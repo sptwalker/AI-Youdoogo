@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     feishu_app_secret: str = ""
     feishu_notify_enabled: bool = False
 
+    # ThinkingData 运营数据平台（docs/11 附录B）
+    td_base_url: str = ""  # 形如 http://HOST:8992，待联调确认
+    td_api_secret: str = ""
+
     @model_validator(mode="after")
     def _enforce_prod_secret(self) -> "Settings":
         """非 local 环境拒绝弱/默认 JWT 密钥，启动即失败而非静默签发可伪造令牌。"""
