@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from app.core.config import get_settings
-from app.llm import create_llm
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 允许以脚本方式直跑
+sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows GBK 控制台兼容
+
+from app.core.config import get_settings  # noqa: E402
+from app.llm import create_llm  # noqa: E402
 
 
 def main() -> int:
