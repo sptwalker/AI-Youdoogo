@@ -7,6 +7,8 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api.v1.auth import router as auth_router
+from app.api.v1.users import router as users_router
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import ok, register_exception_handlers
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="创想悦动AI决策大脑系统", version="0.1.0")
 register_exception_handlers(app)
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")
@@ -28,30 +32,36 @@ async def health() -> dict:
 
 @app.get("/api/v1/health/deps")
 async def health_deps() -> dict:
-    """基础设施连通性自检：PostgreSQL / Redis / MinIO 逐项报告。"""
+    """基础设施连通性自检：PostgreSQL / Redis / MinIO 逐项报告。
+
+    异常细节只进日志不回显（连接串含主机/账号信息，防匿名探测泄露）。
+    """
     result: dict[str, str] = {}
 
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         result["postgres"] = "ok"
-    except Exception as exc:  # noqa: BLE001 - 自检接口需吞掉一切异常逐项报告
-        result["postgres"] = f"error: {exc}"
+    except Exception:  # noqa: BLE001 - 自检接口需吞掉一切异常逐项报告
+        logger.exception("health/deps: postgres 连接失败")
+        result["postgres"] = "error"
 
     try:
         r = aioredis.from_url(settings.redis_url)
         await r.ping()
         await r.aclose()
         result["redis"] = "ok"
-    except Exception as exc:  # noqa: BLE001
-        result["redis"] = f"error: {exc}"
+    except Exception:  # noqa: BLE001
+        logger.exception("health/deps: redis 连接失败")
+        result["redis"] = "error"
 
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             resp = await client.get(f"http://{settings.minio_endpoint}/minio/health/live")
             resp.raise_for_status()
         result["minio"] = "ok"
-    except Exception as exc:  # noqa: BLE001
-        result["minio"] = f"error: {exc}"
+    except Exception:  # noqa: BLE001
+        logger.exception("health/deps: minio 连接失败")
+        result["minio"] = "error"
 
     return ok(result)

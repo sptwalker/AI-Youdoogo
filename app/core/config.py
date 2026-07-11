@@ -2,7 +2,10 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_JWT_SECRET = "change-me-in-phase-1"
 
 
 class Settings(BaseSettings):
@@ -14,7 +17,8 @@ class Settings(BaseSettings):
     app_env: str = "local"
     log_level: str = "INFO"
     api_port: int = 8000
-    jwt_secret: str = "change-me-in-phase-1"
+    jwt_secret: str = _DEFAULT_JWT_SECRET  # 仅 local 可用默认值，非 local 启动即校验
+    jwt_expire_minutes: int = 720  # 访问令牌有效期（分钟），首版12小时免刷新负担
 
     # 数据库
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/youdoo"
@@ -38,6 +42,18 @@ class Settings(BaseSettings):
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
     feishu_notify_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _enforce_prod_secret(self) -> "Settings":
+        """非 local 环境拒绝弱/默认 JWT 密钥，启动即失败而非静默签发可伪造令牌。"""
+        if self.app_env != "local" and (
+            self.jwt_secret == _DEFAULT_JWT_SECRET or len(self.jwt_secret) < 32
+        ):
+            raise ValueError(
+                "生产环境 JWT_SECRET 必须覆盖默认值且长度≥32；"
+                '可用 python -c "import secrets;print(secrets.token_urlsafe(48))" 生成'
+            )
+        return self
 
 
 @lru_cache
