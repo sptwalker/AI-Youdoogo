@@ -71,3 +71,83 @@ async def test_notify_disabled_no_request(monkeypatch: pytest.MonkeyPatch) -> No
     assert await notify.send_text_to_user("ou_abc", "hi") is False
     assert await notify.send_card_to_chat("oc_1", {"elements": []}) is False
     assert len(respx.calls) == 0
+
+
+BITABLE_URL = "https://open.feishu.cn/open-apis/bitable/v1/apps/app1/tables/tbl1/records"
+RAW_URL = "https://open.feishu.cn/open-apis/docx/v1/documents/doc1/raw_content"
+
+
+def _mock_token() -> respx.Route:
+    return respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200, json={"code": 0, "tenant_access_token": "t-xyz", "expire": 7200}
+        )
+    )
+
+
+@respx.mock
+async def test_bitable_pagination_all_pages(feishu_settings: None) -> None:
+    """has_more/page_token 自动翻页取全量，第二次请求携带 page_token。"""
+    _mock_token()
+    route = respx.get(BITABLE_URL).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "data": {
+                        "items": [{"record_id": "r1"}, {"record_id": "r2"}],
+                        "has_more": True,
+                        "page_token": "pt-1",
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                json={"code": 0, "data": {"items": [{"record_id": "r3"}], "has_more": False}},
+            ),
+        ]
+    )
+    client = FeishuClient()
+    records = await client.bitable_list_records("app1", "tbl1")
+    assert [r["record_id"] for r in records] == ["r1", "r2", "r3"]
+    assert route.call_count == 2
+    assert route.calls[1].request.url.params["page_token"] == "pt-1"
+    await client.close()
+
+
+@respx.mock
+async def test_bitable_max_records_cap(feishu_settings: None) -> None:
+    """max_records 截断并停止继续翻页。"""
+    _mock_token()
+    route = respx.get(BITABLE_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": {
+                    "items": [{"record_id": f"r{i}"} for i in range(3)],
+                    "has_more": True,
+                    "page_token": "pt-x",
+                },
+            },
+        )
+    )
+    client = FeishuClient()
+    records = await client.bitable_list_records("app1", "tbl1", max_records=2)
+    assert len(records) == 2
+    assert route.call_count == 1  # 达到上限不再翻页
+    await client.close()
+
+
+@respx.mock
+async def test_document_raw_content(feishu_settings: None) -> None:
+    """docx 纯文本读取。"""
+    _mock_token()
+    respx.get(RAW_URL).mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"content": "第一段\n第二段"}})
+    )
+    client = FeishuClient()
+    text = await client.get_document_raw_content("doc1")
+    assert text == "第一段\n第二段"
+    await client.close()

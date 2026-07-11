@@ -123,6 +123,30 @@ class FeishuClient:
         result: dict[str, Any] = data.get("data", {})
         return result
 
+    async def _get_authed(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """以 tenant_access_token 发送 GET 请求并解析飞书响应。"""
+        token = await self.get_tenant_access_token()
+        client = self._get_client()
+        try:
+            response = await client.get(
+                f"{self.BASE_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise FeishuAPIError(f"HTTP error on GET {path}: {e}") from e
+        except httpx.RequestError as e:
+            raise FeishuAPIError(f"Request error on GET {path}: {e}") from e
+
+        data = response.json()
+        if data.get("code") != 0:
+            raise FeishuAPIError(f"Feishu API error on GET {path}: {data.get('msg')}")
+        result: dict[str, Any] = data.get("data", {})
+        return result
+
     # ---------------- 消息 ----------------
 
     async def send_message(
@@ -229,6 +253,15 @@ class FeishuClient:
                 await asyncio.sleep(0.4)
         return last
 
+    async def get_document_raw_content(self, document_id: str) -> str:
+        """获取云文档纯文本内容（知识库分块向量化的输入）。
+
+        需要 docx:document:readonly 权限。
+        ponytail: 结构化块读取（blocks 列表）暂不封装——知识库只需纯文本，需要结构时再加。
+        """
+        data = await self._get_authed(f"/docx/v1/documents/{document_id}/raw_content")
+        return str(data.get("content", ""))
+
     # ---------------- 多维表格 bitable ----------------
 
     async def bitable_list_records(
@@ -237,30 +270,29 @@ class FeishuClient:
         table_id: str,
         page_size: int = 100,
         filter_expr: str | None = None,
+        max_records: int | None = None,
     ) -> list[dict[str, Any]]:
-        """列出多维表格记录。"""
-        token = await self.get_tenant_access_token()
-        client = self._get_client()
-        params: dict[str, Any] = {"page_size": page_size}
-        if filter_expr:
-            params["filter"] = filter_expr
-        try:
-            response = await client.get(
-                f"{self.BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            raise FeishuAPIError(f"HTTP error listing bitable records: {e}") from e
-        except httpx.RequestError as e:
-            raise FeishuAPIError(f"Request error listing bitable records: {e}") from e
+        """列出多维表格记录（自动翻页取全量；max_records 可设上限防超大表）。
 
-        data = response.json()
-        if data.get("code") != 0:
-            raise FeishuAPIError(f"Failed to list bitable records: {data.get('msg')}")
-        items: list[dict[str, Any]] = data.get("data", {}).get("items", []) or []
-        return items
+        飞书单页最多 100 条，靠 has_more/page_token 翻页。
+        """
+        items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            params: dict[str, Any] = {"page_size": page_size}
+            if filter_expr:
+                params["filter"] = filter_expr
+            if page_token:
+                params["page_token"] = page_token
+            data = await self._get_authed(
+                f"/bitable/v1/apps/{app_token}/tables/{table_id}/records", params
+            )
+            items.extend(data.get("items") or [])
+            if max_records is not None and len(items) >= max_records:
+                return items[:max_records]
+            page_token = data.get("page_token")
+            if not data.get("has_more") or not page_token:
+                return items
 
     async def bitable_create_record(
         self, app_token: str, table_id: str, fields: dict[str, Any]
