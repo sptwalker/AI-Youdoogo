@@ -3,8 +3,12 @@ import type { ReactElement } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { TOKEN_KEY } from './api/client'
 import AppLayout from './layouts/AppLayout'
+import Agents from './pages/Agents'
 import Dashboard from './pages/Dashboard'
+import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
+import OpsBoard from './pages/OpsBoard'
+import Tasks from './pages/Tasks'
 import Users from './pages/Users'
 
 function RequireAuth({ children }: { children: ReactElement }) {
@@ -23,6 +27,10 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'knowledge', element: <Knowledge /> },
+      { path: 'ops-board', element: <OpsBoard /> },
+      { path: 'agents', element: <Agents /> },
+      { path: 'tasks', element: <Tasks /> },
       { path: 'users', element: <Users /> },
     ],
   },

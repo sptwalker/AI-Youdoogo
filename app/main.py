@@ -7,7 +7,12 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api.v1.agents import router as agents_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.ops_data import router as ops_data_router
+from app.api.v1.proposals import router as proposals_router
+from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
 from app.core.config import get_settings
 from app.core.database import engine
@@ -22,6 +27,11 @@ app = FastAPI(title="创想悦动AI决策大脑系统", version="0.1.0")
 register_exception_handlers(app)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(agents_router, prefix="/api/v1")
+app.include_router(ops_data_router, prefix="/api/v1")
+app.include_router(tasks_router, prefix="/api/v1")
+app.include_router(proposals_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")

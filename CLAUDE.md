@@ -16,7 +16,7 @@
 | 数据库 | PostgreSQL 16（`timescale/timescaledb-ha:pg16` 镜像，内置 TimescaleDB + pgvector） |
 | 缓存/文件 | Redis / MinIO |
 | 大模型 | **DeepSeek 主力**（chat 日常 / reasoner 会商推理），降级链 → Qwen → GLM；网关在 `app/llm/`（langchain-core + langchain-openai） |
-| 智能体编排 | LangGraph 1.x（**阶段3才引入**，之前禁止安装） |
+| 智能体编排 | **自研状态机**（`app/services/task_flow.py` + `app/agents/scheduler.py`）；LangGraph 1.x 暂缓——2026-07-12 阶段3决策：先自研轻量状态机跑通任务卡闭环，确有编排复杂度再引入并做 POC |
 | 飞书 | 自研异步 httpx 客户端 `app/integrations/feishu/`（不用 lark-oapi） |
 | 前端 | React + Ant Design Pro（**阶段2才初始化**） |
 | 质量 | Ruff + Mypy + Pytest（提交前三件套必须全绿） |

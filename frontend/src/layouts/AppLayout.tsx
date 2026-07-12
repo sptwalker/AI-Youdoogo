@@ -11,6 +11,10 @@ const MENU = {
   path: '/',
   routes: [
     { path: '/', name: '工作台' },
+    { path: '/knowledge', name: '知识库' },
+    { path: '/ops-board', name: '运营看板' },
+    { path: '/agents', name: '智能体' },
+    { path: '/tasks', name: '任务卡' },
     { path: '/users', name: '用户管理' },
   ],
 }

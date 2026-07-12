@@ -52,3 +52,27 @@ async def send_card_to_chat(chat_id: str, card: dict[str, Any]) -> bool:
         # 通知为尽力而为，失败不应影响主流程
         logger.warning("Failed to send Feishu card: %s", e)
         return False
+
+
+async def send_text_to_chat(chat_id: str, text: str) -> bool:
+    """向群聊发送纯文本（receive_id_type=chat_id），返回是否实际发送。"""
+    if not _enabled():
+        logger.debug("Feishu notify disabled; skip sending chat text")
+        return False
+    if not chat_id:
+        logger.debug("No chat_id; skip sending chat text")
+        return False
+    try:
+        await feishu_client.send_text(chat_id, text, receive_id_type="chat_id")
+        return True
+    except FeishuAPIError as e:
+        logger.warning("Failed to send Feishu chat text: %s", e)
+        return False
+
+
+async def push_ops_message(text: str) -> bool:
+    """把运营日报/告警等文本推送到配置的运营群（feishu_ops_chat_id）。
+
+    best-effort：未开启通知或未配置群时静默跳过，返回是否实际发送。
+    """
+    return await send_text_to_chat(get_settings().feishu_ops_chat_id, text)

@@ -1,0 +1,47 @@
+"""任务卡表（docs/03 §3.3，阶段3）：任务主表 + 流转日志。"""
+
+import uuid
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base, CommonMixin
+from app.services.task_flow import CREATED
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
+
+
+class TaskCard(CommonMixin, Base):
+    """任务卡主表。assignee_agent_id 指向执行的智能体角色（真人接收后续扩展）。"""
+
+    __tablename__ = "task_card"
+
+    title: Mapped[str] = mapped_column(String(200))
+    task_type: Mapped[str] = mapped_column(String(32))
+    priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal")
+    status: Mapped[str] = mapped_column(String(24), default=CREATED, server_default=CREATED)
+    creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sys_user.id"))
+    assignee_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_role.id"), nullable=True
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("task_card.id"), nullable=True
+    )  # 拆解出的子任务指向父任务
+    sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict)
+    result_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TaskCardLog(CommonMixin, Base):
+    """任务流转日志（每次状态变更一行）。"""
+
+    __tablename__ = "task_card_log"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("task_card.id"))
+    from_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(24))
+    # 操作者松引用（真人 sys_user 或智能体 agent_role，不加 FK）
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)

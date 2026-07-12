@@ -1,6 +1,29 @@
 """models 包：导出 Base 供 Alembic 元数据发现。"""
 
+from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.base import Base
+from app.models.feedback import AgentFeedback
+from app.models.knowledge import KnowledgeFile, KnowledgeVector
+from app.models.llm_log import LlmCallLog
+from app.models.ops_data import OpsDailyMetric
+from app.models.proposal import ProposalCard, ProposalReview
 from app.models.system import SysDepartment, SysRole, SysUser
+from app.models.task import TaskCard, TaskCardLog
 
-__all__ = ["Base", "SysDepartment", "SysRole", "SysUser"]
+__all__ = [
+    "AgentFeedback",
+    "AgentRole",
+    "AgentTaskRecord",
+    "Base",
+    "KnowledgeFile",
+    "KnowledgeVector",
+    "LlmCallLog",
+    "OpsDailyMetric",
+    "ProposalCard",
+    "ProposalReview",
+    "SysDepartment",
+    "SysRole",
+    "SysUser",
+    "TaskCard",
+    "TaskCardLog",
+]

@@ -1,0 +1,40 @@
+"""平台运营数据接口：Excel 上传落库 + 按日查询指标。"""
+
+from datetime import date
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import CurrentUser, require_roles
+from app.core.database import get_db
+from app.core.exceptions import AppError, ok
+from app.models.system import SysUser
+from app.services import ops_data
+from app.services.excel_ingest import ExcelParseError
+
+router = APIRouter(prefix="/ops-data", tags=["ops-data"])
+
+DB = Annotated[AsyncSession, Depends(get_db)]
+Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
+
+
+@router.post("/daily/upload")
+async def upload_daily(db: DB, _: Manager, file: Annotated[UploadFile, File()]) -> dict:
+    """上传 ops_daily 模板 Excel，解析后幂等落库。"""
+    content = await file.read()
+    try:
+        summary = await ops_data.ingest_ops_daily_excel(db, content)
+    except ExcelParseError as exc:
+        raise AppError(str(exc)) from exc
+    return ok(summary)
+
+
+@router.get("/daily")
+async def list_daily(
+    db: DB,
+    _: CurrentUser,
+    stat_date: Annotated[date, Query(description="统计日期 YYYY-MM-DD")],
+) -> dict:
+    """查询某日运营指标。"""
+    return ok(await ops_data.get_ops_metrics(db, stat_date))

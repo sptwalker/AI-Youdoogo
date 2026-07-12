@@ -38,10 +38,14 @@ class Settings(BaseSettings):
     zhipu_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # LLM 用量：当日 token 预算，超阈值告警（0=不启用）
+    llm_daily_token_budget: int = 0
+
     # 飞书
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
     feishu_notify_enabled: bool = False
+    feishu_ops_chat_id: str = ""  # 运营通知群 chat_id（日报/告警推送目标）
 
     # ThinkingData 运营数据平台（docs/11 附录B）
     td_base_url: str = ""  # 形如 http://HOST:8992，待联调确认
