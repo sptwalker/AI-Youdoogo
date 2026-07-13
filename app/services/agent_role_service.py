@@ -90,7 +90,7 @@ async def update_agent_role(
         role.tier = tier
     if name is not None:
         role.name = name
-    if prompt_template is not None:
+    if prompt_template:  # 忽略空串，避免编辑其它字段时把提示词覆盖清空
         role.prompt_template = prompt_template
     if duty is not None:
         role.duty = duty

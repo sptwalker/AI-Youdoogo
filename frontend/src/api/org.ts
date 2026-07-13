@@ -22,6 +22,8 @@ export interface Employee {
   department_id: string | null
   report_to_id: string | null
   model_role: string
+  duty: string | null
+  prompt_template: string
   is_seed: boolean
   is_active: boolean
 }

@@ -74,6 +74,7 @@ class EmployeeOut(BaseModel):
     report_to_id: uuid.UUID | None
     model_role: str
     duty: str | None
+    prompt_template: str
     is_seed: bool
     is_active: bool
     permission_scope: dict[str, Any]
