@@ -84,6 +84,7 @@ async def update_kb(
     is_confidential: bool | None = None,
     description: str | None = None,
     is_active: bool | None = None,
+    department_id: uuid.UUID | None = None,
 ) -> KnowledgeBase:
     kb = await get_kb(db, kb_id)
     if name is not None:
@@ -94,6 +95,8 @@ async def update_kb(
         kb.description = description
     if is_active is not None:
         kb.is_active = is_active
+    if department_id is not None:  # F5c 改部门
+        kb.department_id = department_id
     await db.commit()
     await db.refresh(kb)
     return kb

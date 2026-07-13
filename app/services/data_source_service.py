@@ -57,6 +57,7 @@ async def update_ds(
     config: dict[str, Any] | None = None,
     secret_ref: str | None = None,
     is_active: bool | None = None,
+    department_id: uuid.UUID | None = None,
 ) -> DataSource:
     ds = await get_ds(db, ds_id)
     if name is not None:
@@ -67,6 +68,8 @@ async def update_ds(
         ds.secret_ref = secret_ref
     if is_active is not None:
         ds.is_active = is_active
+    if department_id is not None:  # F5c 改部门
+        ds.department_id = department_id
     await db.commit()
     await db.refresh(ds)
     return ds

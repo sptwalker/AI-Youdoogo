@@ -47,6 +47,7 @@ async def update_ds(ds_id: uuid.UUID, body: DataSourceUpdate, db: DB, _: Admin) 
         db, ds_id,
         name=body.name, config=body.config,
         secret_ref=body.secret_ref, is_active=body.is_active,
+        department_id=body.department_id,
     )
     return ok({"id": str(ds.id), "name": ds.name})
 

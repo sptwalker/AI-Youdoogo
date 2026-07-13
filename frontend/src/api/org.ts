@@ -38,6 +38,18 @@ export function getTree(): Promise<OrgNode[]> {
   return request({ method: 'GET', url: '/org/tree' })
 }
 
+/** 把嵌套部门树拍平为下拉选项（名称带层级缩进）。 */
+export function flattenDepts(nodes: OrgNode[]): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = []
+  const walk = (ns: OrgNode[], prefix: string) =>
+    ns.forEach((n) => {
+      out.push({ value: n.id, label: prefix + n.name })
+      walk(n.children, prefix + '　')
+    })
+  walk(nodes, '')
+  return out
+}
+
 export function initTemplate(): Promise<{ departments: number; execs: number; directors: number }> {
   return request({ method: 'POST', url: '/org/init-template' })
 }

@@ -72,6 +72,7 @@ class KnowledgeBaseUpdate(BaseModel):
     is_confidential: bool | None = None
     description: str | None = None
     is_active: bool | None = None
+    department_id: uuid.UUID | None = None  # 改部门
 
 
 class DataSourceCreate(BaseModel):
@@ -92,3 +93,4 @@ class DataSourceUpdate(BaseModel):
     config: dict[str, Any] | None = None
     secret_ref: str | None = Field(default=None, max_length=128)
     is_active: bool | None = None
+    department_id: uuid.UUID | None = None  # 改部门

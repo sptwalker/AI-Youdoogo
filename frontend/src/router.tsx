@@ -6,8 +6,10 @@ import AppLayout from './layouts/AppLayout'
 import Agents from './pages/Agents'
 import AuditLog from './pages/AuditLog'
 import Dashboard from './pages/Dashboard'
+import DataSources from './pages/DataSources'
 import Discussion from './pages/Discussion'
 import Knowledge from './pages/Knowledge'
+import KnowledgeBases from './pages/KnowledgeBases'
 import Login from './pages/Login'
 import Meetings from './pages/Meetings'
 import OpsBoard from './pages/OpsBoard'
@@ -43,6 +45,8 @@ export const router = createBrowserRouter([
       { path: 'discussion', element: <Discussion /> },
       { path: 'org', element: <OrgAdmin /> },
       { path: 'users', element: <Users /> },
+      { path: 'knowledge-bases', element: <KnowledgeBases /> },
+      { path: 'data-sources', element: <DataSources /> },
       { path: 'system-config', element: <SystemConfig /> },
       { path: 'audit-log', element: <AuditLog /> },
       { path: 'settings', element: <Settings /> },

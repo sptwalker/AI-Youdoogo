@@ -14,7 +14,7 @@ from app.api.deps import require_roles
 from app.core.database import get_db
 from app.core.exceptions import ok
 from app.models.system import SysUser
-from app.services import audit_service, config_service
+from app.services import audit_service, config_service, connectivity_service
 
 router = APIRouter(tags=["admin"])
 
@@ -55,3 +55,9 @@ async def update_config(key: str, body: ConfigUpdate, db: DB, admin: Admin) -> d
         db, key, body.value, updated_by=admin.id, actor_role=admin.role_code
     )
     return ok({"key": cfg.key, "value": cfg.value})
+
+
+@router.get("/admin/connectivity")
+async def test_connectivity(_: Admin) -> dict:
+    """外部依赖连通性测试（LLM/飞书/ThinkingData），只回状态+延迟，不回显密钥。"""
+    return ok(await connectivity_service.test_all())

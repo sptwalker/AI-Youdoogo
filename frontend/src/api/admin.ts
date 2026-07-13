@@ -33,3 +33,14 @@ export function listConfigs(): Promise<SysConfig[]> {
 export function updateConfig(key: string, value: unknown): Promise<{ key: string; value: unknown }> {
   return request({ method: 'PATCH', url: `/configs/${key}`, data: { value } })
 }
+
+export interface ConnResult {
+  target: string
+  status: 'ok' | 'fail' | 'not_configured'
+  latency_ms: number
+  msg: string
+}
+
+export function testConnectivity(): Promise<ConnResult[]> {
+  return request({ method: 'GET', url: '/admin/connectivity' })
+}

@@ -48,6 +48,7 @@ async def update_kb(kb_id: uuid.UUID, body: KnowledgeBaseUpdate, db: DB, _: Admi
         db, kb_id,
         name=body.name, is_confidential=body.is_confidential,
         description=body.description, is_active=body.is_active,
+        department_id=body.department_id,
     )
     return ok({"id": str(kb.id), "name": kb.name})
 
