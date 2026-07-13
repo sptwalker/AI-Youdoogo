@@ -12,6 +12,7 @@ from app.api.v1.agents import router as agents_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collab import router as collab_router
 from app.api.v1.data_sources import router as data_sources_router
+from app.api.v1.desktop import router as desktop_router
 from app.api.v1.discussion import message_router as discussion_message_router
 from app.api.v1.discussion import router as discussion_router
 from app.api.v1.grants import router as grants_router
@@ -23,7 +24,6 @@ from app.api.v1.org import router as org_router
 from app.api.v1.proposals import router as proposals_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
-from app.api.v1.workbench import router as workbench_router
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import ok, register_exception_handlers
@@ -46,7 +46,7 @@ app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(proposals_router, prefix="/api/v1")
 app.include_router(meetings_router, prefix="/api/v1")
 app.include_router(org_router, prefix="/api/v1")
-app.include_router(workbench_router, prefix="/api/v1")
+app.include_router(desktop_router, prefix="/api/v1")
 app.include_router(discussion_router, prefix="/api/v1")
 app.include_router(discussion_message_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")

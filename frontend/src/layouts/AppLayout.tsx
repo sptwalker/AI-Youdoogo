@@ -7,21 +7,31 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { fetchMe, ROLE_LABELS, type UserInfo } from '../api/auth'
 import { TOKEN_KEY } from '../api/client'
 
-const MENU = {
-  path: '/',
-  routes: [
-    { path: '/', name: '工作台' },
-    { path: '/knowledge', name: '知识库' },
-    { path: '/ops-board', name: '运营看板' },
-    { path: '/agents', name: '智能体' },
-    { path: '/tasks', name: '任务卡' },
-    { path: '/proposals', name: '提案' },
-    { path: '/meetings', name: '会议会商' },
-    { path: '/discussion', name: '协作空间' },
-    { path: '/org', name: '组织架构' },
-    { path: '/users', name: '用户管理' },
-    { path: '/settings', name: '系统设置' },
-  ],
+const BIZ_ROUTES = [
+  { path: '/knowledge', name: '知识库' },
+  { path: '/ops-board', name: '运营看板' },
+  { path: '/agents', name: '智能体' },
+  { path: '/tasks', name: '任务卡' },
+  { path: '/proposals', name: '提案' },
+  { path: '/meetings', name: '会议会商' },
+  { path: '/discussion', name: '协作空间' },
+]
+const ADMIN_ROUTES = [
+  { path: '/org', name: '组织架构' },
+  { path: '/users', name: '用户管理' },
+  { path: '/settings', name: '系统设置' },
+]
+
+/** 菜单二级分组：工作桌面置顶 + 业务组 + 系统管理组（仅 admin 可见）。 */
+function buildMenu(isAdmin: boolean) {
+  return {
+    path: '/',
+    routes: [
+      { path: '/', name: '工作桌面' },
+      { name: '业务', routes: BIZ_ROUTES },
+      ...(isAdmin ? [{ name: '系统管理', routes: ADMIN_ROUTES }] : []),
+    ],
+  }
 }
 
 export default function AppLayout() {
@@ -42,7 +52,7 @@ export default function AppLayout() {
     <ProLayout
       title="创想悦动AI决策大脑"
       layout="mix"
-      route={MENU}
+      route={buildMenu(me?.role_code === 'admin')}
       location={{ pathname: location.pathname }}
       menuItemRender={(item, dom) => (
         <a onClick={() => item.path && navigate(item.path)}>{dom}</a>
