@@ -1,0 +1,7 @@
+# 行尾规范化：默认按平台，但容器内执行的 shell/Dockerfile 强制 LF
+# （CRLF 的 entrypoint.sh 在 Linux 容器会 "bad interpreter" 起不来）
+* text=auto
+*.sh text eol=lf
+docker/entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+frontend/Dockerfile text eol=lf
