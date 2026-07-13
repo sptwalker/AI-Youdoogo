@@ -62,12 +62,14 @@ async def ingest_file(
     content: bytes,
     mime_type: str | None,
     uploader_id: uuid.UUID,
+    knowledge_base_id: uuid.UUID,
     category: str | None = None,
 ) -> KnowledgeFile:
-    """上传文件入库：先抽取校验，再存 MinIO，最后分块向量化。"""
+    """上传文件入库：先抽取校验，再存 MinIO，最后分块向量化。归属指定知识库。"""
     text = extract_text(content, mime_type, file_name)  # 先校验格式，避免存了无法解析的垃圾
     file = KnowledgeFile(
         file_name=file_name,
+        knowledge_base_id=knowledge_base_id,
         category=category,
         uploader_id=uploader_id,
         storage_path="",
@@ -90,11 +92,13 @@ async def ingest_text(
     title: str,
     text: str,
     uploader_id: uuid.UUID,
+    knowledge_base_id: uuid.UUID,
     category: str | None = None,
 ) -> KnowledgeFile:
-    """粘贴正文入库（不落 MinIO，storage_path="inline"）。"""
+    """粘贴正文入库（不落 MinIO，storage_path="inline"）。归属指定知识库。"""
     file = KnowledgeFile(
         file_name=title,
+        knowledge_base_id=knowledge_base_id,
         category=category,
         uploader_id=uploader_id,
         storage_path="inline",
@@ -113,6 +117,7 @@ async def ingest_feishu_doc(
     *,
     document_id: str,
     uploader_id: uuid.UUID,
+    knowledge_base_id: uuid.UUID,
     category: str | None = None,
 ) -> KnowledgeFile:
     """拉取飞书云文档纯文本入库（复用 FeishuClient.get_document_raw_content）。"""
@@ -122,6 +127,7 @@ async def ingest_feishu_doc(
         title=f"飞书文档 {document_id}",
         text=text,
         uploader_id=uploader_id,
+        knowledge_base_id=knowledge_base_id,
         category=category,
     )
 

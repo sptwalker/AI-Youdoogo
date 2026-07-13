@@ -3,7 +3,7 @@
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.base import Base
 from app.models.feedback import AgentFeedback
-from app.models.knowledge import KnowledgeFile, KnowledgeVector
+from app.models.knowledge import DataSource, KnowledgeBase, KnowledgeFile, KnowledgeVector
 from app.models.llm_log import LlmCallLog
 from app.models.meeting import (
     MeetingDiscuss,
@@ -21,6 +21,8 @@ __all__ = [
     "AgentRole",
     "AgentTaskRecord",
     "Base",
+    "DataSource",
+    "KnowledgeBase",
     "KnowledgeFile",
     "KnowledgeVector",
     "LlmCallLog",
