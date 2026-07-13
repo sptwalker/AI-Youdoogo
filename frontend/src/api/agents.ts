@@ -54,6 +54,24 @@ export function listRoles(): Promise<AgentRole[]> {
   return request({ method: 'GET', url: '/agents/roles' })
 }
 
+export interface ChatTurn {
+  role: 'user' | 'ai'
+  content: string
+}
+
+/** 与某 AI 顾问实时对话（知识库加持、留痕）。 */
+export function consultAgent(
+  roleId: string,
+  message: string,
+  history: ChatTurn[],
+): Promise<{ reply: string; status: string }> {
+  return request({
+    method: 'POST',
+    url: `/agents/roles/${roleId}/consult`,
+    data: { message, history },
+  })
+}
+
 export function addFeedback(recordId: string, score: number, comment?: string) {
   return request({
     method: 'POST',

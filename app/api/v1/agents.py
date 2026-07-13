@@ -10,15 +10,17 @@ from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import ops
+from app.agents.base import run_agent
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.integrations.feishu import notify
-from app.models.agent import AgentTaskRecord
+from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.system import SysUser
 from app.schemas.agent import (
     AgentRoleCreate,
@@ -175,3 +177,36 @@ async def add_feedback(
 async def optimize_prompt(role_id: uuid.UUID, db: DB, admin: Admin) -> dict:
     """基于低分反馈产出改进版提示词（仅建议；须真人经 PATCH /roles 确认落地）。"""
     return ok(await feedback_service.optimize_prompt(db, role_id, user_id=admin.id))
+
+
+class ConsultRequest(BaseModel):
+    """与 AI 顾问实时对话（单条消息 + 近期历史，供上下文）。"""
+
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[dict] = Field(default_factory=list)  # [{role: user/ai, content}]
+
+
+@router.post("/roles/{role_id}/consult")
+async def consult(role_id: uuid.UUID, body: ConsultRequest, db: DB, user: CurrentUser) -> dict:
+    """与某 AI 顾问实时对话（知识库加持、留痕）。任意登录用户可用。
+
+    红线：AI 回复仅参考意见，不产生任何生效动作。
+    """
+    role = await db.get(AgentRole, role_id)
+    if role is None or role.is_delete or not role.is_active:
+        raise AppError("AI 顾问不存在或已停用", code=404, status_code=404)
+    # 折叠近期历史（最多 6 轮）为上下文
+    convo = "\n".join(
+        f"{'我' if h.get('role') == 'user' else role.name}：{h.get('content', '')}"
+        for h in body.history[-6:]
+    )
+    msg = f"以下是我们的对话：\n{convo}\n\n我：{body.message}" if convo else body.message
+    record = await run_agent(
+        db, role, task_type="desktop_consult",
+        input_summary=f"对话：{body.message[:40]}",
+        user_message=msg, user_id=user.id, use_knowledge=True,
+    )
+    return ok({
+        "reply": record.output_content or record.error_msg or "（无回应）",
+        "status": record.status,
+    })
