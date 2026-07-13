@@ -43,8 +43,27 @@ export function createNode(payload: { name: string; parent_id: string; code?: st
   return request({ method: 'POST', url: '/org/nodes', data: payload })
 }
 
+export function updateNode(id: string, payload: { name?: string; sort_order?: number }) {
+  return request({ method: 'PATCH', url: `/org/nodes/${id}`, data: payload })
+}
+
 export function deleteNode(id: string): Promise<null> {
   return request({ method: 'DELETE', url: `/org/nodes/${id}` })
+}
+
+export interface EmployeePayload {
+  name?: string
+  prompt_template?: string
+  title?: string
+  tier?: string
+  model_role?: string
+  duty?: string
+  report_to_id?: string
+  is_active?: boolean
+}
+
+export function updateEmployee(id: string, payload: EmployeePayload) {
+  return request({ method: 'PATCH', url: `/org/employees/${id}`, data: payload })
 }
 
 export function setSupervisor(id: string, supervisor_user_id: string | null) {
@@ -57,7 +76,15 @@ export function listEmployees(deptId: string): Promise<Employee[]> {
 
 export function createEmployee(
   deptId: string,
-  payload: { name: string; prompt_template: string; title?: string; tier?: string; model_role?: string },
+  payload: {
+    name: string
+    prompt_template: string
+    title?: string
+    tier?: string
+    model_role?: string
+    duty?: string
+    report_to_id?: string
+  },
 ) {
   return request({ method: 'POST', url: `/org/nodes/${deptId}/employees`, data: payload })
 }
