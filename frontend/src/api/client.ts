@@ -12,6 +12,9 @@ export interface ApiEnvelope<T> {
 
 const http = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 
+/** 已由拦截器/request 向用户提示过的 API 错误：全局据此抑制 unhandledrejection 噪音。 */
+export class ApiError extends Error {}
+
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY)
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -29,7 +32,7 @@ http.interceptors.response.use(
     } else {
       message.error(msg)
     }
-    return Promise.reject(new Error(msg))
+    return Promise.reject(new ApiError(msg))
   },
 )
 
@@ -38,7 +41,7 @@ export async function request<T>(config: Parameters<typeof http.request>[0]): Pr
   const resp = await http.request<ApiEnvelope<T>>(config)
   if (resp.data.code !== 0) {
     message.error(resp.data.msg)
-    throw new Error(resp.data.msg)
+    throw new ApiError(resp.data.msg)
   }
   return resp.data.data
 }

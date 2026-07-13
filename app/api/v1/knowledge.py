@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
-from app.core.exceptions import ok
+from app.core.exceptions import AppError, ok
 from app.knowledge import ingest, retrieval
 from app.models.knowledge import KnowledgeFile
 from app.models.system import SysUser
@@ -29,6 +29,8 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 DB = Annotated[AsyncSession, Depends(get_db)]
 Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
 
+_MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB 上限，防大文件读入内存 OOM（nginx 另有 50m 兜底）
+
 
 @router.post("/files")
 async def upload_file(
@@ -37,8 +39,12 @@ async def upload_file(
     file: Annotated[UploadFile, File()],
     category: Annotated[str | None, Form()] = None,
 ) -> dict:
-    """上传文件入库（支持 txt/md/docx/pdf）。"""
+    """上传文件入库（支持 txt/md/docx/pdf，单文件 ≤20MB）。"""
+    if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
+        raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
     content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:  # Content-Length 缺失/不实时兜底
+        raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
     kf = await ingest.ingest_file(
         db,
         file_name=file.filename or "未命名",

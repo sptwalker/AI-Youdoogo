@@ -28,11 +28,17 @@ def _extract_docx(content: bytes) -> str:
 
 
 def _extract_pdf(content: bytes) -> str:
-    """pdf → 逐页抽取纯文本（扫描件无文本层则返回空，交由上层报"内容为空"）。"""
+    """pdf → 逐页抽取纯文本。无文本层（扫描件/图片型 PDF）时明确提示需 OCR。"""
     from pypdf import PdfReader
 
     reader = PdfReader(BytesIO(content))
-    return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    if not text:
+        raise AppError(
+            "该 PDF 无文本层（疑似扫描件/图片型），暂不支持；"
+            "请上传含文本的 PDF 或先 OCR 转文字"
+        )
+    return text
 
 
 def extract_text(content: bytes, mime_type: str | None, file_name: str) -> str:

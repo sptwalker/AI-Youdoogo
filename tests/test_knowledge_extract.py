@@ -60,6 +60,14 @@ def test_corrupt_docx_reported() -> None:
         extract_text(b"not a real docx", None, "bad.docx")
 
 
+def test_scanned_pdf_reports_ocr_hint() -> None:
+    """无文本层的 PDF（扫描件）给出需 OCR 的明确提示，而非笼统"内容为空"。"""
+    b = BytesIO()
+    canvas.Canvas(b).save()  # 空白页，无文本层
+    with pytest.raises(AppError, match="扫描件|OCR"):
+        extract_text(b.getvalue(), "application/pdf", "scan.pdf")
+
+
 def test_non_utf8_text_rejected() -> None:
     with pytest.raises(AppError, match="UTF-8"):
         extract_text("你好".encode("gbk"), "text/plain", "gbk.txt")
