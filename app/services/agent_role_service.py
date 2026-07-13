@@ -14,14 +14,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.models.agent import AgentRole
+from app.models.agent import TIER_DIRECTOR, TIER_EXEC, TIER_MEMBER, AgentRole
 
 VALID_MODEL_ROLES = ("daily", "reasoning")
+VALID_TIERS = (TIER_EXEC, TIER_DIRECTOR, TIER_MEMBER)
 
 
 def _check_model_role(model_role: str) -> None:
     if model_role not in VALID_MODEL_ROLES:
         raise AppError(f"model_role 仅支持 {'/'.join(VALID_MODEL_ROLES)}")
+
+
+def _check_tier(tier: str) -> None:
+    if tier not in VALID_TIERS:
+        raise AppError(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
 
 
 async def create_agent_role(
@@ -34,19 +40,24 @@ async def create_agent_role(
     department_id: uuid.UUID | None = None,
     permission_scope: dict[str, Any] | None = None,
     tools: list[Any] | None = None,
+    tier: str = TIER_MEMBER,
+    title: str = "",
+    report_to_id: uuid.UUID | None = None,
 ) -> AgentRole:
-    """新增一个智能体角色（name 唯一）。"""
+    """新增一个智能体员工（name 唯一）。"""
     _check_model_role(model_role)
+    _check_tier(tier)
     role = AgentRole(
         name=name, prompt_template=prompt_template, duty=duty, model_role=model_role,
         department_id=department_id, permission_scope=permission_scope or {}, tools=tools or [],
+        tier=tier, title=title, report_to_id=report_to_id,
     )
     db.add(role)
     try:
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise AppError("角色名已存在", code=409, status_code=409) from exc
+        raise AppError("角色名或编码已存在", code=409, status_code=409) from exc
     await db.refresh(role)
     return role
 
@@ -61,14 +72,21 @@ async def update_agent_role(
     is_active: bool | None = None,
     permission_scope: dict[str, Any] | None = None,
     tools: list[Any] | None = None,
+    title: str | None = None,
+    tier: str | None = None,
+    report_to_id: uuid.UUID | None = None,
+    department_id: uuid.UUID | None = None,
 ) -> AgentRole:
-    """更新智能体角色：仅更新提供的字段。"""
+    """更新智能体员工：仅更新提供的字段。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体角色不存在", code=404, status_code=404)
+        raise AppError("智能体员工不存在", code=404, status_code=404)
     if model_role is not None:
         _check_model_role(model_role)
         role.model_role = model_role
+    if tier is not None:
+        _check_tier(tier)
+        role.tier = tier
     if prompt_template is not None:
         role.prompt_template = prompt_template
     if duty is not None:
@@ -79,9 +97,26 @@ async def update_agent_role(
         role.permission_scope = permission_scope
     if tools is not None:
         role.tools = tools
+    if title is not None:
+        role.title = title
+    if report_to_id is not None:
+        role.report_to_id = report_to_id
+    if department_id is not None:
+        role.department_id = department_id
     await db.commit()
     await db.refresh(role)
     return role
+
+
+async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
+    """软删智能体员工。种子骨架（is_seed）不可删（保护 7 高管 + 8 总监）。"""
+    role = await db.get(AgentRole, role_id)
+    if role is None or role.is_delete:
+        raise AppError("智能体员工不存在", code=404, status_code=404)
+    if role.is_seed:
+        raise AppError("骨架种子智能体（高管/总监）不可删除，如需停用请置为停用")
+    role.is_delete = True
+    await db.commit()
 
 
 async def list_agent_roles(db: AsyncSession) -> list[AgentRole]:

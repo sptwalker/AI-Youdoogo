@@ -1,0 +1,67 @@
+/** 组织架构 API（对应后端 app/api/v1/org.py）。 */
+import { request } from './client'
+
+export interface OrgNode {
+  id: string
+  name: string
+  code: string
+  node_type: 'company' | 'dept_l1' | 'dept_l2'
+  level: number
+  parent_id: string | null
+  supervisor_user_id: string | null
+  children: OrgNode[]
+}
+
+export interface Employee {
+  id: string
+  code: string | null
+  name: string
+  title: string
+  tier: 'exec' | 'director' | 'member'
+  department_id: string | null
+  report_to_id: string | null
+  model_role: string
+  is_seed: boolean
+  is_active: boolean
+}
+
+export const TIER_LABEL: Record<string, string> = {
+  exec: '公司高管',
+  director: '部门总监',
+  member: '普通员工',
+}
+
+export function getTree(): Promise<OrgNode[]> {
+  return request({ method: 'GET', url: '/org/tree' })
+}
+
+export function initTemplate(): Promise<{ departments: number; execs: number; directors: number }> {
+  return request({ method: 'POST', url: '/org/init-template' })
+}
+
+export function createNode(payload: { name: string; parent_id: string; code?: string }) {
+  return request({ method: 'POST', url: '/org/nodes', data: payload })
+}
+
+export function deleteNode(id: string): Promise<null> {
+  return request({ method: 'DELETE', url: `/org/nodes/${id}` })
+}
+
+export function setSupervisor(id: string, supervisor_user_id: string | null) {
+  return request({ method: 'PUT', url: `/org/nodes/${id}/supervisor`, data: { supervisor_user_id } })
+}
+
+export function listEmployees(deptId: string): Promise<Employee[]> {
+  return request({ method: 'GET', url: `/org/nodes/${deptId}/employees` })
+}
+
+export function createEmployee(
+  deptId: string,
+  payload: { name: string; prompt_template: string; title?: string; tier?: string; model_role?: string },
+) {
+  return request({ method: 'POST', url: `/org/nodes/${deptId}/employees`, data: payload })
+}
+
+export function deleteEmployee(id: string): Promise<null> {
+  return request({ method: 'DELETE', url: `/org/employees/${id}` })
+}

@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, Uuid
+from sqlalchemy import ForeignKey, Index, String, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CommonMixin
@@ -19,8 +19,11 @@ class ProposalCard(CommonMixin, Base):
     """提案主表。approved 仅能由真人评审置位（docs/04 红线：决议须真人确认）。"""
 
     __tablename__ = "proposal_card"
+    __table_args__ = (
+        Index("uq_proposal_code", "code", unique=True, postgresql_where=text("is_delete = false")),
+    )
 
-    code: Mapped[str] = mapped_column(String(32), unique=True)
+    code: Mapped[str] = mapped_column(String(32))
     title: Mapped[str] = mapped_column(String(200))
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("sys_department.id"), nullable=True

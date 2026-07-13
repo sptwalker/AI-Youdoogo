@@ -9,6 +9,7 @@ import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
 import Meetings from './pages/Meetings'
 import OpsBoard from './pages/OpsBoard'
+import OrgAdmin from './pages/OrgAdmin'
 import Proposals from './pages/Proposals'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: 'tasks', element: <Tasks /> },
       { path: 'proposals', element: <Proposals /> },
       { path: 'meetings', element: <Meetings /> },
+      { path: 'org', element: <OrgAdmin /> },
       { path: 'users', element: <Users /> },
     ],
   },
