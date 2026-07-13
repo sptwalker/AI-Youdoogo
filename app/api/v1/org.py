@@ -106,8 +106,8 @@ async def update_employee(emp_id: uuid.UUID, body: EmployeeUpdate, db: DB, _: Ad
     """更新智能体员工。"""
     role = await agent_role_service.update_agent_role(
         db, emp_id,
-        prompt_template=body.prompt_template, duty=body.duty, model_role=body.model_role,
-        is_active=body.is_active, title=body.title, tier=body.tier,
+        name=body.name, prompt_template=body.prompt_template, duty=body.duty,
+        model_role=body.model_role, is_active=body.is_active, title=body.title, tier=body.tier,
         report_to_id=body.report_to_id, department_id=body.department_id,
     )
     return ok(_emp(role))

@@ -66,6 +66,7 @@ async def update_agent_role(
     db: AsyncSession,
     role_id: uuid.UUID,
     *,
+    name: str | None = None,
     prompt_template: str | None = None,
     duty: str | None = None,
     model_role: str | None = None,
@@ -77,7 +78,7 @@ async def update_agent_role(
     report_to_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
 ) -> AgentRole:
-    """更新智能体员工：仅更新提供的字段。"""
+    """更新智能体员工：仅更新提供的字段（含姓名，真人主管可自定义下属 AI 名称）。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
         raise AppError("智能体员工不存在", code=404, status_code=404)
@@ -87,6 +88,8 @@ async def update_agent_role(
     if tier is not None:
         _check_tier(tier)
         role.tier = tier
+    if name is not None:
+        role.name = name
     if prompt_template is not None:
         role.prompt_template = prompt_template
     if duty is not None:
@@ -103,18 +106,21 @@ async def update_agent_role(
         role.report_to_id = report_to_id
     if department_id is not None:
         role.department_id = department_id
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise AppError("角色名已被占用", code=409, status_code=409) from exc
     await db.refresh(role)
     return role
 
 
 async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
-    """软删智能体员工。种子骨架（is_seed）不可删（保护 7 高管 + 8 总监）。"""
+    """软删智能体员工。骨架种子（is_seed）也可删——is_seed 仅作模板位标记，
+    一键初始化可按需补回；删除权交给管理员，保持全体一致可删可调。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
         raise AppError("智能体员工不存在", code=404, status_code=404)
-    if role.is_seed:
-        raise AppError("骨架种子智能体（高管/总监）不可删除，如需停用请置为停用")
     role.is_delete = True
     await db.commit()
 

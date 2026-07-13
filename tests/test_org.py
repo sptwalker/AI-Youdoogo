@@ -104,9 +104,12 @@ async def test_set_supervisor(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     assert updated.supervisor_user_id == ceo
 
 
-async def test_seed_agent_protected_from_delete(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
+async def test_seed_agent_deletable_and_renamable(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
+    """骨架也可改名与删除（is_seed 仅作模板位标记，不再拦截）。"""
     session, ceo = ctx
     await org_template.seed_org_template(session, ceo_user_id=ceo)
     cfo = await _agent(session, "exec_cfo")
-    with pytest.raises(AppError, match="不可删除"):
-        await agent_role_service.delete_agent_role(session, cfo.id)
+    renamed = await agent_role_service.update_agent_role(session, cfo.id, name="财务大脑")
+    assert renamed.name == "财务大脑"
+    await agent_role_service.delete_agent_role(session, cfo.id)
+    assert (await session.get(AgentRole, cfo.id)).is_delete is True
