@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.models.agent import AgentRole
+from app.models.discussion import DiscussionChannel
 from app.models.system import COMPANY, DEPT_L1, DEPT_L2, SysDepartment, SysUser
 
 _NODE_TYPE_BY_LEVEL = {0: COMPANY, 1: DEPT_L1, 2: DEPT_L2}
@@ -86,6 +87,8 @@ async def create_node(
     db.add(node)
     await db.flush()
     node.path = f"{parent.path}{node.id}/"
+    # F3'：部门自动种子一个讨论频道
+    db.add(DiscussionChannel(name=f"{name}讨论区", department_id=node.id))
     await db.commit()
     await db.refresh(node)
     return node

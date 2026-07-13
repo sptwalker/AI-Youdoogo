@@ -17,6 +17,7 @@ const MENU = {
     { path: '/tasks', name: '任务卡' },
     { path: '/proposals', name: '提案' },
     { path: '/meetings', name: '会议会商' },
+    { path: '/discussion', name: '协作空间' },
     { path: '/org', name: '组织架构' },
     { path: '/users', name: '用户管理' },
     { path: '/settings', name: '系统设置' },

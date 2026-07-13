@@ -30,6 +30,9 @@ class MeetingInfo(CommonMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     meeting_type: Mapped[str] = mapped_column(String(32), default="decision")
     status: Mapped[str] = mapped_column(String(16), default=SCHEDULED, server_default=SCHEDULED)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sys_department.id"), nullable=True
+    )  # 归属部门（F3'；存量会议 NULL=临时会议）
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     creator_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sys_user.id"))
     participants: Mapped[list[Any]] = mapped_column(_JSONB, default=list)  # [{type,id,name}]

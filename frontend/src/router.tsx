@@ -5,6 +5,7 @@ import { TOKEN_KEY } from './api/client'
 import AppLayout from './layouts/AppLayout'
 import Agents from './pages/Agents'
 import Dashboard from './pages/Dashboard'
+import Discussion from './pages/Discussion'
 import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
 import Meetings from './pages/Meetings'
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'tasks', element: <Tasks /> },
       { path: 'proposals', element: <Proposals /> },
       { path: 'meetings', element: <Meetings /> },
+      { path: 'discussion', element: <Discussion /> },
       { path: 'org', element: <OrgAdmin /> },
       { path: 'users', element: <Users /> },
       { path: 'settings', element: <Settings /> },

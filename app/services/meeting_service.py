@@ -51,11 +51,12 @@ async def create_meeting(
     creator_id: uuid.UUID,
     meeting_type: str = "decision",
     participants: list[dict[str, Any]] | None = None,
+    department_id: uuid.UUID | None = None,
 ) -> MeetingInfo:
     """创建会议（初始 scheduled）。"""
     m = MeetingInfo(
         title=title, creator_id=creator_id, meeting_type=meeting_type,
-        participants=participants or [],
+        participants=participants or [], department_id=department_id,
     )
     db.add(m)
     await db.commit()
