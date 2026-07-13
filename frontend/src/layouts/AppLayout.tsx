@@ -15,6 +15,8 @@ const MENU = {
     { path: '/ops-board', name: '运营看板' },
     { path: '/agents', name: '智能体' },
     { path: '/tasks', name: '任务卡' },
+    { path: '/proposals', name: '提案' },
+    { path: '/meetings', name: '会议会商' },
     { path: '/users', name: '用户管理' },
   ],
 }

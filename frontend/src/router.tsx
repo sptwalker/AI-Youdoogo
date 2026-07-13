@@ -7,7 +7,9 @@ import Agents from './pages/Agents'
 import Dashboard from './pages/Dashboard'
 import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
+import Meetings from './pages/Meetings'
 import OpsBoard from './pages/OpsBoard'
+import Proposals from './pages/Proposals'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
 
@@ -31,6 +33,8 @@ export const router = createBrowserRouter([
       { path: 'ops-board', element: <OpsBoard /> },
       { path: 'agents', element: <Agents /> },
       { path: 'tasks', element: <Tasks /> },
+      { path: 'proposals', element: <Proposals /> },
+      { path: 'meetings', element: <Meetings /> },
       { path: 'users', element: <Users /> },
     ],
   },

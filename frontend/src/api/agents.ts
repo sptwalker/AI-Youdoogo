@@ -53,3 +53,26 @@ export function listRecords(limit = 20): Promise<TaskRecord[]> {
 export function listRoles(): Promise<AgentRole[]> {
   return request({ method: 'GET', url: '/agents/roles' })
 }
+
+export function addFeedback(recordId: string, score: number, comment?: string) {
+  return request({
+    method: 'POST',
+    url: `/agents/records/${recordId}/feedback`,
+    data: { score, comment },
+  })
+}
+
+export interface OptimizeResult {
+  role_id: string
+  current_prompt: string
+  suggested_prompt: string
+  based_on_samples: number
+}
+
+export function optimizePrompt(roleId: string): Promise<OptimizeResult> {
+  return request({ method: 'POST', url: `/agents/roles/${roleId}/optimize-prompt` })
+}
+
+export function updateRolePrompt(roleId: string, prompt_template: string) {
+  return request({ method: 'PATCH', url: `/agents/roles/${roleId}`, data: { prompt_template } })
+}

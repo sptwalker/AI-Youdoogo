@@ -1,4 +1,4 @@
-/** 智能体：角色一览 + 生成运营提案 + 执行留痕（可展开看全文）。 */
+/** 智能体：角色一览(+提示词优化) + 生成运营提案 + 执行留痕(可展开·可评分)。 */
 import {
   ModalForm,
   PageContainer,
@@ -8,13 +8,17 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Card, Tag, Typography, message } from 'antd'
-import { useRef } from 'react'
+import { Button, Card, Modal, Rate, Tag, Typography, message } from 'antd'
+import { useRef, useState } from 'react'
 import {
+  addFeedback,
   generateProposal,
   listRecords,
   listRoles,
+  optimizePrompt,
+  updateRolePrompt,
   type AgentRole,
+  type OptimizeResult,
   type TaskRecord,
 } from '../api/agents'
 
@@ -22,17 +26,20 @@ const TASK_LABEL: Record<string, string> = {
   daily_report: '运营日报',
   anomaly_alert: '异常告警',
   proposal: '运营提案',
+  proposal_research: '提案预研',
+  proposal_execution: '提案执行',
+  meeting_discuss: '会议发言',
+  meeting_minutes: '会议纪要',
+  meeting_vote: 'AI参考票',
+  analysis: '分析',
+  resolution_execution: '决议执行',
 }
 
 export default function Agents() {
   const actionRef = useRef<ActionType>(null)
 
   const columns: ProColumns<TaskRecord>[] = [
-    {
-      title: '任务',
-      dataIndex: 'task_type',
-      render: (_, r) => TASK_LABEL[r.task_type] || r.task_type,
-    },
+    { title: '任务', dataIndex: 'task_type', render: (_, r) => TASK_LABEL[r.task_type] || r.task_type },
     { title: '摘要', dataIndex: 'input_summary', render: (_, r) => r.input_summary || '-' },
     {
       title: '状态',
@@ -44,7 +51,17 @@ export default function Agents() {
       ),
     },
     { title: '模型', dataIndex: 'model_used', render: (_, r) => r.model_used || '-' },
-    { title: '耗时(ms)', dataIndex: 'duration_ms' },
+    {
+      title: '评分',
+      render: (_, r) => (
+        <Rate
+          onChange={async (v) => {
+            await addFeedback(r.id, v)
+            message.success('已评分，可在角色卡触发提示词优化')
+          }}
+        />
+      ),
+    },
     { title: '时间', dataIndex: 'create_time', valueType: 'dateTime' },
   ]
 
@@ -88,6 +105,8 @@ export default function Agents() {
 }
 
 function RolesCard() {
+  const [opt, setOpt] = useState<OptimizeResult | null>(null)
+
   return (
     <Card title="智能体角色" style={{ marginBottom: 16 }}>
       <ProTable<AgentRole>
@@ -103,12 +122,60 @@ function RolesCard() {
           {
             title: '启用',
             dataIndex: 'is_active',
-            render: (_, r) => <Tag color={r.is_active ? 'success' : 'default'}>
-              {r.is_active ? '启用' : '停用'}
-            </Tag>,
+            render: (_, r) => (
+              <Tag color={r.is_active ? 'success' : 'default'}>{r.is_active ? '启用' : '停用'}</Tag>
+            ),
+          },
+          {
+            title: '操作',
+            render: (_, r) => (
+              <a
+                onClick={async () => {
+                  message.loading({ content: '基于低分反馈优化中…', key: 'o' })
+                  try {
+                    setOpt(await optimizePrompt(r.id))
+                    message.destroy('o')
+                  } catch {
+                    message.destroy('o')
+                  }
+                }}
+              >
+                优化提示词
+              </a>
+            ),
           },
         ]}
       />
+      <Modal
+        open={opt !== null}
+        onCancel={() => setOpt(null)}
+        title="提示词优化建议（须真人确认应用）"
+        width={720}
+        okText="应用为新提示词"
+        onOk={async () => {
+          if (opt) {
+            await updateRolePrompt(opt.role_id, opt.suggested_prompt)
+            message.success('已应用')
+            setOpt(null)
+          }
+        }}
+      >
+        {opt && (
+          <>
+            <Typography.Text type="secondary">
+              基于 {opt.based_on_samples} 条低分反馈
+            </Typography.Text>
+            <Typography.Title level={5}>当前提示词</Typography.Title>
+            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+              {opt.current_prompt}
+            </Typography.Paragraph>
+            <Typography.Title level={5}>建议提示词</Typography.Title>
+            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+              {opt.suggested_prompt}
+            </Typography.Paragraph>
+          </>
+        )}
+      </Modal>
     </Card>
   )
 }
