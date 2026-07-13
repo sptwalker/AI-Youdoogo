@@ -25,6 +25,7 @@ from app.models.meeting import (
     MeetingResolution,
     MeetingVote,
 )
+from app.models.task import TaskCard
 from app.services import task_service
 
 EXPERT_NAME = "会商AI专家"  # 与 alembic 007 种子行一致
@@ -168,11 +169,15 @@ async def cast_vote(
 
 
 def _parse_choice(text: str) -> str:
-    """从模型首行解析表决建议，兜底 abstain。"""
+    """从模型首行解析表决建议，兜底 abstain。
+
+    要求 approve/reject/abstain 出现在首行开头（剥离前导非字母如 * 空格），避免
+    “我不建议 approve”这类否定句被子串命中而误判。
+    """
     lines = (text or "").strip().splitlines()
-    first = lines[0].lower() if lines else ""
+    first = lines[0].lower().lstrip("*# \t-—：:") if lines else ""
     for c in _VALID_CHOICES:
-        if c in first:
+        if first.startswith(c):
             return c
     return "abstain"
 
@@ -300,7 +305,7 @@ async def resolution_to_task(
     *,
     creator_id: uuid.UUID,
     assignee_agent_id: uuid.UUID | None = None,
-) -> Any:
+) -> TaskCard:
     """把已确认决议转为任务卡（红线：仅 is_confirmed 决议可转）。
 
     Raises:

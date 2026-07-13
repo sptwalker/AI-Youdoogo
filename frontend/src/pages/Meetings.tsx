@@ -12,6 +12,7 @@ import {
   discuss,
   generateMinutes,
   getMeeting,
+  getTally,
   listMeetings,
   MEETING_STATUS,
   setMeetingStatus,
@@ -19,6 +20,7 @@ import {
   type Discuss,
   type Meeting,
   type Resolution,
+  type Tally,
 } from '../api/meetings'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -39,10 +41,15 @@ export default function Meetings() {
   const [subject, setSubject] = useState('')
   const [speech, setSpeech] = useState('')
   const [resText, setResText] = useState('')
+  const [tally, setTally] = useState<Tally | null>(null)
 
   const open = async (id: string) => setDetail(await getMeeting(id))
   const refresh = async () => detail && setDetail(await getMeeting(detail.meeting.id))
   const inProgress = detail?.meeting.status === 'in_progress'
+
+  const showTally = async (mid: string, subj: string) => {
+    if (subj) setTally(await getTally(mid, subj))
+  }
 
   const columns: ProColumns<Meeting>[] = [
     { title: '主题', dataIndex: 'title' },
@@ -118,10 +125,19 @@ export default function Meetings() {
               <Card size="small" title="投票（真人票决定，AI票仅参考）">
                 <Space.Compact style={{ width: '100%' }}>
                   <Input placeholder="表决对象" value={subject} onChange={(e) => setSubject(e.target.value)} />
-                  <Button onClick={async () => { if (subject) { await vote(detail.meeting.id, subject, 'approve'); message.success('已投赞成'); } }}>赞成</Button>
-                  <Button danger onClick={async () => { if (subject) { await vote(detail.meeting.id, subject, 'reject'); message.success('已投反对'); } }}>反对</Button>
-                  <Button type="primary" onClick={async () => { if (subject) { await aiVote(detail.meeting.id, subject); message.success('AI已投参考票'); } }}>AI参考票</Button>
+                  <Button onClick={async () => { if (subject) { await vote(detail.meeting.id, subject, 'approve'); await showTally(detail.meeting.id, subject) } }}>赞成</Button>
+                  <Button danger onClick={async () => { if (subject) { await vote(detail.meeting.id, subject, 'reject'); await showTally(detail.meeting.id, subject) } }}>反对</Button>
+                  <Button type="primary" onClick={async () => { if (subject) { await aiVote(detail.meeting.id, subject); await showTally(detail.meeting.id, subject) } }}>AI参考票</Button>
+                  <Button onClick={() => showTally(detail.meeting.id, subject)}>统计</Button>
                 </Space.Compact>
+                {tally && tally.subject === subject && (
+                  <div style={{ marginTop: 8 }}>
+                    <Tag color={tally.human_passed ? 'success' : 'default'}>
+                      真人票{tally.human_passed ? '通过' : '未过'}
+                    </Tag>
+                    <span>真人 {JSON.stringify(tally.human)} · AI参考 {JSON.stringify(tally.ai)}</span>
+                  </div>
+                )}
               </Card>
             )}
 

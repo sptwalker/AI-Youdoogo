@@ -117,3 +117,12 @@ async def test_minutes_needs_discussion(ctx) -> None:
     m = await _open_meeting(session, uid)
     with pytest.raises(AppError, match="无发言"):
         await meeting_service.generate_minutes(session, m.id)
+
+
+def test_parse_choice_rejects_negation() -> None:
+    """AI 参考票解析：首行开头匹配，否定句不误判（红线：AI票仅参考也不能反向）。"""
+    p = meeting_service._parse_choice
+    assert p("approve\n方案可行") == "approve"
+    assert p("**reject** 风险高") == "reject"
+    assert p("我不建议 approve，风险太大") == "abstain"  # 否定句不再误判为 approve
+    assert p("") == "abstain"

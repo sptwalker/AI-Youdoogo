@@ -70,6 +70,17 @@ export function aiVote(id: string, subject: string) {
   return request({ method: 'POST', url: `/meetings/${id}/ai-vote`, data: { subject } })
 }
 
+export interface Tally {
+  subject: string
+  human: Record<string, number>
+  ai: Record<string, number>
+  human_passed: boolean
+}
+
+export function getTally(id: string, subject: string): Promise<Tally> {
+  return request({ method: 'GET', url: `/meetings/${id}/tally`, params: { subject } })
+}
+
 export function generateMinutes(id: string): Promise<Meeting> {
   return request({ method: 'POST', url: `/meetings/${id}/minutes` })
 }
