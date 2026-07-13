@@ -31,9 +31,9 @@ import {
 
 const TIER_COLOR: Record<string, string> = { exec: 'red', director: 'blue', member: 'default' }
 const TIER_OPTIONS = [
-  { value: 'exec', label: '公司高管' },
-  { value: 'director', label: '部门总监' },
-  { value: 'member', label: '普通员工' },
+  { value: 'exec', label: '公司顾问' },
+  { value: 'director', label: '总监助理' },
+  { value: 'member', label: '助理' },
 ]
 const MODEL_OPTIONS = [
   { value: 'daily', label: '日常 (deepseek-chat)' },
@@ -92,7 +92,12 @@ function EmployeeForm(props: {
       <ProFormText name="title" label="职位（如 CCO / 数据分析专员）" />
       <ProFormSelect name="tier" label="层级" options={TIER_OPTIONS} rules={[{ required: true }]} />
       <ProFormSelect name="model_role" label="模型档位" options={MODEL_OPTIONS} />
-      <ProFormSelect name="report_to_id" label="汇报给（可选）" request={reportToOptions} />
+      <ProFormSelect
+        name="report_to_id"
+        label="汇报给（可选）"
+        tooltip="公司顾问直属真人 CEO（最高管理员），可不填；总监助理/助理可汇报给上级顾问或助理"
+        request={reportToOptions}
+      />
       <ProFormText name="duty" label="职责简述" />
       <ProFormTextArea
         name="prompt_template"
@@ -277,7 +282,7 @@ export default function OrgAdmin() {
 
               <ProTable<Employee>
                 rowKey="id"
-                headerTitle={`智能体员工（${selected.node_type === 'company' ? '公司高管挂此' : '本部门'}）`}
+                headerTitle={`AI 顾问/助理（${selected.node_type === 'company' ? '公司顾问挂此' : '本部门总监助理/助理'}）`}
                 search={false}
                 options={false}
                 pagination={false}

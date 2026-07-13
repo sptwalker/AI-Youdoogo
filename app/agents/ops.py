@@ -11,12 +11,12 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import get_agent_role, run_agent
+from app.agents.base import get_agent_role_by_code, run_agent
 from app.core.exceptions import AppError
 from app.models.agent import AgentTaskRecord
 from app.services.anomaly import Alert
 
-OPS_DIRECTOR_NAME = "运营AI总监"  # 与 alembic 003 种子行一致（agent_role.name 唯一键）
+OPS_DIRECTOR_CODE = "dir_platform_ops"  # 平台运营部总监助理（稳定种子键，不随显示名变）
 
 _COLUMNS = (
     ("stat_date", "日期"),
@@ -50,9 +50,9 @@ async def generate_daily_report(
     """
     if not rows:
         raise AppError("运营数据为空，无法生成日报")
-    role = await get_agent_role(db, OPS_DIRECTOR_NAME)
+    role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置运营AI总监角色，请先执行数据库迁移（alembic upgrade head）")
+        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     user_message = (
         f"以下是 {stat_date} 的平台运营数据，请据此生成当日运营日报：\n\n"
@@ -84,9 +84,9 @@ async def generate_anomaly_alert(
     """
     if not alerts:
         raise AppError("无异常项，无需生成告警")
-    role = await get_agent_role(db, OPS_DIRECTOR_NAME)
+    role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置运营AI总监角色，请先执行数据库迁移（alembic upgrade head）")
+        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     detail = "\n".join(f"- [{a.severity}] {a.product} {a.metric}：{a.message}" for a in alerts)
     user_message = (
@@ -115,9 +115,9 @@ async def generate_proposal(
     Raises:
         AppError: 未配置运营智能体角色。
     """
-    role = await get_agent_role(db, OPS_DIRECTOR_NAME)
+    role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置运营AI总监角色，请先执行数据库迁移（alembic upgrade head）")
+        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     context_part = f"\n\n参考信息：\n{context}" if context.strip() else ""
     user_message = (

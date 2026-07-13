@@ -47,8 +47,9 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as session:
         session.add(
             AgentRole(
-                name=ops.OPS_DIRECTOR_NAME,
-                prompt_template="你是运营AI总监。",
+                name="平台运营部总监助理",
+                code=ops.OPS_DIRECTOR_CODE,
+                prompt_template="你是平台运营部总监助理。",
                 model_role="daily",
             )
         )
@@ -109,7 +110,7 @@ async def test_empty_rows_rejected(db: AsyncSession) -> None:
 
 
 async def test_missing_role_rejected(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ops, "OPS_DIRECTOR_NAME", "不存在的角色")
+    monkeypatch.setattr(ops, "OPS_DIRECTOR_CODE", "no_such_code")
     with pytest.raises(AppError, match="未配置"):
         await ops.generate_daily_report(db, stat_date="2026-07-11", rows=_ROWS)
 

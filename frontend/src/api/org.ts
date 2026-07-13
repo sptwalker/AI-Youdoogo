@@ -26,9 +26,9 @@ export interface Employee {
 }
 
 export const TIER_LABEL: Record<string, string> = {
-  exec: '公司高管',
-  director: '部门总监',
-  member: '普通员工',
+  exec: '公司顾问',
+  director: '总监助理',
+  member: '助理',
 }
 
 export function getTree(): Promise<OrgNode[]> {

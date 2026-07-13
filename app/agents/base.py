@@ -25,9 +25,19 @@ _LLM_ROLE_BY_TIER: dict[str, str] = {"daily": "default", "reasoning": "meeting_e
 
 
 async def get_agent_role(db: AsyncSession, name: str) -> AgentRole | None:
-    """按角色名取启用中的智能体角色（name 为 docs/03 定义的唯一业务键）。"""
+    """按角色名取启用中的智能体角色。"""
     stmt = select(AgentRole).where(
         AgentRole.name == name,
+        AgentRole.is_active.is_(True),
+        AgentRole.is_delete.is_(False),
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def get_agent_role_by_code(db: AsyncSession, code: str) -> AgentRole | None:
+    """按稳定 code 取启用中的智能体（code 为种子键，不随显示名变，比 name 更可靠）。"""
+    stmt = select(AgentRole).where(
+        AgentRole.code == code,
         AgentRole.is_active.is_(True),
         AgentRole.is_delete.is_(False),
     )

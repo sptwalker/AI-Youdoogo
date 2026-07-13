@@ -58,8 +58,9 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as session:
         session.add(
             AgentRole(
-                name=ops.OPS_DIRECTOR_NAME,
-                prompt_template="你是运营AI总监。",
+                name="平台运营部总监助理",
+                code=ops.OPS_DIRECTOR_CODE,
+                prompt_template="你是平台运营部总监助理。",
                 model_role="daily",
             )
         )

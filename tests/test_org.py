@@ -45,14 +45,14 @@ async def _agent(session: AsyncSession, code: str) -> AgentRole:
 async def test_seed_idempotent(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     session, ceo = ctx
     r1 = await org_template.seed_org_template(session, ceo_user_id=ceo)
-    assert r1 == {"root": "创想悦动", "departments": 8, "execs": 7, "directors": 8}
+    assert r1 == {"root": "创想悦动", "departments": 9, "execs": 8, "directors": 9}
     depts1, agents1 = await _count(session, SysDepartment), await _count(session, AgentRole)
-    assert depts1 == 9 and agents1 == 15  # 根+8部门；7高管+8总监
+    assert depts1 == 10 and agents1 == 17  # 根+9部门；8顾问+9总监助理
 
     # 重跑不造重复（按 code upsert）
     await org_template.seed_org_template(session, ceo_user_id=ceo)
-    assert await _count(session, SysDepartment) == 9
-    assert await _count(session, AgentRole) == 15
+    assert await _count(session, SysDepartment) == 10
+    assert await _count(session, AgentRole) == 17
 
 
 async def test_seed_wires_root_supervisor_and_report_lines(
@@ -73,7 +73,7 @@ async def test_tree_shape(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     await org_template.seed_org_template(session, ceo_user_id=ceo)
     tree = await org_service.get_tree(session)
     assert len(tree) == 1 and tree[0]["node_type"] == "company"
-    assert len(tree[0]["children"]) == 8  # 8 个一级部门
+    assert len(tree[0]["children"]) == 9  # 9 个一级部门
 
 
 async def test_depth_limited_to_two(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
