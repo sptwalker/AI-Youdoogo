@@ -164,7 +164,7 @@ export default function OrgAdmin() {
         />,
         <Popconfirm
           key="d"
-          title="删除该智能体？（骨架位可在「一键初始化」时按需补回）"
+          title="删除该智能体？（模板岗位可在「一键初始化」时按需补回）"
           onConfirm={async () => {
             await deleteEmployee(r.id)
             message.success('已删除')
@@ -173,7 +173,6 @@ export default function OrgAdmin() {
         >
           <a>删除</a>
         </Popconfirm>,
-        ...(r.is_seed ? [<Tag key="s" color="gold">骨架</Tag>] : []),
       ],
     },
   ]
