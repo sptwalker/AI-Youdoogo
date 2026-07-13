@@ -25,14 +25,15 @@ const ADMIN_ROUTES = [
   { path: '/audit-log', name: '系统日志' },
 ]
 
-/** 菜单二级分组：工作桌面置顶 + 业务组 + 系统管理组（仅 admin 可见）。 */
+/** 菜单二级分组：工作桌面置顶 + 业务组 + 系统管理组（仅 admin 可见）。
+ *  注意：ProLayout 用 path 作菜单 key，分组父节点也必须有 path，否则整组不渲染。 */
 function buildMenu(isAdmin: boolean) {
   return {
     path: '/',
     routes: [
       { path: '/', name: '工作桌面' },
-      { name: '业务', routes: BIZ_ROUTES },
-      ...(isAdmin ? [{ name: '系统管理', routes: ADMIN_ROUTES }] : []),
+      { path: '/g-biz', name: '业务', routes: BIZ_ROUTES },
+      ...(isAdmin ? [{ path: '/g-sys', name: '系统管理', routes: ADMIN_ROUTES }] : []),
     ],
   }
 }
