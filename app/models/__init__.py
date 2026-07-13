@@ -3,6 +3,7 @@
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.audit_log import AuditLog
 from app.models.base import Base
+from app.models.collab import CollabAuthorization, CollabRequest
 from app.models.discussion import DiscussionChannel, DiscussionMessage
 from app.models.feedback import AgentFeedback
 from app.models.knowledge import DataSource, KnowledgeBase, KnowledgeFile, KnowledgeVector
@@ -26,6 +27,8 @@ __all__ = [
     "AgentTaskRecord",
     "AuditLog",
     "Base",
+    "CollabAuthorization",
+    "CollabRequest",
     "DataSource",
     "DiscussionChannel",
     "DiscussionMessage",
