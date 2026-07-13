@@ -14,6 +14,7 @@ from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.knowledge import ingest, retrieval
+from app.knowledge.scope import resolve_visible_kb_ids
 from app.models.knowledge import KnowledgeFile
 from app.models.system import SysUser
 from app.schemas.knowledge import (
@@ -23,6 +24,7 @@ from app.schemas.knowledge import (
     FileOut,
     TextIngestRequest,
 )
+from app.services.knowledge_base_service import get_default_kb
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -38,19 +40,22 @@ async def upload_file(
     manager: Manager,
     file: Annotated[UploadFile, File()],
     category: Annotated[str | None, Form()] = None,
+    knowledge_base_id: Annotated[uuid.UUID | None, Form()] = None,
 ) -> dict:
-    """上传文件入库（支持 txt/md/docx/pdf，单文件 ≤20MB）。"""
+    """上传文件入库（支持 txt/md/docx/pdf，单文件 ≤20MB）。缺省入公司公共库。"""
     if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
         raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:  # Content-Length 缺失/不实时兜底
         raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
+    kb_id = knowledge_base_id or (await get_default_kb(db)).id
     kf = await ingest.ingest_file(
         db,
         file_name=file.filename or "未命名",
         content=content,
         mime_type=file.content_type,
         uploader_id=manager.id,
+        knowledge_base_id=kb_id,
         category=category,
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
@@ -58,18 +63,22 @@ async def upload_file(
 
 @router.post("/text")
 async def ingest_text(body: TextIngestRequest, db: DB, manager: Manager) -> dict:
-    """粘贴正文入库。"""
+    """粘贴正文入库。缺省入公司公共库。"""
+    kb_id = body.knowledge_base_id or (await get_default_kb(db)).id
     kf = await ingest.ingest_text(
-        db, title=body.title, text=body.text, uploader_id=manager.id, category=body.category
+        db, title=body.title, text=body.text, uploader_id=manager.id,
+        knowledge_base_id=kb_id, category=body.category,
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
 
 @router.post("/feishu")
 async def ingest_feishu(body: FeishuIngestRequest, db: DB, manager: Manager) -> dict:
-    """拉取飞书云文档入库。"""
+    """拉取飞书云文档入库。缺省入公司公共库。"""
+    kb_id = body.knowledge_base_id or (await get_default_kb(db)).id
     kf = await ingest.ingest_feishu_doc(
-        db, document_id=body.document_id, uploader_id=manager.id, category=body.category
+        db, document_id=body.document_id, uploader_id=manager.id,
+        knowledge_base_id=kb_id, category=body.category,
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
@@ -100,6 +109,11 @@ async def delete_file(file_id: uuid.UUID, db: DB, _: Manager) -> dict:
 
 @router.post("/ask")
 async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
-    """知识库问答（带来源溯源）。"""
-    result = await retrieval.answer(db, body.query, body.top_k, user_id=user.id)
+    """知识库问答（带来源溯源）。按请求用户可见范围隔离检索（契约②）。"""
+    ids = await resolve_visible_kb_ids(
+        db, department_id=user.department_id, is_admin=user.role_code == "admin"
+    )
+    result = await retrieval.answer(
+        db, body.query, body.top_k, user_id=user.id, visible_kb_ids=ids
+    )
     return ok(AskResponse(**result).model_dump(mode="json"))

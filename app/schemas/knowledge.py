@@ -28,6 +28,7 @@ class TextIngestRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     text: str = Field(min_length=1)
     category: str | None = Field(default=None, max_length=64)
+    knowledge_base_id: uuid.UUID | None = None  # 缺省=公司公共库
 
 
 class FeishuIngestRequest(BaseModel):
@@ -35,6 +36,7 @@ class FeishuIngestRequest(BaseModel):
 
     document_id: str = Field(min_length=1, max_length=128)
     category: str | None = Field(default=None, max_length=64)
+    knowledge_base_id: uuid.UUID | None = None  # 缺省=公司公共库
 
 
 class AskRequest(BaseModel):
@@ -49,3 +51,44 @@ class AskResponse(BaseModel):
 
     answer: str
     sources: list[dict[str, Any]]
+
+
+class KnowledgeBaseCreate(BaseModel):
+    """新建知识库。department scope 需 department_id；personal scope 需 owner_agent_id。"""
+
+    name: str = Field(min_length=1, max_length=128)
+    scope: str = Field(default="department")
+    code: str | None = Field(default=None, max_length=64)
+    department_id: uuid.UUID | None = None
+    owner_agent_id: uuid.UUID | None = None
+    is_confidential: bool = False
+    description: str | None = None
+
+
+class KnowledgeBaseUpdate(BaseModel):
+    """改知识库（仅传需改字段）。"""
+
+    name: str | None = Field(default=None, max_length=128)
+    is_confidential: bool | None = None
+    description: str | None = None
+    is_active: bool | None = None
+
+
+class DataSourceCreate(BaseModel):
+    """新建数据接口。secret_ref 存 .env 变量名，绝不存明文。"""
+
+    name: str = Field(min_length=1, max_length=128)
+    type: str
+    code: str | None = Field(default=None, max_length=64)
+    department_id: uuid.UUID | None = None
+    config: dict[str, Any] | None = None
+    secret_ref: str | None = Field(default=None, max_length=128)
+
+
+class DataSourceUpdate(BaseModel):
+    """改数据接口（仅传需改字段）。"""
+
+    name: str | None = Field(default=None, max_length=128)
+    config: dict[str, Any] | None = None
+    secret_ref: str | None = Field(default=None, max_length=128)
+    is_active: bool | None = None

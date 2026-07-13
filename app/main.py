@@ -9,7 +9,9 @@ from sqlalchemy import text
 
 from app.api.v1.agents import router as agents_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.data_sources import router as data_sources_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.knowledge_bases import router as knowledge_bases_router
 from app.api.v1.meetings import router as meetings_router
 from app.api.v1.ops_data import router as ops_data_router
 from app.api.v1.org import router as org_router
@@ -30,6 +32,8 @@ register_exception_handlers(app)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
+app.include_router(knowledge_bases_router, prefix="/api/v1")
+app.include_router(data_sources_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
 app.include_router(ops_data_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")

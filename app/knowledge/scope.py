@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
@@ -61,13 +61,13 @@ async def resolve_visible_kb_ids(
     public_cond = KnowledgeBase.is_confidential.is_(False)
     # 2) 归属本部门及祖先链的机密库
     conf_cond = KnowledgeBase.is_confidential.is_(True) & (
-        KnowledgeBase.department_id.in_(ancestors) if ancestors else False
+        KnowledgeBase.department_id.in_(ancestors) if ancestors else false()
     )
     # 3) 本人 personal 库
     personal_cond = (
         (KnowledgeBase.scope == SCOPE_PERSONAL) & (KnowledgeBase.owner_agent_id == owner_agent_id)
         if owner_agent_id is not None
-        else False
+        else false()
     )
 
     stmt = select(KnowledgeBase.id).where(
