@@ -18,6 +18,7 @@ from app.api.v1.org import router as org_router
 from app.api.v1.proposals import router as proposals_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
+from app.api.v1.workbench import router as workbench_router
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import ok, register_exception_handlers
@@ -40,6 +41,7 @@ app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(proposals_router, prefix="/api/v1")
 app.include_router(meetings_router, prefix="/api/v1")
 app.include_router(org_router, prefix="/api/v1")
+app.include_router(workbench_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")
