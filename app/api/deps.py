@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.exceptions import AppError
 from app.core.security import decode_access_token
 from app.models.system import SysUser
+from app.services import permission_service
 from app.services.auth_service import get_user_by_id
 
 _bearer = HTTPBearer(auto_error=False)
@@ -45,12 +46,26 @@ async def get_current_user(
 CurrentUser = Annotated[SysUser, Depends(get_current_user)]
 
 
+async def require_human(user: CurrentUser) -> SysUser:
+    """生效动作红线守卫（纵深防御）：必须已认证真人触发。
+
+    AI 员工经 run_agent 内部运行、不持 JWT，故任何进入本依赖的请求天然是真人；
+    与角色门（require_roles）并存标注「生效动作」，配合「生效函数不进 agent tool 注册表」。
+    """
+    return user
+
+
+HumanUser = Annotated[SysUser, Depends(require_human)]
+
+
 def require_roles(*roles: str) -> Callable[..., Coroutine[Any, Any, SysUser]]:
-    """角色守卫依赖工厂：require_roles("admin") / require_roles("admin", "executive")。"""
+    """角色守卫依赖工厂：require_roles("admin") / require_roles("admin", "executive")。
+
+    判定收敛到 permission_service.check_role（单一角色判定权威，F4b）。
+    """
 
     async def _guard(user: CurrentUser) -> SysUser:
-        if user.role_code not in roles:
-            raise AppError("无权限执行此操作", code=403, status_code=403)
+        permission_service.check_role(user, *roles)
         return user
 
     return _guard

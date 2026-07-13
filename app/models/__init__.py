@@ -15,6 +15,7 @@ from app.models.meeting import (
 )
 from app.models.ops_data import OpsDailyMetric
 from app.models.proposal import ProposalCard, ProposalReview
+from app.models.resource_grant import ResourceGrant
 from app.models.sys_config import SysConfig
 from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
@@ -39,6 +40,7 @@ __all__ = [
     "OpsDailyMetric",
     "ProposalCard",
     "ProposalReview",
+    "ResourceGrant",
     "SysConfig",
     "SysDepartment",
     "SysRole",

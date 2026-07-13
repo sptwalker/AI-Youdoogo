@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import scheduler
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, HumanUser
 from app.core.database import get_db
 from app.core.exceptions import ok
 from app.schemas.task import (
@@ -83,9 +83,9 @@ async def decompose_task(
 
 @router.post("/{task_id}/transition")
 async def transition_task(
-    task_id: uuid.UUID, body: TransitionRequest, db: DB, user: CurrentUser
+    task_id: uuid.UUID, body: TransitionRequest, db: DB, user: HumanUser
 ) -> dict:
-    """状态流转（经状态机校验，非法流转返回错误）。"""
+    """状态流转（经状态机校验，非法流转返回错误）。验收=生效动作，require_human 守卫。"""
     task = await task_service.transition(
         db,
         task_id,

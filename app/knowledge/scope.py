@@ -32,6 +32,13 @@ def _ancestor_ids(path: str) -> list[uuid.UUID]:
     return [uuid.UUID(seg) for seg in path.strip("/").split("/") if seg]
 
 
+async def ancestor_dept_ids(
+    db: AsyncSession, department_id: uuid.UUID | None
+) -> list[uuid.UUID]:
+    """某部门的本节点+祖先链 id 列表（供 scope 与 resource_grant 复用）。"""
+    return _ancestor_ids(await _dept_path(db, department_id))
+
+
 async def resolve_visible_kb_ids(
     db: AsyncSession,
     *,

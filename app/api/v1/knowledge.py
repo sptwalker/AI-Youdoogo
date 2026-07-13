@@ -14,7 +14,6 @@ from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.knowledge import ingest, retrieval
-from app.knowledge.scope import resolve_visible_kb_ids
 from app.models.knowledge import KnowledgeFile
 from app.models.system import SysUser
 from app.schemas.knowledge import (
@@ -24,6 +23,7 @@ from app.schemas.knowledge import (
     FileOut,
     TextIngestRequest,
 )
+from app.services import permission_service
 from app.services.knowledge_base_service import get_default_kb
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -109,10 +109,8 @@ async def delete_file(file_id: uuid.UUID, db: DB, _: Manager) -> dict:
 
 @router.post("/ask")
 async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
-    """知识库问答（带来源溯源）。按请求用户可见范围隔离检索（契约②）。"""
-    ids = await resolve_visible_kb_ids(
-        db, department_id=user.department_id, is_admin=user.role_code == "admin"
-    )
+    """知识库问答（带来源溯源）。按请求用户可见范围隔离检索（契约② scope ∪ grant）。"""
+    ids = await permission_service.visible_kb_ids(db, user)
     result = await retrieval.answer(
         db, body.query, body.top_k, user_id=user.id, visible_kb_ids=ids
     )
