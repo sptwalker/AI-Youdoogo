@@ -5,6 +5,12 @@ from app.models.base import Base
 from app.models.feedback import AgentFeedback
 from app.models.knowledge import KnowledgeFile, KnowledgeVector
 from app.models.llm_log import LlmCallLog
+from app.models.meeting import (
+    MeetingDiscuss,
+    MeetingInfo,
+    MeetingResolution,
+    MeetingVote,
+)
 from app.models.ops_data import OpsDailyMetric
 from app.models.proposal import ProposalCard, ProposalReview
 from app.models.system import SysDepartment, SysRole, SysUser
@@ -18,6 +24,10 @@ __all__ = [
     "KnowledgeFile",
     "KnowledgeVector",
     "LlmCallLog",
+    "MeetingDiscuss",
+    "MeetingInfo",
+    "MeetingResolution",
+    "MeetingVote",
     "OpsDailyMetric",
     "ProposalCard",
     "ProposalReview",

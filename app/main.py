@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.api.v1.agents import router as agents_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.knowledge import router as knowledge_router
+from app.api.v1.meetings import router as meetings_router
 from app.api.v1.ops_data import router as ops_data_router
 from app.api.v1.proposals import router as proposals_router
 from app.api.v1.tasks import router as tasks_router
@@ -32,6 +33,7 @@ app.include_router(agents_router, prefix="/api/v1")
 app.include_router(ops_data_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(proposals_router, prefix="/api/v1")
+app.include_router(meetings_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")
