@@ -1,7 +1,9 @@
-"""通义 text-embedding-v3 客户端（OpenAI 兼容 /embeddings 端点，1024 维）。
+"""知识库 embedding 客户端（OpenAI 兼容 /embeddings 端点，1024 维）。
 
-MVP 单 provider、不做 failover（A/B 选型与降级见 docs/06 阶段1，后续增量）。
-密钥走 DASHSCOPE_API_KEY（app/core/config），无密钥抛明确异常。
+A/B 可配置（docs/06 阶段1）：默认通义 text-embedding-v3；经 .env 的
+EMBEDDING_BASE_URL / EMBEDDING_MODEL / EMBEDDING_API_KEY 可替换为 bge-m3 等
+（须仍为 1024 维，否则要改 knowledge_vector.embedding 列并重建 hnsw 索引）。
+密钥留空则回退 DASHSCOPE_API_KEY；无密钥抛明确异常。
 """
 
 from __future__ import annotations
@@ -12,8 +14,7 @@ from app.core.config import get_settings
 from app.llm.factory import resolve_provider_base_url
 from app.models.knowledge import EMBED_DIM
 
-_MODEL = "text-embedding-v3"
-_BATCH = 10  # ponytail: 通义批量上限保守取 10，吞吐不足再调
+_BATCH = 10  # ponytail: 批量上限保守取 10，吞吐不足再调
 _TIMEOUT = 30.0
 
 
@@ -21,8 +22,18 @@ class EmbeddingError(RuntimeError):
     """embedding 调用失败（未配密钥 / 接口错误 / 维度不符）。"""
 
 
+def _base_url() -> str:
+    """embedding 端点根地址：配置优先，留空回退通义。"""
+    return get_settings().embedding_base_url or resolve_provider_base_url("qwen") or ""
+
+
 def _endpoint() -> str:
-    return f"{resolve_provider_base_url('qwen')}/embeddings"
+    return f"{_base_url()}/embeddings"
+
+
+def _api_key() -> str:
+    s = get_settings()
+    return s.embedding_api_key or s.dashscope_api_key
 
 
 async def _embed_batch(
@@ -32,7 +43,7 @@ async def _embed_batch(
         _endpoint(),
         headers={"Authorization": f"Bearer {api_key}"},
         json={
-            "model": _MODEL,
+            "model": get_settings().embedding_model,
             "input": texts,
             "dimensions": EMBED_DIM,
             "encoding_format": "float",
@@ -52,12 +63,12 @@ async def _embed_batch(
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
-    """批量向量化。空列表直接返回 []；空串会被通义拒绝，调用方须先过滤。"""
+    """批量向量化。空列表直接返回 []；空串会被端点拒绝，调用方须先过滤。"""
     if not texts:
         return []
-    api_key = get_settings().dashscope_api_key
+    api_key = _api_key()
     if not api_key:
-        raise EmbeddingError("未配置 DASHSCOPE_API_KEY，无法调用通义 embedding")
+        raise EmbeddingError("未配置 embedding 密钥（EMBEDDING_API_KEY 或 DASHSCOPE_API_KEY）")
     out: list[list[float]] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         for i in range(0, len(texts), _BATCH):

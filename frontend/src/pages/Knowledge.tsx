@@ -119,7 +119,7 @@ export default function Knowledge() {
         toolBarRender={() => [
           <Upload
             key="upload"
-            accept=".txt,.md,.markdown"
+            accept=".txt,.md,.markdown,.docx,.pdf"
             showUploadList={false}
             beforeUpload={(file) => {
               uploadKnowledgeFile(file)
@@ -133,7 +133,7 @@ export default function Knowledge() {
               return false
             }}
           >
-            <Button>上传 txt/md</Button>
+            <Button>上传文档 (txt/md/docx/pdf)</Button>
           </Upload>,
           <ModalForm<{ title: string; text: string; category?: string }>
             key="text"

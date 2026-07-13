@@ -37,7 +37,7 @@ async def upload_file(
     file: Annotated[UploadFile, File()],
     category: Annotated[str | None, Form()] = None,
 ) -> dict:
-    """上传文件入库（MVP：txt/md）。"""
+    """上传文件入库（支持 txt/md/docx/pdf）。"""
     content = await file.read()
     kf = await ingest.ingest_file(
         db,

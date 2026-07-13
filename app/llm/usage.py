@@ -69,6 +69,9 @@ async def _check_daily_budget(db: AsyncSession) -> None:
     )
     today_total = int((await db.execute(stmt)).scalar_one())
     if today_total > budget:
-        logger.warning(
-            "LLM 日用量告警：当日累计 %d tokens 已超预算 %d，请关注成本。", today_total, budget
-        )
+        msg = f"LLM 日用量告警：当日累计 {today_total} tokens 已超预算 {budget}，请关注成本。"
+        logger.warning(msg)
+        # best-effort 推运营群（未开启通知或未配群时静默跳过）
+        from app.integrations.feishu import notify
+
+        await notify.push_ops_message(f"【成本告警】{msg}")

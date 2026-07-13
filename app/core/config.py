@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     # LLM 用量：当日 token 预算，超阈值告警（0=不启用）
     llm_daily_token_budget: int = 0
 
+    # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
+    embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
+    embedding_model: str = "text-embedding-v3"  # 换 bge-m3 等在此改（需 1024 维）
+    embedding_api_key: str = ""  # 留空则回退 dashscope_api_key
+
     # 飞书
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
