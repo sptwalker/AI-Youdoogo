@@ -5,9 +5,10 @@ docs/03 §3.7：业务时序数据阶段4 才转 TimescaleDB hypertable，本阶
 （按 (stat_date, product) 唯一，重复上传幂等 upsert）。
 """
 
+import uuid
 from datetime import date
 
-from sqlalchemy import Date, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Date, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CommonMixin
@@ -25,3 +26,6 @@ class OpsDailyMetric(CommonMixin, Base):
     new_users: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retention_d1: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="excel", server_default="excel")
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("sys_department.id"), nullable=True
+    )  # F4a 部门切片

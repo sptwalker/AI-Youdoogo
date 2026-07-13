@@ -37,6 +37,9 @@ async def run_task(
         AppError: 任务未分配智能体 / 智能体角色不存在 / 当前状态不可执行。
     """
     task = await task_service.get_task(db, task_id)
+    if task.assignee_type == "user":
+        # 派给真人的任务不进自动执行链，交由真人在工作台受理（docs/13 §7）
+        raise AppError("该任务派给真人受理，不由调度中枢自动执行")
     if task.assignee_agent_id is None:
         raise AppError("任务未分配智能体，无法自动执行")
     role = await db.get(AgentRole, task.assignee_agent_id)

@@ -21,7 +21,7 @@ from app.schemas.task import (
     TaskOut,
     TransitionRequest,
 )
-from app.services import task_service
+from app.services import audit_service, task_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -94,6 +94,13 @@ async def transition_task(
         note=body.note,
         result_content=body.result_content,
     )
+    if body.to_status in ("accepted", "rejected"):  # 红线：任务验收留痕
+        await audit_service.audit(
+            db, actor_id=user.id, actor_role=user.role_code,
+            action=f"task.{body.to_status}",
+            summary=f"任务验收 {task.title[:40]} → {body.to_status}",
+            target_type="task_card", target_id=task.id,
+        )
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))
 
 

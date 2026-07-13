@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Integer, String, Uuid
+from sqlalchemy import ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CommonMixin
@@ -23,3 +23,6 @@ class LlmCallLog(CommonMixin, Base):
     # 业务关联（松引用，不加 FK 避免跨模块耦合）
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("sys_department.id"), nullable=True
+    )  # F4a 部门级预算归集

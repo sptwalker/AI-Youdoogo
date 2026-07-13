@@ -22,7 +22,7 @@ from app.schemas.org import (
     NodeUpdate,
     SupervisorSet,
 )
-from app.services import agent_role_service, org_service, org_template
+from app.services import agent_role_service, audit_service, org_service, org_template
 
 router = APIRouter(prefix="/org", tags=["org"])
 
@@ -43,14 +43,23 @@ async def get_tree(db: DB, _: CurrentUser) -> dict:
 @router.post("/init-template")
 async def init_template(db: DB, admin: Admin) -> dict:
     """一键按模板初始化公司骨架（幂等）：公司根 + 8 部门 + 7 高管 + 8 总监；根主管=CEO。"""
-    return ok(await org_template.seed_org_template(db, ceo_user_id=admin.id))
+    result = await org_template.seed_org_template(db, ceo_user_id=admin.id)
+    await audit_service.audit(
+        db, actor_id=admin.id, actor_role=admin.role_code, action="org.init_template",
+        summary="一键初始化公司骨架", detail=result,
+    )
+    return ok(result)
 
 
 @router.post("/nodes")
-async def create_node(body: NodeCreate, db: DB, _: Admin) -> dict:
+async def create_node(body: NodeCreate, db: DB, admin: Admin) -> dict:
     """新建部门（一级/二级，层级≤2）。"""
     node = await org_service.create_node(
         db, name=body.name, parent_id=body.parent_id, code=body.code
+    )
+    await audit_service.audit(
+        db, actor_id=admin.id, actor_role=admin.role_code, action="org.node.create",
+        summary=f"新建部门 {node.name}", target_type="sys_department", target_id=node.id,
     )
     return ok(NodeOut.model_validate(node).model_dump(mode="json"))
 
@@ -63,16 +72,26 @@ async def update_node(dept_id: uuid.UUID, body: NodeUpdate, db: DB, _: Admin) ->
 
 
 @router.delete("/nodes/{dept_id}")
-async def delete_node(dept_id: uuid.UUID, db: DB, _: Admin) -> dict:
+async def delete_node(dept_id: uuid.UUID, db: DB, admin: Admin) -> dict:
     """删部门（有子部门/员工时拒绝）。"""
     await org_service.delete_node(db, dept_id)
+    await audit_service.audit(
+        db, actor_id=admin.id, actor_role=admin.role_code, action="org.node.delete",
+        summary="删除部门", target_type="sys_department", target_id=dept_id,
+    )
     return ok()
 
 
 @router.put("/nodes/{dept_id}/supervisor")
-async def set_supervisor(dept_id: uuid.UUID, body: SupervisorSet, db: DB, _: Admin) -> dict:
+async def set_supervisor(dept_id: uuid.UUID, body: SupervisorSet, db: DB, admin: Admin) -> dict:
     """设置部门真人主管（跨部门协作确认/复核人）。"""
     node = await org_service.set_supervisor(db, dept_id, body.supervisor_user_id)
+    sup = str(body.supervisor_user_id) if body.supervisor_user_id else None
+    await audit_service.audit(
+        db, actor_id=admin.id, actor_role=admin.role_code, action="org.supervisor.set",
+        summary=f"设置部门主管 {node.name}", target_type="sys_department", target_id=node.id,
+        detail={"supervisor_user_id": sup},
+    )
     return ok(NodeOut.model_validate(node).model_dump(mode="json"))
 
 

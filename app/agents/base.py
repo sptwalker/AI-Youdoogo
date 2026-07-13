@@ -17,11 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm import get_llm_for_role
 from app.llm.usage import extract_usage, record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
+from app.services import config_service
 
 logger = logging.getLogger(__name__)
 
 # agent_role.model_role（粗粒度档位）→ app/llm/roles.py 的 LLM 角色键
 _LLM_ROLE_BY_TIER: dict[str, str] = {"daily": "default", "reasoning": "meeting_expert"}
+
+# 全局红线不变量（提示词分层前缀）；可经 sys_config('agent_global_prompt') 覆盖，一处改全局
+_DEFAULT_GLOBAL_PROMPT = (
+    "【公司红线】你是创想悦动公司的 AI 顾问/助理，仅有建议、分析、辅助执行权；"
+    "涉及资金、人事、项目、重大业务调整的决议必须由真人确认才生效，你的产出一律为草稿/参考。"
+    "只依据已知事实作答、禁止编造；引用资料须可溯源；保持专业、简明的公司口吻。"
+)
 
 
 async def get_agent_role(db: AsyncSession, name: str) -> AgentRole | None:
@@ -73,8 +81,13 @@ async def run_agent(
     usage: tuple[int, int, int] = (0, 0, 0)
     try:
         llm = get_llm_for_role(llm_role, temperature=0.3)
+        # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
+        global_prompt = await config_service.resolve(
+            db, "agent_global_prompt", _DEFAULT_GLOBAL_PROMPT
+        )
+        system_content = f"{global_prompt}\n\n{role.prompt_template}"
         reply = await llm.ainvoke(
-            [SystemMessage(content=role.prompt_template), HumanMessage(content=user_message)]
+            [SystemMessage(content=system_content), HumanMessage(content=user_message)]
         )
         output = _as_text(reply)
         # 实际命中模型（经降级链后）优先取响应元数据，缺失则记档位

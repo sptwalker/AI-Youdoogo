@@ -22,7 +22,7 @@ from app.schemas.proposal import (
     ReviewOut,
 )
 from app.schemas.task import TaskOut
-from app.services import proposal_service
+from app.services import audit_service, proposal_service
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -86,6 +86,11 @@ async def human_review(
     p = await proposal_service.human_review(
         db, proposal_id, reviewer_id=manager.id, conclusion=body.conclusion, decision=body.decision
     )
+    await audit_service.audit(
+        db, actor_id=manager.id, actor_role=manager.role_code,
+        action=f"proposal.{body.decision}", summary=f"提案评审 {p.code} → {body.decision}",
+        target_type="proposal_card", target_id=p.id,
+    )
     return ok(ProposalOut.model_validate(p).model_dump(mode="json"))
 
 
@@ -96,5 +101,10 @@ async def convert_to_task(
     """把已通过的提案转为任务卡。"""
     task = await proposal_service.convert_to_task(
         db, proposal_id, creator_id=manager.id, assignee_agent_id=body.assignee_agent_id
+    )
+    await audit_service.audit(
+        db, actor_id=manager.id, actor_role=manager.role_code,
+        action="proposal.convert", summary=f"提案转任务卡 {task.title[:40]}",
+        target_type="task_card", target_id=task.id,
     )
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))

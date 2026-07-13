@@ -29,7 +29,7 @@ from app.schemas.meeting import (
     VoteRequest,
 )
 from app.schemas.task import TaskOut
-from app.services import meeting_service
+from app.services import audit_service, meeting_service
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -155,6 +155,11 @@ async def create_resolution(
 async def confirm_resolution(resolution_id: uuid.UUID, db: DB, manager: Manager) -> dict:
     """真人确认决议生效（红线）。"""
     r = await meeting_service.confirm_resolution(db, resolution_id, confirmed_by=manager.id)
+    await audit_service.audit(
+        db, actor_id=manager.id, actor_role=manager.role_code,
+        action="meeting.resolution.confirm", summary=f"决议确认生效 {r.content[:40]}",
+        target_type="meeting_resolution", target_id=r.id,
+    )
     return ok(ResolutionOut.model_validate(r).model_dump(mode="json"))
 
 
@@ -165,5 +170,10 @@ async def convert_resolution(
     """把已确认决议转为任务卡。"""
     task = await meeting_service.resolution_to_task(
         db, resolution_id, creator_id=manager.id, assignee_agent_id=body.assignee_agent_id
+    )
+    await audit_service.audit(
+        db, actor_id=manager.id, actor_role=manager.role_code,
+        action="meeting.resolution.convert", summary=f"决议转任务卡 {task.title[:40]}",
+        target_type="task_card", target_id=task.id,
     )
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))

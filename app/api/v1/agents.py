@@ -30,7 +30,13 @@ from app.schemas.agent import (
     ProposalRequest,
     TaskRecordOut,
 )
-from app.services import agent_role_service, anomaly, feedback_service, ops_data
+from app.services import (
+    agent_role_service,
+    anomaly,
+    audit_service,
+    feedback_service,
+    ops_data,
+)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -134,7 +140,7 @@ async def create_role(body: AgentRoleCreate, db: DB, _: Admin) -> dict:
 
 
 @router.patch("/roles/{role_id}")
-async def update_role(role_id: uuid.UUID, body: AgentRoleUpdate, db: DB, _: Admin) -> dict:
+async def update_role(role_id: uuid.UUID, body: AgentRoleUpdate, db: DB, admin: Admin) -> dict:
     """更新智能体角色（仅 admin）：改提示词/职责/档位/启用状态等。"""
     role = await agent_role_service.update_agent_role(
         db,
@@ -146,6 +152,11 @@ async def update_role(role_id: uuid.UUID, body: AgentRoleUpdate, db: DB, _: Admi
         permission_scope=body.permission_scope,
         tools=body.tools,
     )
+    if body.prompt_template is not None:  # 红线：提示词应用留痕
+        await audit_service.audit(
+            db, actor_id=admin.id, actor_role=admin.role_code, action="agent.prompt.apply",
+            summary=f"应用提示词 {role.name}", target_type="agent_role", target_id=role.id,
+        )
     return ok(AgentRoleOut.model_validate(role).model_dump(mode="json"))
 
 

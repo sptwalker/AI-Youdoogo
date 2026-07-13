@@ -26,6 +26,18 @@ class TaskCard(CommonMixin, Base):
     assignee_agent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("agent_role.id"), nullable=True
     )
+    # F4a 归属/分派/风险（纯加列，历史行取默认）
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sys_department.id"), nullable=True
+    )
+    risk_level: Mapped[str] = mapped_column(String(16), default="low", server_default="low")
+    assignee_type: Mapped[str] = mapped_column(
+        String(16), default="agent", server_default="agent"
+    )  # agent（AI 执行）/ user（派真人，scheduler 跳过）
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    origin_type: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
+    )  # proposal/meeting/manual/discussion
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("task_card.id"), nullable=True
     )  # 拆解出的子任务指向父任务

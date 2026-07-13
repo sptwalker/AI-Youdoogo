@@ -1,6 +1,7 @@
 """models 包：导出 Base 供 Alembic 元数据发现。"""
 
 from app.models.agent import AgentRole, AgentTaskRecord
+from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.discussion import DiscussionChannel, DiscussionMessage
 from app.models.feedback import AgentFeedback
@@ -14,6 +15,7 @@ from app.models.meeting import (
 )
 from app.models.ops_data import OpsDailyMetric
 from app.models.proposal import ProposalCard, ProposalReview
+from app.models.sys_config import SysConfig
 from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 
@@ -21,6 +23,7 @@ __all__ = [
     "AgentFeedback",
     "AgentRole",
     "AgentTaskRecord",
+    "AuditLog",
     "Base",
     "DataSource",
     "DiscussionChannel",
@@ -36,6 +39,7 @@ __all__ = [
     "OpsDailyMetric",
     "ProposalCard",
     "ProposalReview",
+    "SysConfig",
     "SysDepartment",
     "SysRole",
     "SysUser",
