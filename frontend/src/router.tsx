@@ -4,6 +4,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { TOKEN_KEY } from './api/client'
 import AppLayout from './layouts/AppLayout'
 import Agents from './pages/Agents'
+import AuditLog from './pages/AuditLog'
 import Dashboard from './pages/Dashboard'
 import Discussion from './pages/Discussion'
 import Knowledge from './pages/Knowledge'
@@ -13,6 +14,7 @@ import OpsBoard from './pages/OpsBoard'
 import OrgAdmin from './pages/OrgAdmin'
 import Proposals from './pages/Proposals'
 import Settings from './pages/Settings'
+import SystemConfig from './pages/SystemConfig'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
 
@@ -41,6 +43,8 @@ export const router = createBrowserRouter([
       { path: 'discussion', element: <Discussion /> },
       { path: 'org', element: <OrgAdmin /> },
       { path: 'users', element: <Users /> },
+      { path: 'system-config', element: <SystemConfig /> },
+      { path: 'audit-log', element: <AuditLog /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

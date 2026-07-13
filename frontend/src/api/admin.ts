@@ -1,0 +1,35 @@
+/** 系统管理 API（对应后端 app/api/v1/admin.py）：审计日志 + 系统配置。 */
+import { request } from './client'
+
+export interface AuditLog {
+  id: string
+  actor_id: string | null
+  actor_role: string | null
+  action: string
+  target_type: string | null
+  target_id: string | null
+  summary: string
+  detail: Record<string, unknown> | null
+  result: string
+  create_time: string
+}
+
+export interface SysConfig {
+  key: string
+  value: unknown
+  value_type: string
+  category: string
+  is_editable: boolean
+}
+
+export function listAuditLogs(params?: { action?: string; actor_id?: string }): Promise<AuditLog[]> {
+  return request({ method: 'GET', url: '/audit-logs', params })
+}
+
+export function listConfigs(): Promise<SysConfig[]> {
+  return request({ method: 'GET', url: '/configs' })
+}
+
+export function updateConfig(key: string, value: unknown): Promise<{ key: string; value: unknown }> {
+  return request({ method: 'PATCH', url: `/configs/${key}`, data: { value } })
+}

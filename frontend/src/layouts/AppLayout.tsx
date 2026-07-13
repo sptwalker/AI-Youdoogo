@@ -18,7 +18,9 @@ const BIZ_ROUTES = [
 ]
 const ADMIN_ROUTES = [
   { path: '/org', name: '组织架构' },
-  { path: '/users', name: '用户管理' },
+  { path: '/users', name: '用户与权限' },
+  { path: '/system-config', name: '系统配置' },
+  { path: '/audit-log', name: '系统日志' },
   { path: '/settings', name: '系统设置' },
 ]
 
