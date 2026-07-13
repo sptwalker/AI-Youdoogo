@@ -18,11 +18,17 @@ router = APIRouter(prefix="/ops-data", tags=["ops-data"])
 DB = Annotated[AsyncSession, Depends(get_db)]
 Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
 
+_MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB 上限，防大文件读入内存 OOM
+
 
 @router.post("/daily/upload")
 async def upload_daily(db: DB, _: Manager, file: Annotated[UploadFile, File()]) -> dict:
-    """上传 ops_daily 模板 Excel，解析后幂等落库。"""
+    """上传 ops_daily 模板 Excel（≤20MB），解析后幂等落库。"""
+    if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
+        raise AppError("文件过大（>20MB），请压缩或拆分后上传")
     content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise AppError("文件过大（>20MB），请压缩或拆分后上传")
     try:
         summary = await ops_data.ingest_ops_daily_excel(db, content)
     except ExcelParseError as exc:
