@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -35,13 +35,25 @@ async def _all_nodes(db: AsyncSession) -> list[SysDepartment]:
 
 
 async def get_tree(db: AsyncSession) -> list[dict[str, Any]]:
-    """返回嵌套部门树（根在最外层）。"""
+    """返回嵌套部门树（根在最外层），每节点带 AI 员工数 employee_count。"""
     nodes = await _all_nodes(db)
+    # 各部门在职 AI 员工数（一次 group by）
+    counts: dict[uuid.UUID, int] = {
+        dept_id: int(n)
+        for dept_id, n in (
+            await db.execute(
+                select(AgentRole.department_id, func.count())
+                .where(AgentRole.is_delete.is_(False), AgentRole.department_id.is_not(None))
+                .group_by(AgentRole.department_id)
+            )
+        ).all()
+    }
     by_id: dict[uuid.UUID, dict[str, Any]] = {
         n.id: {
             "id": str(n.id), "name": n.name, "code": n.code, "node_type": n.node_type,
             "level": n.level, "parent_id": str(n.parent_id) if n.parent_id else None,
             "supervisor_user_id": str(n.supervisor_user_id) if n.supervisor_user_id else None,
+            "employee_count": counts.get(n.id, 0),
             "children": [],
         }
         for n in nodes

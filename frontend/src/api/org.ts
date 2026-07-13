@@ -9,6 +9,7 @@ export interface OrgNode {
   level: number
   parent_id: string | null
   supervisor_user_id: string | null
+  employee_count: number
   children: OrgNode[]
 }
 

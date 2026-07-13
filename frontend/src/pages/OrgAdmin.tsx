@@ -19,7 +19,6 @@ import {
   deleteEmployee,
   deleteNode,
   getTree,
-  initTemplate,
   listEmployees,
   setSupervisor,
   TIER_LABEL,
@@ -50,10 +49,26 @@ interface TreeItem {
 function toTree(nodes: OrgNode[]): TreeItem[] {
   return nodes.map((n) => ({
     key: n.id,
-    title: `${n.name}${n.node_type === 'company' ? ' (公司)' : ''}`,
+    title: `${n.name}${n.node_type === 'company' ? ' (公司)' : ''}${
+      n.employee_count ? ` · ${n.employee_count}` : ''
+    }`,
     node: n,
     children: n.children.length ? toTree(n.children) : undefined,
   }))
+}
+
+/** 从组织树汇总：一级部门数 / 二级部门数 / AI 员工总数。 */
+function orgStats(tree: OrgNode[]): { l1: number; l2: number; emps: number } {
+  const root = tree[0]
+  if (!root) return { l1: 0, l2: 0, emps: 0 }
+  let emps = 0
+  const walk = (n: OrgNode) => {
+    emps += n.employee_count
+    n.children.forEach(walk)
+  }
+  walk(root)
+  const l2 = root.children.reduce((s, c) => s + c.children.length, 0)
+  return { l1: root.children.length, l2, emps }
 }
 
 function findNode(nodes: OrgNode[], id: string): OrgNode | null {
@@ -193,20 +208,20 @@ export default function OrgAdmin() {
           title="部门树"
           style={{ width: 340, flexShrink: 0 }}
           extra={
-            <Popconfirm
-              title="按模板初始化公司骨架（幂等）？"
-              onConfirm={async () => {
-                const r = await initTemplate()
-                message.success(`已初始化：${r.departments}部门/${r.execs}高管/${r.directors}总监`)
-                refreshTree()
-              }}
-            >
-              <Button type="primary" size="small">一键初始化骨架</Button>
-            </Popconfirm>
+            tree.length > 0 && (
+              <span style={{ fontSize: 12, color: '#888' }}>
+                {(() => {
+                  const s = orgStats(tree)
+                  return `${s.l1} 个一级 · ${s.l2} 个二级 · ${s.emps} AI员工`
+                })()}
+              </span>
+            )
           }
         >
           {tree.length === 0 ? (
-            <span style={{ color: '#999' }}>暂无组织架构，点右上「一键初始化骨架」</span>
+            <span style={{ color: '#999' }}>
+              暂无组织架构，请到「系统设置」一键初始化公司骨架
+            </span>
           ) : (
             <Tree
               treeData={toTree(tree)}

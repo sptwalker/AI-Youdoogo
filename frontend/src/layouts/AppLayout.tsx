@@ -19,6 +19,7 @@ const MENU = {
     { path: '/meetings', name: '会议会商' },
     { path: '/org', name: '组织架构' },
     { path: '/users', name: '用户管理' },
+    { path: '/settings', name: '系统设置' },
   ],
 }
 
