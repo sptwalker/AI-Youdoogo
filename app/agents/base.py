@@ -73,6 +73,14 @@ async def run_agent(
     保证「每次AI操作都有痕迹」且调用方拿到可展示的失败原因。
     """
     llm_role = _LLM_ROLE_BY_TIER.get(role.model_role, "default")
+    # 提示词分层前缀先取（配置层故障不应连累 AI 执行，回退内置红线默认）
+    try:
+        global_prompt = await config_service.resolve(
+            db, "agent_global_prompt", _DEFAULT_GLOBAL_PROMPT
+        )
+    except Exception:  # noqa: BLE001 - sys_config 不可用时用内置默认，不阻断 AI
+        logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
+        global_prompt = _DEFAULT_GLOBAL_PROMPT
     t0 = time.monotonic()
     output: str | None = None
     model_used: str | None = None
@@ -82,9 +90,6 @@ async def run_agent(
     try:
         llm = get_llm_for_role(llm_role, temperature=0.3)
         # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
-        global_prompt = await config_service.resolve(
-            db, "agent_global_prompt", _DEFAULT_GLOBAL_PROMPT
-        )
         system_content = f"{global_prompt}\n\n{role.prompt_template}"
         reply = await llm.ainvoke(
             [SystemMessage(content=system_content), HumanMessage(content=user_message)]

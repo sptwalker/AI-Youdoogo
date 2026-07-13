@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent import TIER_DIRECTOR, TIER_EXEC, AgentRole
+from app.models.discussion import DiscussionChannel
 from app.models.system import COMPANY, DEPT_L1, SysDepartment
 
 # 9 个一级部门：code, 名称, 排序
@@ -120,6 +121,8 @@ async def _upsert_dept(
         db.add(dept)
         await db.flush()
         dept.path = f"{root.path}{dept.id}/"
+        # F3'：新建部门自动种子讨论频道（与 org_service.create_node 一致）
+        db.add(DiscussionChannel(name=f"{name}讨论区", department_id=dept.id))
     else:
         dept.name, dept.parent_id, dept.node_type, dept.level = name, root.id, DEPT_L1, 1
         dept.sort_order, dept.path = sort, f"{root.path}{dept.id}/"

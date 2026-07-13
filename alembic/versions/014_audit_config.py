@@ -73,8 +73,8 @@ def upgrade() -> None:
             "INSERT INTO sys_config "
             "(id, key, value, value_type, category, is_editable, is_delete, "
             "create_time, update_time) VALUES "
-            "(:id, 'agent_global_prompt', to_jsonb(:val::text), 'text', 'prompt', true, false, "
-            "now(), now())"
+            "(:id, 'agent_global_prompt', to_jsonb(CAST(:val AS text)), 'text', 'prompt', "
+            "true, false, now(), now())"
         ).bindparams(id=uuid.uuid4(), val=_GLOBAL_PROMPT)
     )
 

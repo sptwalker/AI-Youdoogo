@@ -106,14 +106,15 @@ async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> Discussion
 async def list_messages(
     db: AsyncSession, channel_id: uuid.UUID, *, limit: int = 100
 ) -> list[dict[str, Any]]:
-    """频道消息（按时间正序，默认最多 100 条）。"""
+    """频道最近 limit 条消息（按时间正序返回）。"""
     stmt = (
         select(DiscussionMessage)
         .where(DiscussionMessage.channel_id == channel_id)
-        .order_by(DiscussionMessage.create_time)
+        .order_by(DiscussionMessage.create_time.desc())  # 先取最近 limit 条
         .limit(limit)
     )
-    return [_msg_dict(m) for m in (await db.execute(stmt)).scalars()]
+    rows = list((await db.execute(stmt)).scalars())
+    return [_msg_dict(m) for m in reversed(rows)]  # 再倒回正序展示/喂 AI
 
 
 async def post_message(
@@ -140,13 +141,16 @@ async def post_message(
     await db.refresh(human)
 
     targets = _dedup(mentioned_agent_ids)[:MAX_FANOUT]  # 护栏 1(空则不进循环)/2/3
+    # 频道近期上下文取一次（含刚发的这条），循环内复用——避免每个 @agent 重查（N+1）
+    ctx = "（暂无发言）"
+    if targets:
+        history = await list_messages(db, channel_id, limit=_CONTEXT_N)
+        ctx = "\n".join(f"{h['speaker_name']}：{h['content']}" for h in history) or ctx
     ai_msgs: list[dict[str, Any]] = []
     for agent_id in targets:
         role = await db.get(AgentRole, agent_id)
         if role is None or role.is_delete or not role.is_active:
             continue  # 坏 @ 不阻断整条发言
-        history = await list_messages(db, channel_id, limit=_CONTEXT_N)
-        ctx = "\n".join(f"{h['speaker_name']}：{h['content']}" for h in history) or "（暂无发言）"
         user_message = (
             f"你在企业协作频道「{channel.name}」中被 @ 点名。\n\n"
             f"频道近期讨论：\n{ctx}\n\n"

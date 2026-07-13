@@ -23,8 +23,8 @@ from app.schemas.knowledge import (
     FileOut,
     TextIngestRequest,
 )
-from app.services import permission_service
-from app.services.knowledge_base_service import get_default_kb
+from app.services import audit_service, permission_service
+from app.services.knowledge_base_service import get_default_kb, get_kb
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -32,6 +32,13 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
 
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB 上限，防大文件读入内存 OOM（nginx 另有 50m 兜底）
+
+
+async def _resolve_kb_id(db: AsyncSession, provided: uuid.UUID | None) -> uuid.UUID:
+    """缺省落公司公共库；显式传入则校验存在（不存在→404，避免 FK 违例 500）。"""
+    if provided is None:
+        return (await get_default_kb(db)).id
+    return (await get_kb(db, provided)).id
 
 
 @router.post("/files")
@@ -48,7 +55,7 @@ async def upload_file(
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:  # Content-Length 缺失/不实时兜底
         raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
-    kb_id = knowledge_base_id or (await get_default_kb(db)).id
+    kb_id = await _resolve_kb_id(db, knowledge_base_id)
     kf = await ingest.ingest_file(
         db,
         file_name=file.filename or "未命名",
@@ -64,7 +71,7 @@ async def upload_file(
 @router.post("/text")
 async def ingest_text(body: TextIngestRequest, db: DB, manager: Manager) -> dict:
     """粘贴正文入库。缺省入公司公共库。"""
-    kb_id = body.knowledge_base_id or (await get_default_kb(db)).id
+    kb_id = await _resolve_kb_id(db, body.knowledge_base_id)
     kf = await ingest.ingest_text(
         db, title=body.title, text=body.text, uploader_id=manager.id,
         knowledge_base_id=kb_id, category=body.category,
@@ -75,7 +82,7 @@ async def ingest_text(body: TextIngestRequest, db: DB, manager: Manager) -> dict
 @router.post("/feishu")
 async def ingest_feishu(body: FeishuIngestRequest, db: DB, manager: Manager) -> dict:
     """拉取飞书云文档入库。缺省入公司公共库。"""
-    kb_id = body.knowledge_base_id or (await get_default_kb(db)).id
+    kb_id = await _resolve_kb_id(db, body.knowledge_base_id)
     kf = await ingest.ingest_feishu_doc(
         db, document_id=body.document_id, uploader_id=manager.id,
         knowledge_base_id=kb_id, category=body.category,
@@ -111,6 +118,12 @@ async def delete_file(file_id: uuid.UUID, db: DB, _: Manager) -> dict:
 async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
     """知识库问答（带来源溯源）。按请求用户可见范围隔离检索（契约② scope ∪ grant）。"""
     ids = await permission_service.visible_kb_ids(db, user)
+    # 红线监督（决策⑥）：admin 全库可见=跨部门检索，每次落审计
+    if user.role_code == "admin":
+        await audit_service.audit(
+            db, actor_id=user.id, actor_role=user.role_code,
+            action="knowledge.cross_dept_search", summary=f"跨部门检索：{body.query[:60]}",
+        )
     result = await retrieval.answer(
         db, body.query, body.top_k, user_id=user.id, visible_kb_ids=ids
     )

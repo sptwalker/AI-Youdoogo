@@ -35,6 +35,12 @@ def test_mask_redacts_secrets() -> None:
     assert out == {"api_key": "***", "note": "ok", "PASSWORD": "***"}
 
 
+def test_mask_redacts_nested_secrets() -> None:
+    """嵌套 dict 里的密钥也打码（防审计 detail 泄露）。"""
+    out = audit_service._mask({"config": {"api_key": "sk-x", "host": "h"}, "n": 1})
+    assert out == {"config": {"api_key": "***", "host": "h"}, "n": 1}
+
+
 async def test_audit_inserts_row(db: AsyncSession) -> None:
     await audit_service.audit(
         db, actor_id=uuid.uuid4(), actor_role="admin", action="task.accept",

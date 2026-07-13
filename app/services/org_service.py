@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -89,7 +90,11 @@ async def create_node(
     node.path = f"{parent.path}{node.id}/"
     # F3'：部门自动种子一个讨论频道
     db.add(DiscussionChannel(name=f"{name}讨论区", department_id=node.id))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:  # 同父下重名（部分唯一索引）→ 409 而非 500
+        await db.rollback()
+        raise AppError("同级下已有同名部门", code=409, status_code=409) from exc
     await db.refresh(node)
     return node
 

@@ -21,13 +21,18 @@ _SECRET_HINT = ("secret", "password", "token", "api_key", "apikey", "access_key"
 
 
 def _mask(detail: dict[str, Any] | None) -> dict[str, Any] | None:
-    """key 含敏感子串则值打码为 ***（防密钥入审计表）。"""
+    """key 含敏感子串则值打码为 ***（防密钥入审计表）。递归处理嵌套 dict。"""
     if not detail:
         return detail
     out: dict[str, Any] = {}
     for k, v in detail.items():
         lk = k.lower()
-        out[k] = "***" if any(h in lk for h in _SECRET_HINT) else v
+        if any(h in lk for h in _SECRET_HINT):
+            out[k] = "***"
+        elif isinstance(v, dict):
+            out[k] = _mask(v)
+        else:
+            out[k] = v
     return out
 
 

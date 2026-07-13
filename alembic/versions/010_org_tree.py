@@ -96,8 +96,9 @@ def downgrade() -> None:
     op.drop_index("ix_dept_path", table_name="sys_department")
     op.drop_index("uq_dept_code", table_name="sys_department")
     op.drop_index("uq_dept_parent_name", table_name="sys_department")
-    op.execute("DELETE FROM sys_department WHERE node_type='company'")
+    # 先 drop 自引用 FK，再删根节点——否则子部门 parent_id 仍指向根，删根违反外键
     op.drop_constraint("fk_dept_supervisor", "sys_department", type_="foreignkey")
     op.drop_constraint("sys_department_parent_id_fkey", "sys_department", type_="foreignkey")
+    op.execute("DELETE FROM sys_department WHERE node_type='company'")
     for col in ("supervisor_user_id", "sort_order", "path", "level", "node_type", "parent_id"):
         op.drop_column("sys_department", col)

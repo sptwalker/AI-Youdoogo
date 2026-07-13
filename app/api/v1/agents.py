@@ -152,7 +152,7 @@ async def update_role(role_id: uuid.UUID, body: AgentRoleUpdate, db: DB, admin: 
         permission_scope=body.permission_scope,
         tools=body.tools,
     )
-    if body.prompt_template is not None:  # 红线：提示词应用留痕
+    if body.prompt_template:  # 红线：提示词应用留痕（与 service 一致，空串不算改，不污染审计）
         await audit_service.audit(
             db, actor_id=admin.id, actor_role=admin.role_code, action="agent.prompt.apply",
             summary=f"应用提示词 {role.name}", target_type="agent_role", target_id=role.id,
