@@ -25,6 +25,7 @@ export function ingestText(payload: {
   title: string
   text: string
   category?: string
+  knowledge_base_id?: string
 }): Promise<KnowledgeFile> {
   return request({ method: 'POST', url: '/knowledge/text', data: payload })
 }
@@ -32,19 +33,32 @@ export function ingestText(payload: {
 export function ingestFeishu(payload: {
   document_id: string
   category?: string
+  knowledge_base_id?: string
 }): Promise<KnowledgeFile> {
   return request({ method: 'POST', url: '/knowledge/feishu', data: payload })
 }
 
-export function uploadKnowledgeFile(file: File, category?: string): Promise<KnowledgeFile> {
+export function uploadKnowledgeFile(
+  file: File,
+  opts?: { category?: string; knowledgeBaseId?: string },
+): Promise<KnowledgeFile> {
   const form = new FormData()
   form.append('file', file)
-  if (category) form.append('category', category)
+  if (opts?.category) form.append('category', opts.category)
+  if (opts?.knowledgeBaseId) form.append('knowledge_base_id', opts.knowledgeBaseId)
   return request({ method: 'POST', url: '/knowledge/files', data: form })
 }
 
 export function deleteKnowledgeFile(id: string): Promise<null> {
   return request({ method: 'DELETE', url: `/knowledge/files/${id}` })
+}
+
+export function moveKnowledgeFile(id: string, knowledgeBaseId: string): Promise<KnowledgeFile> {
+  return request({
+    method: 'PATCH',
+    url: `/knowledge/files/${id}/move`,
+    data: { knowledge_base_id: knowledgeBaseId },
+  })
 }
 
 export function askKnowledge(query: string, topK = 5): Promise<AskResponse> {

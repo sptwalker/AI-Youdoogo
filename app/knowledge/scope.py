@@ -15,7 +15,12 @@ import uuid
 from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
+from app.models.knowledge import (
+    SCOPE_COMPANY,
+    SCOPE_DEPARTMENT,
+    SCOPE_PERSONAL,
+    KnowledgeBase,
+)
 from app.models.system import SysDepartment
 
 
@@ -91,6 +96,38 @@ async def resolve_visible_kb_ids(
     if extra_kb_ids:
         ids = list({*ids, *extra_kb_ids})
     return ids
+
+
+async def resolve_agent_visible_kb_ids(
+    db: AsyncSession,
+    *,
+    department_id: uuid.UUID | None,
+    owner_agent_id: uuid.UUID | None = None,
+) -> list[uuid.UUID]:
+    """AI 员工可见的知识库 id 集（比真人减法隔离更严）。
+
+    规则（用户确认）：公司公共库全员可查；部门专属库只本部门 AI 可查。落地为：
+      公司级库(scope=company) ∪ 本部门及祖先链的部门库 ∪ 本人 personal 库。
+    与真人 resolve_visible_kb_ids 的关键区别：**不含其他部门的库**（即便非机密）。
+    """
+    ancestors = await ancestor_dept_ids(db, department_id)
+    conds = [KnowledgeBase.scope == SCOPE_COMPANY]  # 公司级库全员可查
+    if ancestors:  # 本部门及祖先链的部门库
+        conds.append(
+            (KnowledgeBase.scope == SCOPE_DEPARTMENT)
+            & KnowledgeBase.department_id.in_(ancestors)
+        )
+    if owner_agent_id is not None:  # 本人专属知识区
+        conds.append(
+            (KnowledgeBase.scope == SCOPE_PERSONAL)
+            & (KnowledgeBase.owner_agent_id == owner_agent_id)
+        )
+    stmt = select(KnowledgeBase.id).where(
+        KnowledgeBase.is_active.is_(True),
+        KnowledgeBase.is_delete.is_(False),
+        or_(*conds),
+    )
+    return list((await db.execute(stmt)).scalars())
 
 
 def _demo() -> None:

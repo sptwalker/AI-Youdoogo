@@ -9,12 +9,12 @@ import { TOKEN_KEY } from '../api/client'
 
 const BIZ_ROUTES = [
   { path: '/knowledge', name: '知识库' },
-  { path: '/ops-board', name: '运营看板' },
+  { path: '/discussion', name: '协作空间' },
   { path: '/agents', name: '智能体' },
   { path: '/tasks', name: '任务卡' },
   { path: '/proposals', name: '提案' },
   { path: '/meetings', name: '会议会商' },
-  { path: '/discussion', name: '协作空间' },
+  { path: '/ops-board', name: '运营看板' },
 ]
 const ADMIN_ROUTES = [
   { path: '/org', name: '组织架构' },
@@ -23,7 +23,6 @@ const ADMIN_ROUTES = [
   { path: '/data-sources', name: '数据接口' },
   { path: '/system-config', name: '系统配置' },
   { path: '/audit-log', name: '系统日志' },
-  { path: '/settings', name: '系统设置' },
 ]
 
 /** 菜单二级分组：工作桌面置顶 + 业务组 + 系统管理组（仅 admin 可见）。 */

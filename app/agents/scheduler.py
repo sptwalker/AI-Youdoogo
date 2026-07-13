@@ -64,6 +64,7 @@ async def run_task(
         input_summary=f"任务卡执行：{task.title[:40]}",
         user_message=_build_message(task),
         user_id=operator_id,
+        use_knowledge=True,  # 任务执行时按 AI 员工部门范围检索知识库注入
     )
 
     # executing → reported，产出写回

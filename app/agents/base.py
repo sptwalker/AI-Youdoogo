@@ -58,6 +58,33 @@ def _as_text(msg: AIMessage) -> str:
     return content if isinstance(content, str) else str(content)
 
 
+async def _inject_knowledge(db: AsyncSession, role: AgentRole, user_message: str) -> str:
+    """按 AI 员工的部门可见范围检索知识库，把相关资料拼进消息前作【参考资料】。
+
+    检索/embedding 任何失败都不阻断任务：记 warning、返回原消息。
+    """
+    try:
+        from app.knowledge import retrieval
+        from app.knowledge.scope import resolve_agent_visible_kb_ids
+
+        kb_ids = await resolve_agent_visible_kb_ids(
+            db, department_id=role.department_id, owner_agent_id=role.id
+        )
+        hits = await retrieval.search(db, user_message, top_k=5, visible_kb_ids=kb_ids)
+        if not hits:
+            return user_message
+        materials = "\n\n".join(
+            f"[{i + 1}] {h.chunk_text}（来源：{h.file_name}）" for i, h in enumerate(hits)
+        )
+        return (
+            f"【参考资料】（来自你部门范围内的知识库，回答时可引用并标注来源）\n{materials}\n\n"
+            f"【任务】\n{user_message}"
+        )
+    except Exception:  # noqa: BLE001 - 知识检索故障不阻断 AI 任务
+        logger.warning("知识库检索注入失败，改为无资料执行 role=%s", role.name, exc_info=True)
+        return user_message
+
+
 async def run_agent(
     db: AsyncSession,
     role: AgentRole,
@@ -66,11 +93,15 @@ async def run_agent(
     input_summary: str,
     user_message: str,
     user_id: uuid.UUID | None = None,
+    use_knowledge: bool = False,
 ) -> AgentTaskRecord:
     """执行一次智能体任务并落一条留痕记录。
 
     LLM 调用失败（含无可用密钥）转为 status=failed 的记录返回，不向上抛，
     保证「每次AI操作都有痕迹」且调用方拿到可展示的失败原因。
+
+    use_knowledge=True 时，先按该 AI 员工的部门可见范围检索知识库，把相关资料注入
+    提示词（开卷作答）；检索失败不阻断执行。AI 只能检索自己部门范围内的知识。
     """
     llm_role = _LLM_ROLE_BY_TIER.get(role.model_role, "default")
     # 提示词分层前缀先取（配置层故障不应连累 AI 执行，回退内置红线默认）
@@ -81,6 +112,10 @@ async def run_agent(
     except Exception:  # noqa: BLE001 - sys_config 不可用时用内置默认，不阻断 AI
         logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
         global_prompt = _DEFAULT_GLOBAL_PROMPT
+    # AI 员工按自身部门范围检索知识库并注入（检索故障不阻断任务）
+    effective_message = user_message
+    if use_knowledge:
+        effective_message = await _inject_knowledge(db, role, user_message)
     t0 = time.monotonic()
     output: str | None = None
     model_used: str | None = None
@@ -92,7 +127,7 @@ async def run_agent(
         # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
         system_content = f"{global_prompt}\n\n{role.prompt_template}"
         reply = await llm.ainvoke(
-            [SystemMessage(content=system_content), HumanMessage(content=user_message)]
+            [SystemMessage(content=system_content), HumanMessage(content=effective_message)]
         )
         output = _as_text(reply)
         # 实际命中模型（经降级链后）优先取响应元数据，缺失则记档位

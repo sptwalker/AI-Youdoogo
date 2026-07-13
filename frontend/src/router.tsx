@@ -15,7 +15,6 @@ import Meetings from './pages/Meetings'
 import OpsBoard from './pages/OpsBoard'
 import OrgAdmin from './pages/OrgAdmin'
 import Proposals from './pages/Proposals'
-import Settings from './pages/Settings'
 import SystemConfig from './pages/SystemConfig'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
@@ -49,7 +48,6 @@ export const router = createBrowserRouter([
       { path: 'data-sources', element: <DataSources /> },
       { path: 'system-config', element: <SystemConfig /> },
       { path: 'audit-log', element: <AuditLog /> },
-      { path: 'settings', element: <Settings /> },
     ],
   },
 ])

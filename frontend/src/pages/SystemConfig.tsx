@@ -7,9 +7,10 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Card, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Popconfirm, Space, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
 import { listConfigs, testConnectivity, updateConfig, type ConnResult, type SysConfig } from '../api/admin'
+import { initTemplate } from '../api/org'
 
 /** 按 value_type 把编辑框文本还原为对应 JSON 值。 */
 function coerce(valueType: string, raw: string): unknown {
@@ -74,6 +75,24 @@ export default function SystemConfig() {
   ]
   return (
     <PageContainer title="系统配置" subTitle="非密配置改后即时生效；AI 密钥/飞书 secret 仍走 .env 不在此改">
+      <Card title="组织骨架初始化" size="small" style={{ marginBottom: 16 }}>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="按公司模板初始化/补齐组织骨架（公司根 + 部门 + 顾问/总监助理）。幂等可重跑：更新已有、补齐缺失，不重复创建。"
+          />
+          <Popconfirm
+            title="确认按模板初始化/补齐公司骨架？"
+            onConfirm={async () => {
+              const r = await initTemplate()
+              message.success(`已初始化：${r.departments} 部门 / ${r.execs} 顾问 / ${r.directors} 总监助理`)
+            }}
+          >
+            <Button type="primary">一键初始化 / 补齐公司骨架</Button>
+          </Popconfirm>
+        </Space>
+      </Card>
       <Card
         title="连通性测试"
         size="small"

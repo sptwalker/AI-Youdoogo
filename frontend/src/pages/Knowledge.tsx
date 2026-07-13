@@ -2,24 +2,27 @@
 import {
   ModalForm,
   PageContainer,
+  ProFormSelect,
   ProFormText,
   ProFormTextArea,
   ProTable,
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Card, Input, List, Popconfirm, Space, Spin, Tag, Typography, Upload, message } from 'antd'
-import { useRef, useState } from 'react'
+import { Button, Card, Input, List, Popconfirm, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
+import { useEffect, useRef, useState } from 'react'
 import {
   askKnowledge,
   deleteKnowledgeFile,
   ingestFeishu,
   ingestText,
   listKnowledgeFiles,
+  moveKnowledgeFile,
   uploadKnowledgeFile,
   type AskResponse,
   type KnowledgeFile,
 } from '../api/knowledge'
+import { listKnowledgeBases, type KnowledgeBase } from '../api/knowledgeBases'
 
 const STATUS_TAG: Record<KnowledgeFile['status'], { color: string; text: string }> = {
   uploaded: { color: 'default', text: '待处理' },
@@ -33,6 +36,16 @@ export default function Knowledge() {
   const [query, setQuery] = useState('')
   const [asking, setAsking] = useState(false)
   const [answer, setAnswer] = useState<AskResponse | null>(null)
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([])
+  const [targetKb, setTargetKb] = useState<string | undefined>()
+
+  useEffect(() => {
+    void listKnowledgeBases().then((list) => {
+      setKbs(list)
+      setTargetKb(list.find((k) => k.is_default)?.id ?? list[0]?.id)
+    })
+  }, [])
+  const kbOptions = kbs.map((k) => ({ value: k.id, label: k.is_default ? `${k.name}（默认）` : k.name }))
 
   const ask = async () => {
     if (!query.trim()) return
@@ -59,6 +72,20 @@ export default function Knowledge() {
       title: '操作',
       valueType: 'option',
       render: (_, r) => [
+        <ModalForm<{ knowledge_base_id: string }>
+          key="move"
+          title={`移动《${r.file_name}》到其他知识库`}
+          trigger={<a>移库</a>}
+          modalProps={{ destroyOnHidden: true }}
+          onFinish={async (v) => {
+            await moveKnowledgeFile(r.id, v.knowledge_base_id)
+            message.success('已移库')
+            actionRef.current?.reload()
+            return true
+          }}
+        >
+          <ProFormSelect name="knowledge_base_id" label="目标知识库" options={kbOptions} rules={[{ required: true }]} />
+        </ModalForm>,
         <Popconfirm
           key="del"
           title="确认删除该文档及其向量？"
@@ -68,7 +95,7 @@ export default function Knowledge() {
             actionRef.current?.reload()
           }}
         >
-          <a>删除</a>
+          <a style={{ color: '#cf1322' }}>删除</a>
         </Popconfirm>,
       ],
     },
@@ -117,12 +144,20 @@ export default function Knowledge() {
         columns={columns}
         request={async () => ({ data: await listKnowledgeFiles(), success: true })}
         toolBarRender={() => [
+          <Select
+            key="kb"
+            placeholder="目标知识库"
+            style={{ width: 200 }}
+            value={targetKb}
+            onChange={setTargetKb}
+            options={kbOptions}
+          />,
           <Upload
             key="upload"
             accept=".txt,.md,.markdown,.docx,.pdf"
             showUploadList={false}
             beforeUpload={(file) => {
-              uploadKnowledgeFile(file)
+              uploadKnowledgeFile(file, { knowledgeBaseId: targetKb })
                 .then(() => {
                   message.success('已上传并入库')
                   actionRef.current?.reload()
@@ -141,7 +176,7 @@ export default function Knowledge() {
             trigger={<Button>粘贴入库</Button>}
             modalProps={{ destroyOnHidden: true }}
             onFinish={async (v) => {
-              await ingestText(v)
+              await ingestText({ ...v, knowledge_base_id: targetKb })
               message.success('已入库')
               actionRef.current?.reload()
               return true
@@ -157,7 +192,7 @@ export default function Knowledge() {
             trigger={<Button>飞书文档</Button>}
             modalProps={{ destroyOnHidden: true }}
             onFinish={async (v) => {
-              await ingestFeishu(v)
+              await ingestFeishu({ ...v, knowledge_base_id: targetKb })
               message.success('已入库')
               actionRef.current?.reload()
               return true

@@ -7,6 +7,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +113,19 @@ async def delete_file(file_id: uuid.UUID, db: DB, _: Manager) -> dict:
     """删除文档（软删文件 + 回收其向量）。"""
     await ingest.delete_file(db, file_id)
     return ok()
+
+
+class MoveFileRequest(BaseModel):
+    """把文档移到另一个知识库。"""
+
+    knowledge_base_id: uuid.UUID
+
+
+@router.patch("/files/{file_id}/move")
+async def move_file(file_id: uuid.UUID, body: MoveFileRequest, db: DB, _: Manager) -> dict:
+    """把文档移到另一个知识库（改归属库）。"""
+    kf = await ingest.move_file(db, file_id, body.knowledge_base_id)
+    return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
 
 @router.post("/ask")

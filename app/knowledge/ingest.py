@@ -17,7 +17,7 @@ from app.knowledge import storage
 from app.knowledge.chunk import chunk_text
 from app.knowledge.embedding import embed_texts
 from app.knowledge.extract import extract_text
-from app.models.knowledge import KnowledgeFile, KnowledgeVector
+from app.models.knowledge import KnowledgeBase, KnowledgeFile, KnowledgeVector
 
 logger = logging.getLogger(__name__)
 
@@ -140,3 +140,19 @@ async def delete_file(db: AsyncSession, file_id: uuid.UUID) -> None:
     await db.execute(delete(KnowledgeVector).where(KnowledgeVector.file_id == file_id))
     file.is_delete = True
     await db.commit()
+
+
+async def move_file(
+    db: AsyncSession, file_id: uuid.UUID, knowledge_base_id: uuid.UUID
+) -> KnowledgeFile:
+    """把文档移到另一个知识库（改归属库）。向量按 file_id 关联，无需动。"""
+    file = await db.get(KnowledgeFile, file_id)
+    if file is None or file.is_delete:
+        raise AppError("文档不存在", code=404, status_code=404)
+    kb = await db.get(KnowledgeBase, knowledge_base_id)
+    if kb is None or kb.is_delete:
+        raise AppError("目标知识库不存在", code=404, status_code=404)
+    file.knowledge_base_id = knowledge_base_id
+    await db.commit()
+    await db.refresh(file)
+    return file
