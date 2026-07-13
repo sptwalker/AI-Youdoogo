@@ -54,7 +54,8 @@ export default function AppLayout() {
   return (
     <ProLayout
       title="创想悦动AI决策大脑"
-      layout="mix"
+      layout="side"
+      menu={{ defaultOpenAll: true }}
       route={buildMenu(me?.role_code === 'admin')}
       location={{ pathname: location.pathname }}
       menuItemRender={(item, dom) => (
