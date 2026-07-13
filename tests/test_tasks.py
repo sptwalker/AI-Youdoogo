@@ -92,3 +92,12 @@ async def test_decompose_creates_children(db: tuple[AsyncSession, uuid.UUID]) ->
     assert all(c.parent_id == parent.id for c in children)
     subtasks = await task_service.list_tasks(session, parent_id=parent.id)
     assert len(subtasks) == 2
+
+
+async def test_list_limit_caps_rows(db: tuple[AsyncSession, uuid.UUID]) -> None:
+    """列表默认上限防全量返回（R2 防 OOM）。"""
+    session, uid = db
+    for i in range(5):
+        await task_service.create_task(session, title=f"T{i}", task_type="x", creator_id=uid)
+    assert len(await task_service.list_tasks(session, limit=3)) == 3
+    assert len(await task_service.list_tasks(session)) == 5  # 默认 100 ≥ 全部

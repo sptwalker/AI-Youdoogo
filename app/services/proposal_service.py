@@ -169,11 +169,13 @@ async def convert_to_task(
     return task
 
 
-async def list_proposals(db: AsyncSession, *, status: str | None = None) -> list[ProposalCard]:
+async def list_proposals(
+    db: AsyncSession, *, status: str | None = None, limit: int = 100
+) -> list[ProposalCard]:
     stmt = select(ProposalCard).where(ProposalCard.is_delete.is_(False))
     if status:
         stmt = stmt.where(ProposalCard.status == status)
-    stmt = stmt.order_by(ProposalCard.create_time.desc())
+    stmt = stmt.order_by(ProposalCard.create_time.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars())
 
 

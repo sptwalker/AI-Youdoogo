@@ -344,8 +344,12 @@ async def list_resolutions(db: AsyncSession, meeting_id: uuid.UUID) -> list[Meet
     return list((await db.execute(stmt)).scalars())
 
 
-async def list_meetings(db: AsyncSession, *, status: str | None = None) -> list[MeetingInfo]:
+async def list_meetings(
+    db: AsyncSession, *, status: str | None = None, limit: int = 100
+) -> list[MeetingInfo]:
     stmt = select(MeetingInfo).where(MeetingInfo.is_delete.is_(False))
     if status:
         stmt = stmt.where(MeetingInfo.status == status)
-    return list((await db.execute(stmt.order_by(MeetingInfo.create_time.desc()))).scalars())
+    return list(
+        (await db.execute(stmt.order_by(MeetingInfo.create_time.desc()).limit(limit))).scalars()
+    )

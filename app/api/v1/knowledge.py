@@ -6,7 +6,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,12 +69,17 @@ async def ingest_feishu(body: FeishuIngestRequest, db: DB, manager: Manager) -> 
 
 
 @router.get("/files")
-async def list_files(db: DB, _: CurrentUser) -> dict:
-    """文档列表（未删除，按上传时间倒序）。"""
+async def list_files(
+    db: DB,
+    _: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict:
+    """文档列表（未删除，按上传时间倒序，默认最多 100 条）。"""
     stmt = (
         select(KnowledgeFile)
         .where(KnowledgeFile.is_delete.is_(False))
         .order_by(KnowledgeFile.create_time.desc())
+        .limit(limit)
     )
     files = list((await db.execute(stmt)).scalars())
     return ok([FileOut.model_validate(f).model_dump(mode="json") for f in files])

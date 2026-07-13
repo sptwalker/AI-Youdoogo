@@ -48,10 +48,13 @@ async def create_proposal(body: ProposalCreate, db: DB, user: CurrentUser) -> di
 
 @router.get("")
 async def list_proposals(
-    db: DB, _: CurrentUser, status: Annotated[str | None, Query()] = None
+    db: DB,
+    _: CurrentUser,
+    status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """提案列表（可按状态过滤）。"""
-    items = await proposal_service.list_proposals(db, status=status)
+    """提案列表（可按状态过滤，默认最多 100 条）。"""
+    items = await proposal_service.list_proposals(db, status=status, limit=limit)
     return ok([ProposalOut.model_validate(p).model_dump(mode="json") for p in items])
 
 

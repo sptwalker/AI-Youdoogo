@@ -49,10 +49,13 @@ async def create_meeting(body: MeetingCreate, db: DB, user: CurrentUser) -> dict
 
 @router.get("")
 async def list_meetings(
-    db: DB, _: CurrentUser, status: Annotated[str | None, Query()] = None
+    db: DB,
+    _: CurrentUser,
+    status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """会议列表。"""
-    ms = await meeting_service.list_meetings(db, status=status)
+    """会议列表（默认最多 100 条）。"""
+    ms = await meeting_service.list_meetings(db, status=status, limit=limit)
     return ok([MeetingOut.model_validate(m).model_dump(mode="json") for m in ms])
 
 

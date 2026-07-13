@@ -129,15 +129,19 @@ async def transition(
 
 
 async def list_tasks(
-    db: AsyncSession, *, status: str | None = None, parent_id: uuid.UUID | None = None
+    db: AsyncSession,
+    *,
+    status: str | None = None,
+    parent_id: uuid.UUID | None = None,
+    limit: int = 100,
 ) -> list[TaskCard]:
-    """列出任务卡（可按状态 / 父任务过滤），按创建时间倒序。"""
+    """列出任务卡（可按状态 / 父任务过滤），按创建时间倒序，默认最多 100 条防全量返回。"""
     stmt = select(TaskCard).where(TaskCard.is_delete.is_(False))
     if status:
         stmt = stmt.where(TaskCard.status == status)
     if parent_id:
         stmt = stmt.where(TaskCard.parent_id == parent_id)
-    stmt = stmt.order_by(TaskCard.create_time.desc())
+    stmt = stmt.order_by(TaskCard.create_time.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars())
 
 

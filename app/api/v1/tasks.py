@@ -50,9 +50,10 @@ async def list_tasks(
     db: DB,
     _: CurrentUser,
     status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """任务列表（可按状态过滤）。"""
-    tasks = await task_service.list_tasks(db, status=status)
+    """任务列表（可按状态过滤，默认最多 100 条）。"""
+    tasks = await task_service.list_tasks(db, status=status, limit=limit)
     return ok([TaskOut.model_validate(t).model_dump(mode="json") for t in tasks])
 
 
