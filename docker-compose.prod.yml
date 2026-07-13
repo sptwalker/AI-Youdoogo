@@ -1,0 +1,84 @@
+# 生产编排：仅 Nginx 暴露 80；PG/Redis/MinIO 内网不publish。
+# 启动：docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+# （--env-file 让变量替换与 backend env_file 共用同一份 .env.production）
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "5" }  # 日志轮转，防磁盘写满
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: youdoo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: youdoo
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d youdoo"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: youdoo-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+  minio:
+    image: minio/minio
+    container_name: youdoo-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+  backend:
+    build: .
+    container_name: youdoo-backend
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: youdoo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

@@ -80,3 +80,4 @@ uv run ruff check . ; uv run mypy app     # 质量门
 | 09-模型网关设计 | 复用移植方案/角色模型映射/failover链 |
 | 10-飞书集成设计 | 已有能力/缺口backlog |
 | 11-数据接入设计 | 三类数据源接入提纲/业务API盘点 |
+| 12-生产部署与运维手册 | 阶段6：生产compose/Dockerfile/nginx/备份/监控/用户操作手册 |

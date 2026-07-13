@@ -1,0 +1,18 @@
+# 后端镜像构建上下文排除项（保持镜像精简、避免泄露）
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+docs
+frontend/node_modules
+frontend/dist
+backups
+.env
+.env.*
+!.env.production.example
+*.md
+plan
