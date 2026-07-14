@@ -6,10 +6,17 @@ import { Badge, Button, Card, Col, Empty, Input, List, Popconfirm, Row, Select, 
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import Markdown from '../components/Markdown'
-import { consultAgent, listRoles, type AgentRole, type ChatTurn } from '../api/agents'
 import { listUsers, type UserInfo } from '../api/auth'
 import { reviewCollab } from '../api/collab'
-import { getDesktop, type Desktop, type PendingItem } from '../api/desktop'
+import {
+  getDesktop,
+  getDesktopChat,
+  sendDesktopChat,
+  type AddableAgent,
+  type Desktop,
+  type DesktopMessage,
+  type PendingItem,
+} from '../api/desktop'
 import { confirmResolution } from '../api/meetings'
 import { reviewProposal } from '../api/proposals'
 import { STATUS_LABEL, transitionTask } from '../api/tasks'
@@ -27,10 +34,11 @@ export default function Dashboard() {
   const [data, setData] = useState<Desktop | null>(null)
   const [viewUser, setViewUser] = useState<string | undefined>()
   const [users, setUsers] = useState<UserInfo[]>([])
-  // AI 顾问对话
-  const [agents, setAgents] = useState<AgentRole[]>([])
-  const [chatAgent, setChatAgent] = useState<string | undefined>()
-  const [chatMsgs, setChatMsgs] = useState<ChatTurn[]>([])
+  // 我的助理对话（持久 + 圆桌多AI）
+  const [assistant, setAssistant] = useState<{ id: string; name: string } | null>(null)
+  const [addable, setAddable] = useState<AddableAgent[]>([])
+  const [addAgentIds, setAddAgentIds] = useState<string[]>([])
+  const [chatMsgs, setChatMsgs] = useState<DesktopMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
 
@@ -40,11 +48,15 @@ export default function Dashboard() {
   }, [reload])
   useEffect(() => {
     if (me?.role_code === 'admin') void listUsers().then(setUsers)
-    void listRoles().then((rs) => {
-      setAgents(rs)
-      setChatAgent((c) => c ?? rs[0]?.id)
-    })
   }, [me])
+  // 载入我的助理对话（默认助理 + 最近历史 + 可加入的AI）
+  useEffect(() => {
+    void getDesktopChat().then((c) => {
+      setAssistant(c.assistant)
+      setChatMsgs(c.messages)
+      setAddable(c.addable_agents)
+    })
+  }, [])
 
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
     await fn()
@@ -53,17 +65,15 @@ export default function Dashboard() {
   }
 
   const sendChat = async () => {
-    if (!chatAgent || !chatInput.trim() || chatSending) return
+    if (!chatInput.trim() || chatSending) return
     const q = chatInput.trim()
-    const history = chatMsgs
-    setChatMsgs([...history, { role: 'user', content: q }])
     setChatInput('')
     setChatSending(true)
     try {
-      const { reply } = await consultAgent(chatAgent, q, history)
-      setChatMsgs((m) => [...m, { role: 'ai', content: reply }])
+      const { messages } = await sendDesktopChat(q, addAgentIds)
+      setChatMsgs((m) => [...m, ...messages])
     } catch {
-      setChatMsgs((m) => [...m, { role: 'ai', content: '（AI 暂时无法回应，请稍后重试）' }])
+      // 错误已由拦截器提示
     } finally {
       setChatSending(false)
     }
@@ -164,48 +174,60 @@ export default function Dashboard() {
           </Card>
 
           {!isSupervising && (
-            <Card title="与 AI 顾问对话" style={{ marginTop: 16 }}>
-              <Select
-                placeholder="选择 AI 顾问"
-                style={{ width: '100%', marginBottom: 10 }}
-                value={chatAgent}
-                onChange={setChatAgent}
-                showSearch
-                optionFilterProp="label"
-                options={agents.map((a) => ({ value: a.id, label: a.name }))}
-              />
-              <div style={{ height: 280, overflowY: 'auto', padding: '4px 2px', background: '#fafafa', borderRadius: 6, marginBottom: 10 }}>
+            <Card
+              title={assistant ? `与${assistant.name}对话` : '我的助理'}
+              style={{ marginTop: 16 }}
+              extra={
+                <Select
+                  mode="multiple"
+                  allowClear
+                  maxCount={2}
+                  style={{ minWidth: 220 }}
+                  placeholder="+ 加入AI圆桌（最多2个）"
+                  value={addAgentIds}
+                  onChange={setAddAgentIds}
+                  optionFilterProp="label"
+                  options={addable.map((a) => ({ value: a.id, label: a.name }))}
+                />
+              }
+            >
+              <div style={{ height: 300, overflowY: 'auto', padding: '4px 2px', background: '#fafafa', borderRadius: 6, marginBottom: 10 }}>
                 {chatMsgs.length === 0 && (
-                  <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 110 }}>
-                    向 AI 顾问提问，它会结合知识库资料回答（仅供参考）
+                  <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 120 }}>
+                    向你的助理提问，它会结合知识库与过往对话回答（仅供参考）。可加入其他 AI 一起圆桌讨论。
                   </Typography.Text>
                 )}
-                {chatMsgs.map((m, i) => (
-                  <div key={i} style={{ textAlign: m.role === 'user' ? 'right' : 'left', margin: '8px 6px' }}>
-                    <span
-                      style={{
-                        display: 'inline-block', maxWidth: '82%', padding: '7px 11px', borderRadius: 8,
-                        textAlign: 'left', whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
-                        background: m.role === 'user' ? '#1677ff' : '#fff',
-                        color: m.role === 'user' ? '#fff' : undefined,
-                        border: m.role === 'ai' ? '1px solid #eee' : undefined,
-                      }}
-                    >
-                      {m.role === 'ai' ? <Markdown>{m.content}</Markdown> : m.content}
-                    </span>
-                  </div>
-                ))}
+                {chatMsgs.map((m) => {
+                  const mine = m.speaker_type === 'user'
+                  return (
+                    <div key={m.id} style={{ textAlign: mine ? 'right' : 'left', margin: '10px 6px' }}>
+                      {!mine && (
+                        <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>{m.speaker_name}</div>
+                      )}
+                      <span
+                        style={{
+                          display: 'inline-block', maxWidth: '82%', padding: '7px 11px', borderRadius: 8,
+                          textAlign: 'left', whiteSpace: mine ? 'pre-wrap' : 'normal',
+                          background: mine ? '#1677ff' : '#fff',
+                          color: mine ? '#fff' : undefined,
+                          border: mine ? undefined : '1px solid #eee',
+                        }}
+                      >
+                        {mine ? m.content : <Markdown>{m.content}</Markdown>}
+                      </span>
+                    </div>
+                  )
+                })}
                 {chatSending && <div style={{ textAlign: 'center', margin: 8 }}><Spin size="small" /></div>}
               </div>
               <Space.Compact style={{ width: '100%' }}>
                 <Input
-                  placeholder={chatAgent ? '向 AI 顾问提问，回车发送' : '请先选择 AI 顾问'}
+                  placeholder="向你的助理提问，回车发送"
                   value={chatInput}
-                  disabled={!chatAgent}
                   onChange={(e) => setChatInput(e.target.value)}
                   onPressEnter={sendChat}
                 />
-                <Button type="primary" loading={chatSending} disabled={!chatAgent} onClick={sendChat}>
+                <Button type="primary" loading={chatSending} onClick={sendChat}>
                   发送
                 </Button>
               </Space.Compact>

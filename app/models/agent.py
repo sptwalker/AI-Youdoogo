@@ -30,6 +30,7 @@ class AgentRole(CommonMixin, Base):
         Index("uq_agent_code", "code", unique=True, postgresql_where=_ACTIVE),
         Index("uq_agent_name", "name", unique=True, postgresql_where=_ACTIVE),
         Index("ix_agent_dept", "department_id"),
+        Index("ix_agent_owner_user", "owner_user_id"),
     )
 
     code: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 稳定种子键 exec_cpo/dir_*
@@ -42,6 +43,10 @@ class AgentRole(CommonMixin, Base):
     report_to_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("agent_role.id"), nullable=True
     )  # 汇报线 member→director→exec
+    # 非空=某真人的专属助理（不进组织树/智能体列表，只在其本人工作桌面用）
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sys_user.id"), nullable=True
+    )
     duty: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_template: Mapped[str] = mapped_column(Text)
     # 工具/额外授权提示（访问控制主职走 scope 推导 + resource_grant）

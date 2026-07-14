@@ -157,10 +157,14 @@ async def set_supervisor(
 
 
 async def list_employees(db: AsyncSession, dept_id: uuid.UUID) -> list[AgentRole]:
-    """列出某部门的智能体员工（按层级、创建时间）。"""
+    """列出某部门的智能体员工（排除真人专属助理；按层级、创建时间）。"""
     stmt = (
         select(AgentRole)
-        .where(AgentRole.department_id == dept_id, AgentRole.is_delete.is_(False))
+        .where(
+            AgentRole.department_id == dept_id,
+            AgentRole.is_delete.is_(False),
+            AgentRole.owner_user_id.is_(None),
+        )
         .order_by(AgentRole.tier, AgentRole.create_time)
     )
     return list((await db.execute(stmt)).scalars())

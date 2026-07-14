@@ -5,6 +5,7 @@ from app.models.ai_provider import AiProvider
 from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.collab import CollabAuthorization, CollabRequest
+from app.models.desktop import DesktopMessage
 from app.models.discussion import DiscussionChannel, DiscussionMessage
 from app.models.feedback import AgentFeedback
 from app.models.knowledge import DataSource, KnowledgeBase, KnowledgeFile, KnowledgeVector
@@ -32,6 +33,7 @@ __all__ = [
     "CollabAuthorization",
     "CollabRequest",
     "DataSource",
+    "DesktopMessage",
     "DiscussionChannel",
     "DiscussionMessage",
     "KnowledgeBase",

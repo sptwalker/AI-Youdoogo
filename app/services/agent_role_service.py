@@ -126,10 +126,10 @@ async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
 
 
 async def list_agent_roles(db: AsyncSession) -> list[AgentRole]:
-    """列出全部未删除的智能体角色。"""
+    """列出全部未删除的组织智能体角色（排除真人专属助理 owner_user_id）。"""
     stmt = (
         select(AgentRole)
-        .where(AgentRole.is_delete.is_(False))
+        .where(AgentRole.is_delete.is_(False), AgentRole.owner_user_id.is_(None))
         .order_by(AgentRole.create_time)
     )
     return list((await db.execute(stmt)).scalars())

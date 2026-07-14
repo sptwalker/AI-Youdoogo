@@ -31,3 +31,42 @@ export interface Desktop {
 export function getDesktop(userId?: string): Promise<Desktop> {
   return request({ method: 'GET', url: userId ? `/desktop/${userId}` : '/desktop' })
 }
+
+// ── 工作桌面对话（专属助理 + 圆桌多AI）──────────────────────────
+export interface DesktopMessage {
+  id: string
+  speaker_type: 'user' | 'ai'
+  speaker_agent_id: string | null
+  speaker_name: string
+  content: string
+  create_time: string
+}
+
+export interface AddableAgent {
+  id: string
+  name: string
+  title: string
+}
+
+export interface DesktopChat {
+  assistant: { id: string; name: string }
+  messages: DesktopMessage[]
+  addable_agents: AddableAgent[]
+}
+
+/** 我的助理对话（默认助理 + 最近N天历史 + 可加入的AI）。 */
+export function getDesktopChat(): Promise<DesktopChat> {
+  return request({ method: 'GET', url: '/desktop/chat' })
+}
+
+/** 发一条消息（可再加最多2个AI圆桌讨论），回本轮新增的所有消息。 */
+export function sendDesktopChat(
+  message: string,
+  addAgentIds: string[],
+): Promise<{ messages: DesktopMessage[] }> {
+  return request({
+    method: 'POST',
+    url: '/desktop/chat',
+    data: { message, add_agent_ids: addAgentIds },
+  })
+}
