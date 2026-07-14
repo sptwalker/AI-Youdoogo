@@ -44,6 +44,13 @@ def _api_key() -> str:
     )
 
 
+def _model() -> str:
+    """embedding 模型：sys_config 覆盖 → .env/默认（text-embedding-v3）。"""
+    from app.core import runtime_config
+
+    return str(runtime_config.effective("embedding_model", "") or get_settings().embedding_model)
+
+
 async def _embed_batch(
     client: httpx.AsyncClient, texts: list[str], api_key: str
 ) -> list[list[float]]:
@@ -51,7 +58,7 @@ async def _embed_batch(
         _endpoint(),
         headers={"Authorization": f"Bearer {api_key}"},
         json={
-            "model": get_settings().embedding_model,
+            "model": _model(),
             "input": texts,
             "dimensions": EMBED_DIM,
             "encoding_format": "float",

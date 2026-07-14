@@ -34,6 +34,16 @@ const KEY_LABEL: Record<string, string> = {
 const asText = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v))
 const label = (k: string) => KEY_LABEL[k] ?? k
 
+/** 连通性测试目标的中文名。 */
+const TARGET_LABEL: Record<string, string> = {
+  llm: 'AI 大模型', embedding: '向量模型', feishu: '飞书', thinkingdata: '数据平台',
+}
+/** 非密项留空时展示的生效默认值（提示实际用的地址/模型，避免误以为“没有配置”）。 */
+const EFFECTIVE_DEFAULT: Record<string, string> = {
+  embedding_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1（通义默认）',
+  embedding_model: 'text-embedding-v3（通义默认）',
+}
+
 function coerce(valueType: string, raw: string): unknown {
   if (valueType === 'int') return Number(raw)
   if (valueType === 'bool') return raw.trim().toLowerCase() === 'true'
@@ -118,12 +128,12 @@ export default function SystemConfig() {
       </Card>
 
       <Card title="连通性测试" size="small" style={{ marginBottom: 16 }}
-        extra={<Button size="small" loading={testing} onClick={runTest}>测试 LLM / 飞书 / 数据平台</Button>}>
+        extra={<Button size="small" loading={testing} onClick={runTest}>测试 AI / 向量 / 飞书 / 数据平台</Button>}>
         {!conn && <Typography.Text type="secondary">填好密钥后点右上角测试外部依赖连通性（不回显密钥）。</Typography.Text>}
         <Space wrap size="middle">
           {conn?.map((c) => (
             <Tag key={c.target} color={CONN[c.status].color}>
-              {c.target}：{CONN[c.status].text}
+              {TARGET_LABEL[c.target] ?? c.target}：{CONN[c.status].text}
               {c.status !== 'not_configured' && ` (${c.latency_ms}ms)`}
               {c.status === 'fail' && ` — ${c.msg}`}
             </Tag>
@@ -143,8 +153,10 @@ export default function SystemConfig() {
                     c.is_secret ? (
                       <Tag color={c.is_set ? 'success' : 'default'}>{c.is_set ? '已配置' : '未配置'}</Tag>
                     ) : (
-                      <Typography.Text style={{ whiteSpace: 'pre-wrap' }}>
-                        {asText(c.value) || '（空，回退 .env）'}
+                      <Typography.Text style={{ whiteSpace: 'pre-wrap' }} type={asText(c.value) ? undefined : 'secondary'}>
+                        {asText(c.value) || (EFFECTIVE_DEFAULT[c.key]
+                          ? `默认：${EFFECTIVE_DEFAULT[c.key]}`
+                          : '（空，回退 .env）')}
                       </Typography.Text>
                     )
                   }

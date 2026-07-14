@@ -33,6 +33,23 @@ async def _test_llm() -> dict[str, Any]:
                 "msg": str(exc)[:120]}
 
 
+async def _test_embedding() -> dict[str, Any]:
+    """向量模型连通性：真实 embed 一小段文本，回向量维度。"""
+    from app.knowledge.embedding import _api_key, embed_query
+
+    if not _api_key():
+        return {"target": "embedding", "status": "not_configured", "latency_ms": 0,
+                "msg": "未配置向量模型密钥"}
+    t0 = time.monotonic()
+    try:
+        vec = await embed_query("连通测试")
+        return {"target": "embedding", "status": "ok", "latency_ms": _elapsed(t0),
+                "msg": f"向量可达（{len(vec)} 维）"}
+    except Exception as exc:  # noqa: BLE001 - 探针需吞异常报状态
+        return {"target": "embedding", "status": "fail", "latency_ms": _elapsed(t0),
+                "msg": str(exc)[:120]}
+
+
 async def _test_feishu() -> dict[str, Any]:
     s = get_settings()
     if not s.feishu_app_id or not s.feishu_app_secret:
@@ -64,5 +81,10 @@ async def _test_thinkingdata() -> dict[str, Any]:
 
 
 async def test_all() -> list[dict[str, Any]]:
-    """依次测 LLM / 飞书 / ThinkingData 连通性。"""
-    return [await _test_llm(), await _test_feishu(), await _test_thinkingdata()]
+    """依次测 LLM / 向量模型 / 飞书 / ThinkingData 连通性。"""
+    return [
+        await _test_llm(),
+        await _test_embedding(),
+        await _test_feishu(),
+        await _test_thinkingdata(),
+    ]
