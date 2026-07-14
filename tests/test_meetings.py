@@ -1,10 +1,10 @@
 """会议会商全流程单测（假模型 + 内存 SQLite）。"""
 
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base
@@ -22,6 +22,22 @@ class _FakeLLM:
 
     async def ainvoke(self, messages: list, **kwargs: object) -> AIMessage:
         return AIMessage(content=self._text)
+
+    async def astream(self, messages: list, **kwargs: object) -> AsyncIterator[AIMessageChunk]:
+        # 逐字吐（验证 delta 逐段送达）
+        for ch in self._text:
+            yield AIMessageChunk(content=ch)
+
+
+async def _ai_speak(session: AsyncSession, meeting_id: uuid.UUID, topic: str) -> dict:
+    """drain ai_expert_speak_stream，返回 message_end 落库消息。"""
+    events = [
+        e async for e in meeting_service.ai_expert_speak_stream(session, meeting_id, topic=topic)
+    ]
+    names = [n for n, _ in events]
+    assert names[0] == "message_start" and names[-1] == "message_end"
+    assert names.count("delta") > 1  # 确实逐段流出
+    return events[-1][1]
 
 
 @pytest.fixture
@@ -57,8 +73,8 @@ async def test_full_meeting_flow(ctx, monkeypatch: pytest.MonkeyPatch) -> None:
     await meeting_service.add_discussion(
         session, m.id, speaker_id=uid, speaker_name="老板", content="我倾向上线会员体系。"
     )
-    ai_d = await meeting_service.ai_expert_speak(session, m.id, topic="是否上线会员体系")
-    assert ai_d.speaker_type == "ai" and "可行" in ai_d.content
+    ai_d = await _ai_speak(session, m.id, "是否上线会员体系")
+    assert ai_d["speaker_type"] == "ai" and "可行" in ai_d["content"]
 
     await meeting_service.cast_vote(
         session, m.id, subject="会员体系", voter_type="human", voter_id=uid, choice="approve"

@@ -194,6 +194,8 @@ def _create_raw_llm(
     # 其余全部走 OpenAI 兼容：openai 官方端点(base_url=None) / 内置国产 / 自定义端点
     from langchain_openai import ChatOpenAI
 
+    # 流式调用也带回 usage（末 chunk），否则 record_usage 的日预算护栏会记 0 token
+    kwargs.setdefault("stream_usage", True)
     if p == "openai" and not resolved_base:
         return ChatOpenAI(model=resolved_model, api_key=SecretStr(key), **kwargs)
     if not resolved_base:

@@ -38,12 +38,33 @@ export default function Discussion() {
 
   const send = async () => {
     if (!current || !text.trim()) return
+    const channelId = current.id
+    const streamId = '__streaming__'
     setSending(true)
     try {
-      await postMessage(current.id, text.trim(), mentions.slice(0, 3))
+      await postMessage(channelId, text.trim(), mentions.slice(0, 3), (event, data) => {
+        if (event === 'message_start') {
+          const d = data as unknown as { speaker_agent_id: string | null; speaker_name: string }
+          setMessages((m) => [...m, {
+            id: streamId, channel_id: channelId, speaker_type: 'ai',
+            speaker_id: d.speaker_agent_id, speaker_name: d.speaker_name, content: '',
+            mentioned_agent_ids: [], ai_source_record_id: null, ref_type: null, ref_id: null, create_time: '',
+          }])
+        } else if (event === 'delta') {
+          const t = String((data as { text?: unknown }).text ?? '')
+          setMessages((m) => m.map((x) => (x.id === streamId ? { ...x, content: x.content + t } : x)))
+        } else if (event === 'message_end') {
+          const msg = data as unknown as Message
+          // AI 落库消息替换流式气泡；真人消息（无流式气泡）直接追加
+          setMessages((m) => (m.some((x) => x.id === streamId)
+            ? m.map((x) => (x.id === streamId ? msg : x))
+            : [...m, msg]))
+        }
+      })
       setText('')
       setMentions([])
-      loadMessages(current.id)
+    } catch {
+      setMessages((m) => m.filter((x) => x.id !== streamId))
     } finally {
       setSending(false)
     }

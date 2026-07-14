@@ -63,8 +63,8 @@ def upgrade() -> None:
                 "INSERT INTO sys_config "
                 "(id, key, value, value_type, category, is_editable, is_secret, is_delete, "
                 "create_time, update_time) VALUES "
-                "(:id, :key, to_jsonb(CAST(:val AS integer)), 'int', 'feature', true, false, false, "
-                "now(), now())"
+                "(:id, :key, to_jsonb(CAST(:val AS integer)), 'int', 'feature', true, false, "
+                "false, now(), now())"
             ).bindparams(id=uuid.uuid4(), key=key, val=value)
         )
 

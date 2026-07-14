@@ -2,24 +2,26 @@
 
 - 每个真人一个专属助理（owner_user_id 的 AgentRole），懒创建，附一个 personal KB 作"记忆"。
 - 消息持久落 desktop_message；桌面展示最近 N 天；更早的由 archive_old 归档进助理 KB 后硬删。
-- 圆桌：发一句话，助理 + 被加入的 AI 按顺序多轮发言，后发言者能看到先发言者（限轮数防刷屏）。
-复用 run_agent（LLM+留痕+知识注入）/ ingest_text（归档入库）/ create_kb（personal 库）。
+- 圆桌：发一句话，助理 + 被加入的 AI 按顺序多轮流式发言，后发言者能看到先发言者（限轮数防刷屏）。
+复用 run_agent_stream（LLM流式+留痕+知识注入）/ ingest_text（归档入库）/ create_kb（personal 库）。
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent
+from app.agents.base import run_agent_stream
 from app.core.exceptions import AppError
+from app.core.sse import Event
 from app.knowledge.ingest import ingest_text
-from app.models.agent import TIER_MEMBER, AgentRole
+from app.models.agent import TIER_MEMBER, AgentRole, AgentTaskRecord
 from app.models.desktop import SPEAKER_AI, SPEAKER_USER, DesktopMessage
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.models.system import SysUser
@@ -211,10 +213,14 @@ async def _resolve_participants(
     return participants
 
 
-async def send(
+async def send_stream(
     db: AsyncSession, user: SysUser, message: str, add_agent_ids: list[uuid.UUID]
-) -> list[dict[str, Any]]:
-    """发一条消息 → 圆桌多AI依次多轮发言 → 落库并返回本轮新增的所有消息。"""
+) -> AsyncIterator[Event]:
+    """发一条消息 → 圆桌多AI依次多轮流式发言。
+
+    SSE 事件流：message_end(用户消息回显) → 每个 AI 依次
+    message_start → delta* → message_end(落库消息)。落库逻辑与非流式版一致。
+    """
     if len(set(add_agent_ids)) > _MAX_ADD:
         raise AppError(f"最多再加入 {_MAX_ADD} 个 AI")
     assistant = await get_or_create_assistant(db, user)
@@ -242,7 +248,7 @@ async def send(
     await db.commit()
     await db.refresh(user_msg)
     convo.append((user_name, message))
-    new_messages = [_msg_dict(user_msg)]
+    yield ("message_end", _msg_dict(user_msg))
 
     for _round in range(rounds):
         for agent in participants:
@@ -253,11 +259,18 @@ async def send(
                 + (f"（在座还有{others}）" if others else "")
                 + "简明发表你的看法，不要重复他人已说过的内容。"
             )
-            record = await run_agent(
+            yield ("message_start", {"speaker_agent_id": str(agent.id), "speaker_name": agent.name})
+            record: AgentTaskRecord | None = None
+            async for item in run_agent_stream(
                 db, agent, task_type="desktop_chat",
                 input_summary=f"桌面对话：{message[:40]}",
                 user_message=hint, user_id=user.id, use_knowledge=True,
-            )
+            ):
+                if isinstance(item, AgentTaskRecord):
+                    record = item
+                else:
+                    yield ("delta", {"text": item})
+            assert record is not None  # run_agent_stream 末项必为记录
             reply = record.output_content or record.error_msg or "（无回应）"
             ai_msg = DesktopMessage(
                 owner_user_id=user.id, speaker_type=SPEAKER_AI,
@@ -267,6 +280,4 @@ async def send(
             await db.commit()
             await db.refresh(ai_msg)
             convo.append((agent.name, reply))
-            new_messages.append(_msg_dict(ai_msg))
-
-    return new_messages
+            yield ("message_end", _msg_dict(ai_msg))

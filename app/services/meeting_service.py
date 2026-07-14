@@ -8,14 +8,17 @@ AI 票仅参考，真人票决定。
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import get_agent_role, run_agent
+from app.agents.base import get_agent_role, run_agent, run_agent_stream
 from app.core.exceptions import AppError
+from app.core.sse import Event
+from app.models.agent import AgentTaskRecord
 from app.models.meeting import (
     CLOSED,
     IN_PROGRESS,
@@ -26,6 +29,7 @@ from app.models.meeting import (
     MeetingVote,
 )
 from app.models.task import TaskCard
+from app.schemas.meeting import DiscussOut
 from app.services import task_service
 
 EXPERT_NAME = "会商AI专家"  # 与 alembic 007 种子行一致
@@ -101,17 +105,17 @@ async def add_discussion(
     return d
 
 
-async def ai_expert_speak(
+async def ai_expert_speak_stream(
     db: AsyncSession,
     meeting_id: uuid.UUID,
     *,
     topic: str,
     operator_id: uuid.UUID | None = None,
-) -> MeetingDiscuss:
-    """会中 AI 专家（会商AI专家）就议题发言，产出留痕并写入会议讨论。
+) -> AsyncIterator[Event]:
+    """会中 AI 专家就议题流式发言（message_start → delta* → message_end），产出留痕并写入会议讨论。
 
     Raises:
-        AppError: 会议未开始 / 未配置会商专家角色。
+        AppError: 会议未开始 / 未配置会商专家角色（经 sse_response 转 error 事件）。
     """
     m = await get_meeting(db, meeting_id)
     _require_in_progress(m)
@@ -125,13 +129,20 @@ async def ai_expert_speak(
         f"这是一场决策会议，议题：{topic}\n\n已有发言：\n{ctx}\n\n"
         f"请以会商AI专家身份发表一段简明分析意见（利弊、风险、建议），供与会真人参考。"
     )
-    record = await run_agent(
+    yield ("message_start", {"speaker_agent_id": str(role.id), "speaker_name": role.name})
+    record: AgentTaskRecord | None = None
+    async for item in run_agent_stream(
         db, role,
         task_type="meeting_discuss",
         input_summary=f"会议发言：{topic[:40]}",
         user_message=user_message,
         user_id=operator_id,
-    )
+    ):
+        if isinstance(item, AgentTaskRecord):
+            record = item
+        else:
+            yield ("delta", {"text": item})
+    assert record is not None  # run_agent_stream 末项必为记录
     d = MeetingDiscuss(
         meeting_id=meeting_id, speaker_type="ai", speaker_id=role.id,
         speaker_name=role.name, content=record.output_content or record.error_msg or "（无产出）",
@@ -139,7 +150,7 @@ async def ai_expert_speak(
     db.add(d)
     await db.commit()
     await db.refresh(d)
-    return d
+    yield ("message_end", DiscussOut.model_validate(d).model_dump(mode="json"))
 
 
 async def cast_vote(

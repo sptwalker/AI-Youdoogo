@@ -9,8 +9,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
+from typing import cast
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,26 +92,15 @@ async def _inject_knowledge(db: AsyncSession, role: AgentRole, user_message: str
         return user_message
 
 
-async def run_agent(
-    db: AsyncSession,
-    role: AgentRole,
-    *,
-    task_type: str,
-    input_summary: str,
-    user_message: str,
-    user_id: uuid.UUID | None = None,
-    use_knowledge: bool = False,
-) -> AgentTaskRecord:
-    """执行一次智能体任务并落一条留痕记录。
+async def _prepare(
+    db: AsyncSession, role: AgentRole, user_message: str, use_knowledge: bool
+) -> tuple[str, str, str]:
+    """run_agent / run_agent_stream 共用的执行前准备。
 
-    LLM 调用失败（含无可用密钥）转为 status=failed 的记录返回，不向上抛，
-    保证「每次AI操作都有痕迹」且调用方拿到可展示的失败原因。
-
-    use_knowledge=True 时，先按该 AI 员工的部门可见范围检索知识库，把相关资料注入
-    提示词（开卷作答）；检索失败不阻断执行。AI 只能检索自己部门范围内的知识。
+    返回 (llm_role, system_content, effective_message)：档位映射 → 全局红线前缀
+    （配置层故障回退内置默认）→ 可选知识注入。
     """
     llm_role = _LLM_ROLE_BY_TIER.get(role.model_role, "default")
-    # 提示词分层前缀先取（配置层故障不应连累 AI 执行，回退内置红线默认）
     try:
         global_prompt = await config_service.resolve(
             db, "agent_global_prompt", _DEFAULT_GLOBAL_PROMPT
@@ -112,33 +108,30 @@ async def run_agent(
     except Exception:  # noqa: BLE001 - sys_config 不可用时用内置默认，不阻断 AI
         logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
         global_prompt = _DEFAULT_GLOBAL_PROMPT
-    # AI 员工按自身部门范围检索知识库并注入（检索故障不阻断任务）
+    # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
+    system_content = f"{global_prompt}\n\n{role.prompt_template}"
     effective_message = user_message
     if use_knowledge:
         effective_message = await _inject_knowledge(db, role, user_message)
-    t0 = time.monotonic()
-    output: str | None = None
-    model_used: str | None = None
-    status = "success"
-    error_msg: str | None = None
-    usage: tuple[int, int, int] = (0, 0, 0)
-    try:
-        llm = get_llm_for_role(llm_role, temperature=0.3)
-        # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
-        system_content = f"{global_prompt}\n\n{role.prompt_template}"
-        reply = await llm.ainvoke(
-            [SystemMessage(content=system_content), HumanMessage(content=effective_message)]
-        )
-        output = _as_text(reply)
-        # 实际命中模型（经降级链后）优先取响应元数据，缺失则记档位
-        model_used = str(reply.response_metadata.get("model_name") or llm_role)
-        usage = extract_usage(reply)
-    except Exception as exc:  # noqa: BLE001 - 失败也要留痕，不阻断调用方
-        status = "failed"
-        error_msg = str(exc)
-        logger.exception("智能体执行失败 role=%s task=%s", role.name, task_type)
+    return llm_role, system_content, effective_message
 
-    duration_ms = int((time.monotonic() - t0) * 1000)
+
+async def _finalize(
+    db: AsyncSession,
+    *,
+    role: AgentRole,
+    llm_role: str,
+    task_type: str,
+    input_summary: str,
+    output: str | None,
+    model_used: str | None,
+    status: str,
+    error_msg: str | None,
+    usage: tuple[int, int, int],
+    duration_ms: int,
+    user_id: uuid.UUID | None,
+) -> AgentTaskRecord:
+    """落 AgentTaskRecord 留痕 + 记 usage（run_agent / run_agent_stream 共用收尾）。"""
     record = AgentTaskRecord(
         agent_role_id=role.id,
         task_type=task_type,
@@ -158,3 +151,105 @@ async def run_agent(
         duration_ms=duration_ms, status=status, task_id=record.id, user_id=user_id,
     )
     return record
+
+
+async def run_agent(
+    db: AsyncSession,
+    role: AgentRole,
+    *,
+    task_type: str,
+    input_summary: str,
+    user_message: str,
+    user_id: uuid.UUID | None = None,
+    use_knowledge: bool = False,
+) -> AgentTaskRecord:
+    """执行一次智能体任务并落一条留痕记录。
+
+    LLM 调用失败（含无可用密钥）转为 status=failed 的记录返回，不向上抛，
+    保证「每次AI操作都有痕迹」且调用方拿到可展示的失败原因。
+
+    use_knowledge=True 时，先按该 AI 员工的部门可见范围检索知识库，把相关资料注入
+    提示词（开卷作答）；检索失败不阻断执行。AI 只能检索自己部门范围内的知识。
+    """
+    llm_role, system_content, effective_message = await _prepare(
+        db, role, user_message, use_knowledge
+    )
+    t0 = time.monotonic()
+    output: str | None = None
+    model_used: str | None = None
+    status = "success"
+    error_msg: str | None = None
+    usage: tuple[int, int, int] = (0, 0, 0)
+    try:
+        llm = get_llm_for_role(llm_role, temperature=0.3)
+        reply = await llm.ainvoke(
+            [SystemMessage(content=system_content), HumanMessage(content=effective_message)]
+        )
+        output = _as_text(reply)
+        # 实际命中模型（经降级链后）优先取响应元数据，缺失则记档位
+        model_used = str(reply.response_metadata.get("model_name") or llm_role)
+        usage = extract_usage(reply)
+    except Exception as exc:  # noqa: BLE001 - 失败也要留痕，不阻断调用方
+        status = "failed"
+        error_msg = str(exc)
+        logger.exception("智能体执行失败 role=%s task=%s", role.name, task_type)
+
+    return await _finalize(
+        db, role=role, llm_role=llm_role, task_type=task_type, input_summary=input_summary,
+        output=output, model_used=model_used, status=status, error_msg=error_msg,
+        usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
+    )
+
+
+async def run_agent_stream(
+    db: AsyncSession,
+    role: AgentRole,
+    *,
+    task_type: str,
+    input_summary: str,
+    user_message: str,
+    user_id: uuid.UUID | None = None,
+    use_knowledge: bool = False,
+) -> AsyncIterator[str | AgentTaskRecord]:
+    """run_agent 的流式变体：先逐段 yield token 增量(str)，最后 yield 落库的留痕记录。
+
+    契约同 run_agent：永不 raise，失败转 status=failed 的记录（保留已流出的部分文本）。
+    首 token 前 provider failover 由 FallbackChatModel._astream 负责；首 token 后失败
+    无法安全重启（fallback.py 设计），在此收敛为 failed 记录。
+    调用方按 isinstance(item, AgentTaskRecord) 识别末项。
+    """
+    llm_role, system_content, effective_message = await _prepare(
+        db, role, user_message, use_knowledge
+    )
+    t0 = time.monotonic()
+    full: AIMessageChunk | None = None
+    model_used: str | None = None
+    status = "success"
+    error_msg: str | None = None
+    try:
+        llm = get_llm_for_role(llm_role, temperature=0.3)
+        async for chunk in llm.astream(
+            [SystemMessage(content=system_content), HumanMessage(content=effective_message)]
+        ):
+            if not isinstance(chunk, AIMessageChunk):  # 理论上只有 AIMessageChunk
+                continue
+            full = chunk if full is None else cast(AIMessageChunk, full + chunk)
+            delta = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
+            if delta:
+                yield delta
+    except Exception as exc:  # noqa: BLE001 - 失败也要留痕，不阻断调用方
+        status = "failed"
+        error_msg = str(exc)
+        logger.exception("智能体流式执行失败 role=%s task=%s", role.name, task_type)
+
+    output: str | None = None
+    usage: tuple[int, int, int] = (0, 0, 0)
+    if full is not None:
+        output = _as_text(full)
+        model_used = str(full.response_metadata.get("model_name") or llm_role)
+        usage = extract_usage(full)
+    yield await _finalize(
+        db, role=role, llm_role=llm_role, task_type=task_type, input_summary=input_summary,
+        output=output, model_used=model_used, status=status, error_msg=error_msg,
+        usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
+    )

@@ -10,14 +10,16 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent
+from app.agents.base import run_agent_stream
 from app.core.exceptions import AppError
-from app.models.agent import AgentRole
+from app.core.sse import Event
+from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.discussion import (
     SPEAKER_AI,
     SPEAKER_HUMAN,
@@ -117,7 +119,7 @@ async def list_messages(
     return [_msg_dict(m) for m in reversed(rows)]  # 再倒回正序展示/喂 AI
 
 
-async def post_message(
+async def post_message_stream(
     db: AsyncSession,
     channel_id: uuid.UUID,
     *,
@@ -125,8 +127,12 @@ async def post_message(
     speaker_name: str,
     content: str,
     mentioned_agent_ids: list[uuid.UUID],
-) -> dict[str, Any]:
-    """真人发言；@ 的 AI 顾问逐个触发一次回复（成本护栏五件套）。"""
+) -> AsyncIterator[Event]:
+    """真人发言；@ 的 AI 顾问逐个流式回复（成本护栏五件套不变）。
+
+    SSE 事件流：message_end(真人消息) → 每个被 @ 的 AI 依次
+    message_start → delta* → message_end(落库消息)。
+    """
     channel = await get_channel(db, channel_id)
     if channel.is_archived:
         raise AppError("频道已归档，不可发言")
@@ -139,6 +145,7 @@ async def post_message(
     db.add(human)
     await db.commit()
     await db.refresh(human)
+    yield ("message_end", _msg_dict(human))
 
     targets = _dedup(mentioned_agent_ids)[:MAX_FANOUT]  # 护栏 1(空则不进循环)/2/3
     # 频道近期上下文取一次（含刚发的这条），循环内复用——避免每个 @agent 重查（N+1）
@@ -146,7 +153,6 @@ async def post_message(
     if targets:
         history = await list_messages(db, channel_id, limit=_CONTEXT_N)
         ctx = "\n".join(f"{h['speaker_name']}：{h['content']}" for h in history) or ctx
-    ai_msgs: list[dict[str, Any]] = []
     for agent_id in targets:
         role = await db.get(AgentRole, agent_id)
         if role is None or role.is_delete or not role.is_active:
@@ -156,11 +162,18 @@ async def post_message(
             f"频道近期讨论：\n{ctx}\n\n"
             f"请以你的角色身份，就上文给出一段简明的参考意见/建议（仅供真人参考）。"
         )
-        record = await run_agent(
+        yield ("message_start", {"speaker_agent_id": str(role.id), "speaker_name": role.name})
+        record: AgentTaskRecord | None = None
+        async for item in run_agent_stream(
             db, role, task_type="discussion_reply",
             input_summary=f"讨论回复：{content[:40]}",
             user_message=user_message, user_id=speaker_id,
-        )
+        ):
+            if isinstance(item, AgentTaskRecord):
+                record = item
+            else:
+                yield ("delta", {"text": item})
+        assert record is not None  # run_agent_stream 末项必为记录
         ai = DiscussionMessage(
             channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=role.id,
             speaker_name=role.name,
@@ -170,9 +183,7 @@ async def post_message(
         db.add(ai)
         await db.commit()
         await db.refresh(ai)
-        ai_msgs.append(_msg_dict(ai))
-
-    return {"human": _msg_dict(human), "ai": ai_msgs}
+        yield ("message_end", _msg_dict(ai))
 
 
 async def promote_message(

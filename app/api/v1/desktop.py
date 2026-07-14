@@ -7,12 +7,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
+from app.core.sse import sse_response
 from app.models.system import SysUser
 from app.services import auth_service, desktop_chat_service, desktop_service
 
@@ -49,10 +51,11 @@ async def get_chat(db: DB, user: CurrentUser) -> dict:
 
 
 @router.post("/chat")
-async def send_chat(body: ChatSend, db: DB, user: CurrentUser) -> dict:
-    """发消息 → 助理（+最多2个被加入AI）圆桌回复 → 返回本轮新增消息。"""
-    new_messages = await desktop_chat_service.send(db, user, body.message, body.add_agent_ids)
-    return ok({"messages": new_messages})
+async def send_chat(body: ChatSend, db: DB, user: CurrentUser) -> StreamingResponse:
+    """发消息 → 助理（+最多2个被加入AI）圆桌逐字流式回复（SSE）。"""
+    return sse_response(
+        desktop_chat_service.send_stream(db, user, body.message, body.add_agent_ids)
+    )
 
 
 @router.get("/{user_id}")

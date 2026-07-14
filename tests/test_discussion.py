@@ -1,11 +1,11 @@
 """协作空间 F3' 单测：@Agent 五件套护栏 + 升格 + 部门自动建频道（假模型 + 内存 SQLite）。"""
 
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -19,8 +19,16 @@ from app.services import discussion_service, org_service
 
 
 class _FakeLLM:
-    async def ainvoke(self, messages: list, **kwargs: Any) -> AIMessage:
-        return AIMessage(content="AI 顾问参考意见。", response_metadata={"model_name": "fake"})
+    async def astream(self, messages: list, **kwargs: Any) -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(content="AI 顾问", response_metadata={"model_name": "fake"})
+        yield AIMessageChunk(content="参考意见。")
+
+
+async def _post(s: AsyncSession, channel_id: uuid.UUID, **kw: Any) -> dict[str, Any]:
+    """drain post_message_stream，还原成旧 {human, ai} 形状便于断言。"""
+    events = [e async for e in discussion_service.post_message_stream(s, channel_id, **kw)]
+    ends = [d for name, d in events if name == "message_end"]
+    return {"human": ends[0], "ai": ends[1:]}
 
 
 Ctx = tuple[AsyncSession, DiscussionChannel, list[AgentRole]]
@@ -66,7 +74,7 @@ async def _ai_count(s: AsyncSession, channel_id: uuid.UUID) -> int:
 async def test_no_mention_no_ai(ctx: Ctx) -> None:
     """护栏1：无 @ 不调 AI。"""
     s, channel, _ = ctx
-    result = await discussion_service.post_message(
+    result = await _post(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板", content="随便聊聊",
         mentioned_agent_ids=[],
     )
@@ -79,7 +87,7 @@ async def test_mention_triggers_one_each(
 ) -> None:
     """护栏2：@2 个 → 2 条 AI 回复，各一次。"""
     s, channel, agents = ctx
-    result = await discussion_service.post_message(
+    result = await _post(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板", content="看法？",
         mentioned_agent_ids=[agents[0].id, agents[1].id],
     )
@@ -92,7 +100,7 @@ async def test_dedup_same_agent(
 ) -> None:
     """护栏3：@ 同一 agent×5 去重 → 只回一次。"""
     s, channel, agents = ctx
-    result = await discussion_service.post_message(
+    result = await _post(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板", content="看法？",
         mentioned_agent_ids=[agents[0].id] * 5,
     )
@@ -104,7 +112,7 @@ async def test_fanout_capped_at_three(
 ) -> None:
     """护栏3：@5 个不同 agent → 截到 3。"""
     s, channel, agents = ctx
-    result = await discussion_service.post_message(
+    result = await _post(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板", content="看法？",
         mentioned_agent_ids=[a.id for a in agents],
     )
@@ -116,7 +124,7 @@ async def test_promote_to_proposal(
 ) -> None:
     """升格：一条消息 → 提案，消息回填 ref_type/ref_id。"""
     s, channel, _ = ctx
-    posted = await discussion_service.post_message(
+    posted = await _post(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板",
         content="建议做个新活动方案", mentioned_agent_ids=[],
     )

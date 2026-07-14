@@ -114,9 +114,24 @@ export default function Meetings() {
                   }}>发言</Button>
                   <Button type="primary" onClick={async () => {
                     if (!speech.trim()) return
-                    message.loading({ content: 'AI专家发言中…', key: 'ai' })
-                    await aiSpeak(detail.meeting.id, speech); message.success({ content: '已发言', key: 'ai' })
-                    setSpeech(''); refresh()
+                    const streamId = '__streaming__'
+                    try {
+                      await aiSpeak(detail.meeting.id, speech, (event, data) => {
+                        if (event === 'message_start') {
+                          const d = data as unknown as { speaker_name: string }
+                          setDetail((prev) => prev && ({ ...prev, discussions: [...prev.discussions, { id: streamId, speaker_type: 'ai', speaker_name: d.speaker_name, content: '', create_time: '' }] }))
+                        } else if (event === 'delta') {
+                          const t = String((data as { text?: unknown }).text ?? '')
+                          setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? { ...x, content: x.content + t } : x)) }))
+                        } else if (event === 'message_end') {
+                          const msg = data as unknown as Discuss
+                          setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? msg : x)) }))
+                        }
+                      })
+                      setSpeech('')
+                    } catch {
+                      setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.filter((x) => x.id !== streamId) }))
+                    }
                   }}>AI专家</Button>
                 </Space.Compact>
               )}

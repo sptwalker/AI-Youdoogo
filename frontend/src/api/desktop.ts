@@ -1,5 +1,5 @@
 /** 真人工作桌面 API（对应后端 app/api/v1/desktop.py）。取代 workbench。 */
-import { request } from './client'
+import { request, sseRequest, type SseHandler } from './client'
 
 export interface PendingItem {
   kind: 'task' | 'proposal' | 'resolution' | 'collab'
@@ -59,14 +59,12 @@ export function getDesktopChat(): Promise<DesktopChat> {
   return request({ method: 'GET', url: '/desktop/chat' })
 }
 
-/** 发一条消息（可再加最多2个AI圆桌讨论），回本轮新增的所有消息。 */
+/** 发一条消息（可再加最多2个AI圆桌讨论），SSE 逐字流式回调：
+ *  message_end(用户回显) → 每个 AI 依次 message_start → delta* → message_end。 */
 export function sendDesktopChat(
   message: string,
   addAgentIds: string[],
-): Promise<{ messages: DesktopMessage[] }> {
-  return request({
-    method: 'POST',
-    url: '/desktop/chat',
-    data: { message, add_agent_ids: addAgentIds },
-  })
+  onEvent: SseHandler,
+): Promise<void> {
+  return sseRequest('/desktop/chat', { message, add_agent_ids: addAgentIds }, onEvent)
 }

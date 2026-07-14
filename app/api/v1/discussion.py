@@ -8,11 +8,13 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import ok
+from app.core.sse import sse_response
 from app.models.system import SysUser
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 from app.services import discussion_service
@@ -64,14 +66,15 @@ async def list_messages(
 @router.post("/{channel_id}/messages")
 async def post_message(
     channel_id: uuid.UUID, body: MessagePost, db: DB, user: CurrentUser
-) -> dict:
-    """发言（@ 的 AI 顾问会各触发一次回复）。"""
-    result = await discussion_service.post_message(
-        db, channel_id,
-        speaker_id=user.id, speaker_name=user.real_name or user.username,
-        content=body.content, mentioned_agent_ids=body.mentioned_agent_ids,
+) -> StreamingResponse:
+    """发言（@ 的 AI 顾问逐个逐字流式回复，SSE）。"""
+    return sse_response(
+        discussion_service.post_message_stream(
+            db, channel_id,
+            speaker_id=user.id, speaker_name=user.real_name or user.username,
+            content=body.content, mentioned_agent_ids=body.mentioned_agent_ids,
+        )
     )
-    return ok(result)
 
 
 # 升格挂在 /messages/{id} 下（跨频道操作单条消息）

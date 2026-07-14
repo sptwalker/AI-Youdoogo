@@ -11,8 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.exceptions import AppError
+from app.core.sse import Event
 from app.models import Base
-from app.models.agent import AgentRole
+from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.desktop import DesktopMessage
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.models.system import SysUser
@@ -39,16 +40,28 @@ async def _user(db: AsyncSession, username: str = "alice", real_name: str = "爱
     return u
 
 
-def _fake_run_agent(calls: list[str]):
-    """记录每次 run_agent 的 user_message，返回递增回复。"""
+def _fake_run_agent_stream(calls: list[str]):
+    """记录每次 run_agent_stream 的 user_message，流式返回递增回复（末项为留痕记录）。"""
 
-    async def _run(db: AsyncSession, role: AgentRole, **kw: Any) -> SimpleNamespace:
+    async def _run(db: AsyncSession, role: AgentRole, **kw: Any):
         calls.append(kw["user_message"])
-        return SimpleNamespace(
-            output_content=f"reply{len(calls)}", error_msg=None, status="success"
+        n = len(calls)
+        yield "re"
+        yield f"ply{n}"
+        yield AgentTaskRecord(
+            id=uuid.uuid4(), agent_role_id=role.id, task_type="desktop_chat",
+            output_content=f"reply{n}", status="success",
         )
 
     return _run
+
+
+async def _send_all(
+    db: AsyncSession, user: SysUser, message: str, add_agent_ids: list[uuid.UUID]
+) -> tuple[list[dict[str, Any]], list[Event]]:
+    """drain send_stream：返回 (message_end 消息列表, 全部事件)。"""
+    events = [e async for e in svc.send_stream(db, user, message, add_agent_ids)]
+    return [d for name, d in events if name == "message_end"], events
 
 
 async def test_assistant_idempotent_and_personal_kb(db: AsyncSession) -> None:
@@ -92,13 +105,13 @@ async def test_list_agent_roles_excludes_assistant(db: AsyncSession) -> None:
 async def test_send_roundtable_order_and_context(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """圆桌：助理 + 1 个被加入AI，2 轮 → 5 条消息；后发言者能看到先发言者内容。"""
+    """圆桌：助理 + 1 个被加入AI，2 轮 → 5 条消息；后发言者能看到先发言者内容；delta 流式送达。"""
     calls: list[str] = []
-    monkeypatch.setattr(svc, "run_agent", _fake_run_agent(calls))
+    monkeypatch.setattr(svc, "run_agent_stream", _fake_run_agent_stream(calls))
     u = await _user(db)
     expert = await agent_role_service.create_agent_role(db, name="专家A", prompt_template="x")
 
-    msgs = await svc.send(db, u, "帮我分析一下", [expert.id])
+    msgs, events = await _send_all(db, u, "帮我分析一下", [expert.id])
     # 1 user + 2 参与者 × 2 轮 = 5
     assert len(msgs) == 5
     assert msgs[0]["speaker_type"] == "user"
@@ -106,6 +119,11 @@ async def test_send_roundtable_order_and_context(
     assert "专家A" in ai_names  # 被加入的AI确实发言
     # 第二个发言者的 prompt 应包含第一个发言者的回复（圆桌可见）
     assert "reply1" in calls[1]
+    # 流式协议：4 个 AI 发言 → 各 1 个 message_start + 2 个 delta
+    names = [n for n, _ in events]
+    assert names.count("message_start") == 4
+    assert names.count("delta") == 8
+    assert names[0] == "message_end"  # 用户消息回显在最前
 
 
 async def test_send_rejects_more_than_two_added(db: AsyncSession) -> None:
@@ -113,7 +131,7 @@ async def test_send_rejects_more_than_two_added(db: AsyncSession) -> None:
     u = await _user(db)
     ids = [uuid.uuid4() for _ in range(3)]
     with pytest.raises(AppError, match="最多"):
-        await svc.send(db, u, "hi", ids)
+        await _send_all(db, u, "hi", ids)
 
 
 async def _add_msg(db: AsyncSession, user_id: uuid.UUID, content: str, days_ago: int) -> None:

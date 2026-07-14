@@ -1,5 +1,5 @@
 /** 协作空间 API（对应后端 app/api/v1/discussion.py）。 */
-import { request } from './client'
+import { request, sseRequest, type SseHandler } from './client'
 
 export interface Channel {
   id: string
@@ -44,16 +44,15 @@ export function listMessages(channelId: string): Promise<Message[]> {
   return request({ method: 'GET', url: `/channels/${channelId}/messages` })
 }
 
+/** 发言，SSE 逐字流式回调：message_end(真人消息) → 每个 @AI 依次
+ *  message_start → delta* → message_end。 */
 export function postMessage(
   channelId: string,
   content: string,
   mentioned_agent_ids: string[],
-): Promise<{ human: Message; ai: Message[] }> {
-  return request({
-    method: 'POST',
-    url: `/channels/${channelId}/messages`,
-    data: { content, mentioned_agent_ids },
-  })
+  onEvent: SseHandler,
+): Promise<void> {
+  return sseRequest(`/channels/${channelId}/messages`, { content, mentioned_agent_ids }, onEvent)
 }
 
 export function promoteMessage(

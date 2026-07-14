@@ -69,11 +69,29 @@ export default function Dashboard() {
     const q = chatInput.trim()
     setChatInput('')
     setChatSending(true)
+    // 乐观上屏：用户气泡即时显示；SSE 到达后由 message_end(user) 替换
+    const tmpId = `tmp-${Date.now()}`
+    const streamId = '__streaming__'
+    setChatMsgs((m) => [...m, { id: tmpId, speaker_type: 'user', speaker_agent_id: null, speaker_name: '我', content: q, create_time: '' }])
     try {
-      const { messages } = await sendDesktopChat(q, addAgentIds)
-      setChatMsgs((m) => [...m, ...messages])
+      await sendDesktopChat(q, addAgentIds, (event, data) => {
+        if (event === 'message_start') {
+          // 开一个流式气泡（逐字追加）
+          const d = data as unknown as { speaker_agent_id: string | null; speaker_name: string }
+          setChatMsgs((m) => [...m, { id: streamId, speaker_type: 'ai', speaker_agent_id: d.speaker_agent_id, speaker_name: d.speaker_name, content: '', create_time: '' }])
+        } else if (event === 'delta') {
+          const text = String((data as { text?: unknown }).text ?? '')
+          setChatMsgs((m) => m.map((x) => (x.id === streamId ? { ...x, content: x.content + text } : x)))
+        } else if (event === 'message_end') {
+          const msg = data as unknown as DesktopMessage
+          // 用落库消息替换流式气泡（AI）或乐观气泡（用户回显）
+          setChatMsgs((m) => m.map((x) => (x.id === (msg.speaker_type === 'user' ? tmpId : streamId) ? msg : x)))
+        }
+      })
     } catch {
-      // 错误已由拦截器提示
+      // 错误已由 sseRequest 提示：清掉未完成的流式/乐观气泡并还原输入
+      setChatMsgs((m) => m.filter((x) => x.id !== streamId && x.id !== tmpId))
+      setChatInput(q)
     } finally {
       setChatSending(false)
     }
@@ -148,9 +166,14 @@ export default function Dashboard() {
       <Row gutter={16}>
         {/* 左主栏：待我处理 + AI 对话 */}
         <Col xs={24} lg={15}>
-          <Card title={<Badge count={data?.pending_count ?? 0} showZero offset={[10, 0]}>待我处理</Badge>}>
-            {data && data.pending.length === 0 && <Empty description="暂无待处理" />}
-            <List
+          <Card
+            size="small"
+            title={<Badge count={data?.pending_count ?? 0} showZero offset={[10, 0]}>待我处理</Badge>}
+            // 空态收缩到最小；有内容按量增高，最多占窗口一半后内部滚动
+            styles={{ body: { maxHeight: '50vh', overflowY: 'auto', padding: data && data.pending.length === 0 ? '8px 16px' : undefined } }}
+          >
+            {data && data.pending.length === 0 && <Typography.Text type="secondary">暂无待处理</Typography.Text>}
+            {(!data || data.pending.length > 0) && <List
               dataSource={data?.pending ?? []}
               renderItem={(p) => (
                 <List.Item actions={actions(p)}>
@@ -170,7 +193,7 @@ export default function Dashboard() {
                   />
                 </List.Item>
               )}
-            />
+            />}
           </Card>
 
           {!isSupervising && (

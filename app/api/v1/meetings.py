@@ -8,11 +8,13 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import ok
+from app.core.sse import sse_response
 from app.models.system import SysUser
 from app.schemas.meeting import (
     AiSpeakRequest,
@@ -98,12 +100,15 @@ async def add_discussion(
 
 
 @router.post("/{meeting_id}/ai-speak")
-async def ai_speak(meeting_id: uuid.UUID, body: AiSpeakRequest, db: DB, manager: Manager) -> dict:
-    """会中 AI 专家就议题发言（参考意见）。"""
-    d = await meeting_service.ai_expert_speak(
-        db, meeting_id, topic=body.topic, operator_id=manager.id
+async def ai_speak(
+    meeting_id: uuid.UUID, body: AiSpeakRequest, db: DB, manager: Manager
+) -> StreamingResponse:
+    """会中 AI 专家就议题逐字流式发言（SSE，参考意见）。"""
+    return sse_response(
+        meeting_service.ai_expert_speak_stream(
+            db, meeting_id, topic=body.topic, operator_id=manager.id
+        )
     )
-    return ok(DiscussOut.model_validate(d).model_dump(mode="json"))
 
 
 @router.post("/{meeting_id}/vote")

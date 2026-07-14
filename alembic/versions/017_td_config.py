@@ -34,7 +34,10 @@ _FIELD_MAPPING = '{"product": "product", "dau": "dau", "new_users": "new_users"}
 _SEEDS = [
     ("td_base_url", "", "string", "TD 地址，形如 http://HOST:8992；留空则回退 .env 的 TD_BASE_URL"),
     ("td_daily_metrics_sql", _DAILY_SQL, "text", "每日拉取 SQL，${stat_date} 会被替换为统计日"),
-    ("td_field_mapping", _FIELD_MAPPING, "text", "TD 结果列→本系统字段映射(JSON)：product/dau/new_users"),
+    (
+        "td_field_mapping", _FIELD_MAPPING, "text",
+        "TD 结果列→本系统字段映射(JSON)：product/dau/new_users",
+    ),
 ]
 
 
