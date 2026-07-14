@@ -4,6 +4,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { TOKEN_KEY } from './api/client'
 import AppLayout from './layouts/AppLayout'
 import Agents from './pages/Agents'
+import AiProviders from './pages/AiProviders'
 import AuditLog from './pages/AuditLog'
 import Dashboard from './pages/Dashboard'
 import DataSources from './pages/DataSources'
@@ -46,6 +47,7 @@ export const router = createBrowserRouter([
       { path: 'users', element: <Users /> },
       { path: 'knowledge-bases', element: <KnowledgeBases /> },
       { path: 'data-sources', element: <DataSources /> },
+      { path: 'ai-providers', element: <AiProviders /> },
       { path: 'system-config', element: <SystemConfig /> },
       { path: 'audit-log', element: <AuditLog /> },
     ],

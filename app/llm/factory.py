@@ -36,17 +36,9 @@ class NoAvailableProviderError(RuntimeError):
     def __init__(self, chain: Sequence[str]):
         self.chain = list(chain)
         super().__init__(
-            f"候选链 {self.chain} 上没有任何可用的 LLM provider，请在 .env 配置至少一个 API Key"
+            f"档位/候选 {self.chain} 没有任何可用的 AI 模型卡片，请先在「AI 配置」页新增卡片"
         )
 
-
-# provider → Settings 字段名。未列出的内置 provider 暂无密钥来源 → 不可用。
-_PROVIDER_KEY_FIELD: dict[str, str] = {
-    "deepseek": "deepseek_api_key",
-    "qwen": "dashscope_api_key",
-    "glm": "zhipu_api_key",
-    "anthropic": "anthropic_api_key",
-}
 
 # 各 provider 的默认模型（种子；可被 create_llm 显式 model 或自定义端点覆盖）
 PROVIDER_MODELS: dict[str, str] = {
@@ -93,32 +85,64 @@ def unregister_custom_provider(provider_id: str) -> None:
     _CUSTOM_PROVIDERS.pop(provider_id.lower().strip(), None)
 
 
+def clear_card_providers() -> None:
+    """清空所有卡片 provider（id 前缀 card_）；sync_to_factory 重建前调用，去除已删卡片残留。"""
+    for pid in [k for k in _CUSTOM_PROVIDERS if k.startswith("card_")]:
+        _CUSTOM_PROVIDERS.pop(pid, None)
+
+
 def get_custom_provider(provider_id: str) -> dict[str, str] | None:
     """查询自定义 provider 信息。"""
     return _CUSTOM_PROVIDERS.get(provider_id.lower().strip())
 
 
-def _provider_api_key(provider: str) -> str:
-    """解析某 provider 的 API Key：自定义端点注册值 → sys_config 覆盖 → .env。无则空串。"""
-    custom = _CUSTOM_PROVIDERS.get(provider)
-    if custom is not None:
-        return custom.get("api_key", "")
-    field = _PROVIDER_KEY_FIELD.get(provider)
-    if not field:
-        return ""
-    from app.core import runtime_config
+# ── 卡片状态：禁用集合 + 各档位（tier）主用/候选顺序（真源 ai_provider 表）──────────
+# 由 ai_provider_service.sync_to_factory 在启动 + 每次卡片增删改后推送到此进程内缓存，
+# 供 roles.get_llm_for_role 按档位取「主用 + 同档 active」候选。
+_INACTIVE_PROVIDERS: set[str] = set()
+_PRIMARY_PROVIDER_BY_TIER: dict[str, str] = {}
+_TIER_PROVIDER_IDS: dict[str, list[str]] = {}  # tier → active provider_ids（主用置顶）
 
-    return str(runtime_config.effective(field, "") or "")
+
+def set_provider_status(
+    inactive_ids: Sequence[str],
+    primary_by_tier: dict[str, str],
+    tier_provider_ids: dict[str, list[str]],
+) -> None:
+    """刷新禁用集合 + 各档位主用 + 各档位候选顺序（sync_to_factory 调用）。"""
+    _INACTIVE_PROVIDERS.clear()
+    _INACTIVE_PROVIDERS.update((p or "").lower().strip() for p in inactive_ids if p)
+    _PRIMARY_PROVIDER_BY_TIER.clear()
+    _PRIMARY_PROVIDER_BY_TIER.update(
+        {t: (p or "").lower().strip() for t, p in primary_by_tier.items() if p}
+    )
+    _TIER_PROVIDER_IDS.clear()
+    _TIER_PROVIDER_IDS.update(
+        {t: [(p or "").lower().strip() for p in ids] for t, ids in tier_provider_ids.items()}
+    )
+    logger.info(
+        "卡片状态已刷新: 禁用=%s 主用=%s", sorted(_INACTIVE_PROVIDERS), _PRIMARY_PROVIDER_BY_TIER
+    )
+
+
+def providers_for_tier(tier: str) -> list[str]:
+    """某档位的候选 provider_id 顺序（主用置顶，其余 active）。无卡片返回空。"""
+    return list(_TIER_PROVIDER_IDS.get((tier or "").strip(), []))
+
+
+def _provider_api_key(provider: str) -> str:
+    """解析某 provider 的 API Key：仅从卡片注册表取（无 .env 内置 provider 兜底）。"""
+    custom = _CUSTOM_PROVIDERS.get(provider)
+    return custom.get("api_key", "") if custom is not None else ""
 
 
 def provider_available(provider: str) -> bool:
-    """该 provider 当前是否可用（有密钥且依赖已安装）。
+    """该 provider 当前是否可用（卡片已注册、未禁用、依赖已装）。
 
-    自定义端点注册即视为可用（本地端点可无 Key）；anthropic 额外要求
-    langchain-anthropic 已安装。
+    卡片 provider 注册即视为有 Key（Key 随卡片存入）；被管理员禁用(inactive)则不可用。
     """
     p = (provider or "").lower().strip()
-    if not p:
+    if not p or p in _INACTIVE_PROVIDERS:
         return False
     if p in _CUSTOM_PROVIDERS:
         return True

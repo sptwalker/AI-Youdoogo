@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app.api.v1.admin import router as admin_router
 from app.api.v1.agents import router as agents_router
+from app.api.v1.ai_providers import router as ai_providers_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collab import router as collab_router
 from app.api.v1.data_sources import router as data_sources_router
@@ -38,17 +39,18 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """启动时载入 sys_config 覆盖层（AI/飞书/外部数据等配置覆盖 .env）。"""
+    """启动时载入 sys_config 覆盖层 + 把 AI 卡片推进 LLM 网关（无卡片时 AI 不可用）。"""
     from app.core import runtime_config
     from app.core.database import async_session_factory
-    from app.services import config_service
+    from app.services import ai_provider_service, config_service
 
     try:
         async with async_session_factory() as db:
             runtime_config.load(await config_service.all_values(db))
-        logger.info("配置覆盖层已载入")
+            await ai_provider_service.sync_to_factory(db)
+        logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - 载入失败退回 .env，不阻断启动
-        logger.exception("载入配置覆盖层失败，回退 .env")
+        logger.exception("载入配置覆盖层/AI 卡片失败")
     yield
 
 
@@ -71,6 +73,7 @@ app.include_router(discussion_message_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(grants_router, prefix="/api/v1")
 app.include_router(collab_router, prefix="/api/v1")
+app.include_router(ai_providers_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")

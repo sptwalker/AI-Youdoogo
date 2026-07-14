@@ -9,6 +9,7 @@ import {
 } from '@ant-design/pro-components'
 import { Alert, Button, Card, List, Popconfirm, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { listConfigs, testConnectivity, updateConfig, type ConnResult, type SysConfig } from '../api/admin'
 import { initTemplate } from '../api/org'
 
@@ -101,6 +102,19 @@ export default function SystemConfig() {
             <Button type="primary">一键初始化 / 补齐公司骨架</Button>
           </Popconfirm>
         </Space>
+      </Card>
+
+      <Card title="AI 大模型" size="small" style={{ marginBottom: 16 }}>
+        <Alert
+          type="info" showIcon
+          message="AI 大模型改为卡片化配置"
+          description={
+            <span>
+              新增/管理 AI 模型（DeepSeek 等）请到 <Link to="/ai-providers">「AI 配置」</Link> 页
+              按卡片填写（名称/档位/地址/Key/模型），测连通后设主用。必须建卡片，AI 才可用。
+            </span>
+          }
+        />
       </Card>
 
       <Card title="连通性测试" size="small" style={{ marginBottom: 16 }}

@@ -15,7 +15,7 @@
 | 校验/配置 | Pydantic v2 + pydantic-settings（`app/core/config.py` 唯一配置入口） |
 | 数据库 | PostgreSQL 16（`timescale/timescaledb-ha:pg16` 镜像，内置 TimescaleDB + pgvector） |
 | 缓存/文件 | Redis / MinIO |
-| 大模型 | **DeepSeek 主力**（chat 日常 / reasoner 会商推理），降级链 → Qwen → GLM；网关在 `app/llm/`（langchain-core + langchain-openai） |
+| 大模型 | **卡片化多 Provider**（`ai_provider` 表 + 「AI 配置」页动态管理）：卡片分 daily/reasoning 档，对接 `agent_role.model_role`；档内 `is_primary` 主用 + 同档 active 作 failover；**必须建卡片，无卡片 AI 不可用（不回退 .env）**。网关在 `app/llm/`（langchain-core + langchain-openai） |
 | 智能体编排 | **自研状态机**（`app/services/task_flow.py` + `app/agents/scheduler.py`）；LangGraph 1.x 暂缓——2026-07-12 阶段3决策：先自研轻量状态机跑通任务卡闭环，确有编排复杂度再引入并做 POC |
 | 飞书 | 自研异步 httpx 客户端 `app/integrations/feishu/`（不用 lark-oapi） |
 | 前端 | React + Ant Design Pro（**阶段2才初始化**） |
@@ -44,7 +44,7 @@ app/
 1. **文档优先**：无 docs 设计文档不开发业务代码；文档过时先改文档
 2. **单模块增量**：一次只开发一个独立模块，先确认思路再编码，完成验收再继续
 3. **全类型注解 + docstring**：mypy 无类型缺失；核心逻辑注释说明设计思路与边界
-4. **密钥禁止硬编码**：可存 `.env`（`app/core/config.py`）或 `sys_config`（系统配置页 UI 填写，`is_secret=true`）；app 经 `app/core/runtime_config.py` 覆盖层读取（sys_config 覆盖 .env）；list 接口对密钥脱敏、审计 detail 打码
+4. **密钥禁止硬编码**：可存 `.env`（`app/core/config.py`）或 `sys_config`（系统配置页 UI 填写，`is_secret=true`）；app 经 `app/core/runtime_config.py` 覆盖层读取（sys_config 覆盖 .env）；list 接口对密钥脱敏、审计 detail 打码。**LLM 模型密钥走 `ai_provider` 卡片（「AI 配置」页填，list 只回 hint 末4位）**；embedding/飞书/TD 仍走 sys_config/.env
 5. **接口双校验**：所有接口必须有权限校验 + 参数校验；统一返回 `{code, msg, data}`
 6. **人工兜底**：权限、数据修改、核心决策代码必须人工审核；所有AI输出可编辑/驳回/终止
 7. **提交前**：`uv run ruff check .` + `uv run mypy app` + `uv run pytest` 全绿

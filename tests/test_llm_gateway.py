@@ -1,6 +1,8 @@
-"""多模型网关单测：假模型 failover + 角色注册表（不发真实请求、不消耗额度）。"""
+"""多模型网关单测：假模型 failover + 角色按档取卡片（不发真实请求、不消耗额度）。
 
-from types import SimpleNamespace
+卡片化后：provider 候选来自进程内卡片注册表（factory），不再读 .env 密钥。
+"""
+
 from typing import Any
 
 import pytest
@@ -9,11 +11,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-# factory 现经 runtime_config 取密钥；测试 patch 其读取的 get_settings。
-from app.core import runtime_config as rc_mod
 from app.llm import (
     FallbackChatModel,
     NoAvailableProviderError,
+    factory,
     get_llm_for_role,
     health,
     provider_available,
@@ -59,20 +60,30 @@ class _EchoModel(BaseChatModel):
 
 
 @pytest.fixture(autouse=True)
-def _reset_health() -> None:
-    """每个用例前清空熔断状态，避免用例间串扰。"""
+def _reset_gateway() -> None:
+    """每个用例前清空熔断 + 卡片注册/状态，避免用例间串扰。"""
     health.reset()
+    factory.clear_card_providers()
+    factory.set_provider_status([], {}, {})
 
 
-def _fake_settings(**keys: str) -> SimpleNamespace:
-    base = {
-        "deepseek_api_key": "",
-        "dashscope_api_key": "",
-        "zhipu_api_key": "",
-        "anthropic_api_key": "",
-    }
-    base.update(keys)
-    return SimpleNamespace(**base)
+def _register(tier_cards: dict[str, list[tuple[str, str, bool]]]) -> None:
+    """注册卡片到 factory：{tier: [(provider_id, model, is_primary), ...]}（主用置顶）。"""
+    factory.clear_card_providers()
+    tier_ids: dict[str, list[str]] = {}
+    primary: dict[str, str] = {}
+    for tier, cards in tier_cards.items():
+        for pid, model, is_primary in cards:
+            factory.register_custom_provider(
+                pid, "https://api.x.com", api_key="sk", default_model=model
+            )
+            tier_ids.setdefault(tier, [])
+            if is_primary:
+                tier_ids[tier].insert(0, pid)
+                primary[tier] = pid
+            else:
+                tier_ids[tier].append(pid)
+    factory.set_provider_status([], primary, tier_ids)
 
 
 def test_fallback_switches_to_second_candidate() -> None:
@@ -83,7 +94,6 @@ def test_fallback_switches_to_second_candidate() -> None:
     )
     result = fb.invoke("你好")
     assert result.content == echo.text
-    # 失败的 provider 应进入熔断冷却期
     assert health.is_open("deepseek")
     assert not health.is_open("qwen")
 
@@ -95,44 +105,35 @@ def test_fallback_all_failed_raises() -> None:
         fb.invoke("你好")
 
 
-def test_get_llm_for_role_builds_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """有 DeepSeek 密钥时 ops_director 能构造出 FallbackChatModel，主候选为 deepseek-chat。"""
-    monkeypatch.setattr(
-        rc_mod, "get_settings",
-        lambda: _fake_settings(deepseek_api_key="sk-test", dashscope_api_key="sk-test2"),
-    )
-    llm = get_llm_for_role("ops_director")
+def test_get_llm_for_role_builds_from_tier_cards() -> None:
+    """daily 档有卡片时 default 角色能构造 FallbackChatModel，主候选=主用卡片。"""
+    _register({"daily": [("card_a", "m1", True), ("card_b", "m2", False)]})
+    llm = get_llm_for_role("default")
     assert isinstance(llm, FallbackChatModel)
-    assert llm.candidates[0][1:] == ("deepseek", "deepseek-chat")
-    # 降级链中已配密钥的 qwen 应在候选内，无密钥的 glm 被跳过
-    providers = [c[1] for c in llm.candidates]
-    assert providers == ["deepseek", "qwen"]
+    assert llm.candidates[0][1:] == ("card_a", "m1")
+    assert [c[1] for c in llm.candidates] == ["card_a", "card_b"]
 
 
-def test_get_llm_for_role_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """整条链均无密钥 → 抛 NoAvailableProviderError（约定：抛明确异常而非返回空）。"""
-    monkeypatch.setattr(rc_mod, "get_settings", lambda: _fake_settings())
+def test_get_llm_for_role_no_card_raises() -> None:
+    """该档无卡片 → 抛 NoAvailableProviderError（约定：请先建卡片）。"""
     with pytest.raises(NoAvailableProviderError):
-        get_llm_for_role("ops_director")
+        get_llm_for_role("default")
 
 
-def test_unknown_role_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """未知 role_key 回退 default 角色。"""
-    monkeypatch.setattr(
-        rc_mod, "get_settings", lambda: _fake_settings(deepseek_api_key="sk-test")
-    )
+def test_unknown_role_falls_back_to_default() -> None:
+    """未知 role_key 回退 default 角色（daily 档）。"""
+    _register({"daily": [("card_a", "m1", True)]})
     llm = get_llm_for_role("no_such_role")
-    assert llm.candidates[0][1:] == ("deepseek", "deepseek-chat")
+    assert llm.candidates[0][1:] == ("card_a", "m1")
 
 
-def test_provider_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    """没密钥不可用、有密钥可用；未知 provider 恒不可用。"""
-    monkeypatch.setattr(
-        rc_mod, "get_settings", lambda: _fake_settings(zhipu_api_key="sk-test")
-    )
-    assert provider_available("glm")
-    assert not provider_available("deepseek")
-    assert not provider_available("kimi")  # Settings 暂无密钥字段
+def test_provider_available_card_and_inactive() -> None:
+    """已注册卡片可用；被禁卡片不可用；未知 provider 恒不可用。"""
+    factory.register_custom_provider("card_x", "https://api.x.com", api_key="sk", default_model="m")
+    factory.register_custom_provider("card_y", "https://api.y.com", api_key="sk", default_model="m")
+    factory.set_provider_status(["card_y"], {}, {})
+    assert provider_available("card_x")
+    assert not provider_available("card_y")  # 被禁
     assert not provider_available("nonexistent")
 
 
