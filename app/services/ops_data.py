@@ -78,12 +78,14 @@ async def ingest_from_thinkingdata(db: AsyncSession, stat_date: date) -> dict[st
 
     地址/SQL/字段映射走 sys_config（可编辑）；密钥走 .env。
     """
+    from app.core import runtime_config
     from app.core.config import get_settings
     from app.integrations.thinkingdata.client import ThinkingDataClient
     from app.services import config_service
 
     settings = get_settings()
     base_url = (await config_service.resolve(db, "td_base_url", "")) or settings.td_base_url
+    api_secret = str(runtime_config.effective("td_api_secret", settings.td_api_secret) or "")
     sql_tpl = await config_service.resolve(db, "td_daily_metrics_sql", "")
     mapping = _resolve_mapping(await config_service.resolve(db, "td_field_mapping", None))
     if not sql_tpl:
@@ -92,7 +94,7 @@ async def ingest_from_thinkingdata(db: AsyncSession, stat_date: date) -> dict[st
         raise AppError("未配置 td_daily_metrics_sql（系统配置页设置）")
 
     sql = sql_tpl.replace("${stat_date}", stat_date.isoformat())
-    client = ThinkingDataClient(base_url=base_url, api_secret=settings.td_api_secret)
+    client = ThinkingDataClient(base_url=base_url, api_secret=api_secret)
     try:
         rows = await client.query_sql(sql)
     finally:

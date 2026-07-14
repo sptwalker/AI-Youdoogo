@@ -23,8 +23,11 @@ class EmbeddingError(RuntimeError):
 
 
 def _base_url() -> str:
-    """embedding 端点根地址：配置优先，留空回退通义。"""
-    return get_settings().embedding_base_url or resolve_provider_base_url("qwen") or ""
+    """embedding 端点根地址：sys_config 覆盖 → .env → 回退通义。"""
+    from app.core import runtime_config
+
+    override = str(runtime_config.effective("embedding_base_url", "") or "")
+    return override or resolve_provider_base_url("qwen") or ""
 
 
 def _endpoint() -> str:
@@ -32,8 +35,13 @@ def _endpoint() -> str:
 
 
 def _api_key() -> str:
-    s = get_settings()
-    return s.embedding_api_key or s.dashscope_api_key
+    from app.core import runtime_config
+
+    return str(
+        runtime_config.effective("embedding_api_key", "")
+        or runtime_config.effective("dashscope_api_key", "")
+        or ""
+    )
 
 
 async def _embed_batch(

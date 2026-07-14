@@ -9,6 +9,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+# factory 现经 runtime_config 取密钥；测试 patch 其读取的 get_settings。
+from app.core import runtime_config as rc_mod
 from app.llm import (
     FallbackChatModel,
     NoAvailableProviderError,
@@ -17,7 +19,6 @@ from app.llm import (
     provider_available,
     rank_providers,
 )
-from app.llm import factory as factory_mod
 from app.llm.validate import validate_output
 
 
@@ -97,7 +98,7 @@ def test_fallback_all_failed_raises() -> None:
 def test_get_llm_for_role_builds_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """有 DeepSeek 密钥时 ops_director 能构造出 FallbackChatModel，主候选为 deepseek-chat。"""
     monkeypatch.setattr(
-        factory_mod, "get_settings",
+        rc_mod, "get_settings",
         lambda: _fake_settings(deepseek_api_key="sk-test", dashscope_api_key="sk-test2"),
     )
     llm = get_llm_for_role("ops_director")
@@ -110,7 +111,7 @@ def test_get_llm_for_role_builds_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_get_llm_for_role_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """整条链均无密钥 → 抛 NoAvailableProviderError（约定：抛明确异常而非返回空）。"""
-    monkeypatch.setattr(factory_mod, "get_settings", lambda: _fake_settings())
+    monkeypatch.setattr(rc_mod, "get_settings", lambda: _fake_settings())
     with pytest.raises(NoAvailableProviderError):
         get_llm_for_role("ops_director")
 
@@ -118,7 +119,7 @@ def test_get_llm_for_role_no_keys_raises(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_unknown_role_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """未知 role_key 回退 default 角色。"""
     monkeypatch.setattr(
-        factory_mod, "get_settings", lambda: _fake_settings(deepseek_api_key="sk-test")
+        rc_mod, "get_settings", lambda: _fake_settings(deepseek_api_key="sk-test")
     )
     llm = get_llm_for_role("no_such_role")
     assert llm.candidates[0][1:] == ("deepseek", "deepseek-chat")
@@ -127,7 +128,7 @@ def test_unknown_role_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> 
 def test_provider_available(monkeypatch: pytest.MonkeyPatch) -> None:
     """没密钥不可用、有密钥可用；未知 provider 恒不可用。"""
     monkeypatch.setattr(
-        factory_mod, "get_settings", lambda: _fake_settings(zhipu_api_key="sk-test")
+        rc_mod, "get_settings", lambda: _fake_settings(zhipu_api_key="sk-test")
     )
     assert provider_available("glm")
     assert not provider_available("deepseek")

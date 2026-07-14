@@ -25,3 +25,10 @@ export function uploadOpsDaily(file: File): Promise<UploadResult> {
 export function listOpsDaily(statDate: string): Promise<OpsMetric[]> {
   return request({ method: 'GET', url: '/ops-data/daily', params: { stat_date: statDate } })
 }
+
+/** 从 ThinkingData 拉取某日运营指标入库（地址/SQL/字段映射见系统配置，密钥见配置）。 */
+export function syncThinkingData(
+  statDate: string,
+): Promise<{ date: string; upserted: number; source: string }> {
+  return request({ method: 'POST', url: '/ops-data/sync-thinkingdata', params: { stat_date: statDate } })
+}

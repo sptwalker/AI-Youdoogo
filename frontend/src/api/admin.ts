@@ -20,6 +20,8 @@ export interface SysConfig {
   value_type: string
   category: string
   is_editable: boolean
+  is_secret: boolean
+  is_set: boolean
 }
 
 export function listAuditLogs(params?: { action?: string; actor_id?: string }): Promise<AuditLog[]> {

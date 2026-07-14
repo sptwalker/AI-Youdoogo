@@ -9,6 +9,7 @@
 import logging
 from typing import Any
 
+from app.core import runtime_config
 from app.core.config import get_settings
 from app.integrations.feishu.client import FeishuAPIError, feishu_client
 
@@ -16,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 def _enabled() -> bool:
-    """通知全局开关。"""
-    return bool(get_settings().feishu_notify_enabled)
+    """通知全局开关（sys_config 覆盖 → .env；字符串/布尔都容错）。"""
+    v = runtime_config.effective("feishu_notify_enabled", get_settings().feishu_notify_enabled)
+    return str(v).strip().lower() in ("true", "1", "yes")
 
 
 async def send_text_to_user(user_open_id: str, text: str) -> bool:
@@ -75,4 +77,5 @@ async def push_ops_message(text: str) -> bool:
 
     best-effort：未开启通知或未配置群时静默跳过，返回是否实际发送。
     """
-    return await send_text_to_chat(get_settings().feishu_ops_chat_id, text)
+    chat_id = runtime_config.effective("feishu_ops_chat_id", get_settings().feishu_ops_chat_id)
+    return await send_text_to_chat(str(chat_id or ""), text)

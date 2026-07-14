@@ -44,7 +44,7 @@ app/
 1. **文档优先**：无 docs 设计文档不开发业务代码；文档过时先改文档
 2. **单模块增量**：一次只开发一个独立模块，先确认思路再编码，完成验收再继续
 3. **全类型注解 + docstring**：mypy 无类型缺失；核心逻辑注释说明设计思路与边界
-4. **密钥只走环境变量**（`.env` → `app/core/config.py`），禁止硬编码
+4. **密钥禁止硬编码**：可存 `.env`（`app/core/config.py`）或 `sys_config`（系统配置页 UI 填写，`is_secret=true`）；app 经 `app/core/runtime_config.py` 覆盖层读取（sys_config 覆盖 .env）；list 接口对密钥脱敏、审计 detail 打码
 5. **接口双校验**：所有接口必须有权限校验 + 参数校验；统一返回 `{code, msg, data}`
 6. **人工兜底**：权限、数据修改、核心决策代码必须人工审核；所有AI输出可编辑/驳回/终止
 7. **提交前**：`uv run ruff check .` + `uv run mypy app` + `uv run pytest` 全绿

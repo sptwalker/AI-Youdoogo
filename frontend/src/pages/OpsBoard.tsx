@@ -1,8 +1,8 @@
 /** 运营看板：上传日数据 → 查看指标 → 生成日报 / 异常检测（结果留痕）。 */
-import { PageContainer, ProTable, type ProColumns } from '@ant-design/pro-components'
+import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
 import { Alert, Button, Card, DatePicker, Space, Tag, Typography, Upload, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Markdown from '../components/Markdown'
 import {
   anomalyCheck,
@@ -10,7 +10,7 @@ import {
   type Alert as MetricAlert,
   type TaskRecord,
 } from '../api/agents'
-import { listOpsDaily, uploadOpsDaily, type OpsMetric } from '../api/opsData'
+import { listOpsDaily, syncThinkingData, uploadOpsDaily, type OpsMetric } from '../api/opsData'
 
 const columns: ProColumns<OpsMetric>[] = [
   { title: '产品', dataIndex: 'product' },
@@ -24,10 +24,25 @@ const SEV_COLOR: Record<string, string> = { critical: 'error', warning: 'warning
 export default function OpsBoard() {
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [busy, setBusy] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [report, setReport] = useState<TaskRecord | null>(null)
   const [alerts, setAlerts] = useState<MetricAlert[] | null>(null)
+  const actionRef = useRef<ActionType>(null)
 
   const day = date.format('YYYY-MM-DD')
+
+  const runSync = async () => {
+    setSyncing(true)
+    try {
+      const r = await syncThinkingData(day)
+      message.success(`已从 ThinkingData 拉取入库 ${r.upserted} 条`)
+      actionRef.current?.reload()
+    } catch {
+      /* 拦截器已提示（未配置地址/密钥/SQL 时会提示）*/
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const runReport = async () => {
     setBusy(true)
@@ -77,6 +92,9 @@ export default function OpsBoard() {
           >
             <Button>上传日数据 Excel</Button>
           </Upload>
+          <Button onClick={runSync} loading={syncing}>
+            从 ThinkingData 拉取
+          </Button>
           <Button type="primary" onClick={runReport} loading={busy}>
             生成运营日报
           </Button>
@@ -88,6 +106,7 @@ export default function OpsBoard() {
 
       <ProTable<OpsMetric>
         rowKey="product"
+        actionRef={actionRef}
         headerTitle={`${day} 运营指标`}
         search={false}
         options={false}

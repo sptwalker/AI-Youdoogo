@@ -19,8 +19,6 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from pydantic import SecretStr
 
-from app.core.config import get_settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -101,14 +99,16 @@ def get_custom_provider(provider_id: str) -> dict[str, str] | None:
 
 
 def _provider_api_key(provider: str) -> str:
-    """解析某 provider 的 API Key：自定义端点注册值 → Settings 字段。无则空串。"""
+    """解析某 provider 的 API Key：自定义端点注册值 → sys_config 覆盖 → .env。无则空串。"""
     custom = _CUSTOM_PROVIDERS.get(provider)
     if custom is not None:
         return custom.get("api_key", "")
     field = _PROVIDER_KEY_FIELD.get(provider)
     if not field:
         return ""
-    return str(getattr(get_settings(), field, "") or "")
+    from app.core import runtime_config
+
+    return str(runtime_config.effective(field, "") or "")
 
 
 def provider_available(provider: str) -> bool:

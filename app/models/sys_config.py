@@ -33,4 +33,6 @@ class SysConfig(CommonMixin, Base):
     value_type: Mapped[str] = mapped_column(String(16), default="string")  # string/int/bool/text
     category: Mapped[str] = mapped_column(String(32), default=CAT_FEATURE)
     is_editable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # 密钥类配置：值存本表但读时脱敏（list 不回显明文），app 经 runtime_config 覆盖 .env 使用
+    is_secret: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     updated_by: Mapped[Any] = mapped_column(Uuid, nullable=True)

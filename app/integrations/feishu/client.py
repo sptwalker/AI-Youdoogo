@@ -13,8 +13,6 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
-
 
 class FeishuAPIError(Exception):
     """飞书 API 错误。"""
@@ -38,9 +36,13 @@ class FeishuClient:
 
     @staticmethod
     def _creds() -> tuple[str, str]:
-        """读取当前飞书应用凭证（唯一来源：环境变量经 Settings）。"""
-        settings = get_settings()
-        return settings.feishu_app_id, settings.feishu_app_secret
+        """读取当前飞书应用凭证：sys_config 覆盖(可 UI 填) → .env(Settings)。"""
+        from app.core import runtime_config
+
+        return (
+            str(runtime_config.effective("feishu_app_id", "") or ""),
+            str(runtime_config.effective("feishu_app_secret", "") or ""),
+        )
 
     def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端。"""

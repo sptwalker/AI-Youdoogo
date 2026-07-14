@@ -1,6 +1,8 @@
 """FastAPI 主入口：健康检查 + 依赖连通性自检。"""
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import redis.asyncio as aioredis
@@ -33,7 +35,24 @@ settings = get_settings()
 setup_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="创想悦动AI决策大脑系统", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """启动时载入 sys_config 覆盖层（AI/飞书/外部数据等配置覆盖 .env）。"""
+    from app.core import runtime_config
+    from app.core.database import async_session_factory
+    from app.services import config_service
+
+    try:
+        async with async_session_factory() as db:
+            runtime_config.load(await config_service.all_values(db))
+        logger.info("配置覆盖层已载入")
+    except Exception:  # noqa: BLE001 - 载入失败退回 .env，不阻断启动
+        logger.exception("载入配置覆盖层失败，回退 .env")
+    yield
+
+
+app = FastAPI(title="创想悦动AI决策大脑系统", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
