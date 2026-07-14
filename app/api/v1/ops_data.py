@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
+from app.integrations.thinkingdata.client import ThinkingDataError
 from app.models.system import SysUser
 from app.services import ops_data
 from app.services.excel_ingest import ExcelParseError
@@ -44,3 +45,16 @@ async def list_daily(
 ) -> dict:
     """查询某日运营指标。"""
     return ok(await ops_data.get_ops_metrics(db, stat_date))
+
+
+@router.post("/sync-thinkingdata")
+async def sync_thinkingdata(
+    db: DB,
+    _: Manager,
+    stat_date: Annotated[date, Query(description="统计日期 YYYY-MM-DD")],
+) -> dict:
+    """从 ThinkingData 拉取某日运营指标入库（地址/SQL/字段映射见系统配置，密钥见 .env）。"""
+    try:
+        return ok(await ops_data.ingest_from_thinkingdata(db, stat_date))
+    except ThinkingDataError as exc:
+        raise AppError(f"ThinkingData 拉取失败：{exc}") from exc
