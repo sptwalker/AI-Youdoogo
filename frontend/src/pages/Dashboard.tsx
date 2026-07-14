@@ -5,6 +5,7 @@ import { ModalForm, PageContainer, ProFormSelect, ProFormTextArea } from '@ant-d
 import { Badge, Button, Card, Col, Empty, Input, List, Popconfirm, Row, Select, Space, Spin, Tag, Typography, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
+import Markdown from '../components/Markdown'
 import { consultAgent, listRoles, type AgentRole, type ChatTurn } from '../api/agents'
 import { listUsers, type UserInfo } from '../api/auth'
 import { reviewCollab } from '../api/collab'
@@ -184,13 +185,13 @@ export default function Dashboard() {
                     <span
                       style={{
                         display: 'inline-block', maxWidth: '82%', padding: '7px 11px', borderRadius: 8,
-                        textAlign: 'left', whiteSpace: 'pre-wrap',
+                        textAlign: 'left', whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
                         background: m.role === 'user' ? '#1677ff' : '#fff',
                         color: m.role === 'user' ? '#fff' : undefined,
                         border: m.role === 'ai' ? '1px solid #eee' : undefined,
                       }}
                     >
-                      {m.content}
+                      {m.role === 'ai' ? <Markdown>{m.content}</Markdown> : m.content}
                     </span>
                   </div>
                 ))}

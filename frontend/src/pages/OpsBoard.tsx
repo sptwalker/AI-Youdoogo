@@ -3,6 +3,7 @@ import { PageContainer, ProTable, type ProColumns } from '@ant-design/pro-compon
 import { Alert, Button, Card, DatePicker, Space, Tag, Typography, Upload, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useState } from 'react'
+import Markdown from '../components/Markdown'
 import {
   anomalyCheck,
   generateDailyReport,
@@ -120,8 +121,8 @@ export default function OpsBoard() {
           title={`AI 产出（${report.status === 'success' ? report.model_used : '失败'}）`}
           style={{ marginTop: 16 }}
         >
-          <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-            {report.output_content || report.error_msg}
+          <Typography.Paragraph>
+            <Markdown>{report.output_content || report.error_msg || ''}</Markdown>
           </Typography.Paragraph>
         </Card>
       )}

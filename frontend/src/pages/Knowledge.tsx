@@ -23,6 +23,7 @@ import {
   type KnowledgeFile,
 } from '../api/knowledge'
 import { listKnowledgeBases, type KnowledgeBase } from '../api/knowledgeBases'
+import Markdown from '../components/Markdown'
 
 const STATUS_TAG: Record<KnowledgeFile['status'], { color: string; text: string }> = {
   uploaded: { color: 'default', text: '待处理' },
@@ -118,8 +119,8 @@ export default function Knowledge() {
         {asking && <Spin style={{ marginTop: 16 }} />}
         {answer && !asking && (
           <div style={{ marginTop: 16 }}>
-            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-              {answer.answer}
+            <Typography.Paragraph>
+              <Markdown>{answer.answer}</Markdown>
             </Typography.Paragraph>
             {answer.sources.length > 0 && (
               <List

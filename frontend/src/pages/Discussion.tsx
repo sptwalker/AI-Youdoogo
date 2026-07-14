@@ -3,6 +3,7 @@
 import { PageContainer } from '@ant-design/pro-components'
 import { Avatar, Button, Card, Empty, Input, List, Popconfirm, Select, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
+import Markdown from '../components/Markdown'
 import { listRoles, type AgentRole } from '../api/agents'
 import {
   listChannels,
@@ -118,8 +119,8 @@ export default function Discussion() {
                           </Space>
                         }
                         description={
-                          <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                            {m.content}
+                          <Typography.Paragraph style={{ marginBottom: 0 }}>
+                            <Markdown>{m.content}</Markdown>
                           </Typography.Paragraph>
                         }
                       />

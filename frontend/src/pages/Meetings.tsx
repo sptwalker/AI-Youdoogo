@@ -1,7 +1,8 @@
 /** 会议：列表 + 详情抽屉（开始/结束、发言、AI专家、投票、纪要、决议→确认→转任务卡）。 */
 import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
-import { Button, Card, Drawer, Input, List, Space, Tag, Typography, message } from 'antd'
+import { Button, Card, Drawer, Input, List, Space, Tag, message } from 'antd'
 import { useRef, useState } from 'react'
+import Markdown from '../components/Markdown'
 import {
   aiSpeak,
   aiVote,
@@ -100,7 +101,7 @@ export default function Meetings() {
                 renderItem={(d) => (
                   <List.Item>
                     <Tag color={d.speaker_type === 'ai' ? 'blue' : 'default'}>{d.speaker_name}</Tag>
-                    <span style={{ whiteSpace: 'pre-wrap' }}>{d.content}</span>
+                    <Markdown>{d.content}</Markdown>
                   </List.Item>
                 )} />
               {inProgress && (
@@ -146,9 +147,7 @@ export default function Meetings() {
                 message.loading({ content: '生成中…', key: 'm' })
                 await generateMinutes(detail.meeting.id); message.success({ content: '已生成', key: 'm' }); refresh()
               }}>生成纪要</Button>}>
-              <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-                {detail.meeting.summary || '（暂无纪要）'}
-              </Typography.Paragraph>
+              <Markdown>{detail.meeting.summary || '（暂无纪要）'}</Markdown>
             </Card>
 
             <Card size="small" title="决议（须真人确认生效）">
@@ -162,7 +161,7 @@ export default function Meetings() {
                       : <a key="cf" onClick={async () => { await confirmResolution(r.id); message.success('已确认生效'); refresh() }}>确认生效</a>,
                   ]}>
                     <Tag color={r.is_confirmed ? 'green' : 'orange'}>{r.is_confirmed ? '已确认' : '待确认'}</Tag>
-                    <span style={{ whiteSpace: 'pre-wrap' }}>{r.content}</span>
+                    <Markdown>{r.content}</Markdown>
                   </List.Item>
                 )} />
               <Space.Compact style={{ width: '100%', marginTop: 8 }}>

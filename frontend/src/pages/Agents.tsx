@@ -10,6 +10,7 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Card, Modal, Rate, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
+import Markdown from '../components/Markdown'
 import {
   addFeedback,
   generateProposal,
@@ -77,8 +78,8 @@ export default function Agents() {
         request={async () => ({ data: await listRecords(50), success: true })}
         expandable={{
           expandedRowRender: (r) => (
-            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-              {r.output_content || r.error_msg || '（无内容）'}
+            <Typography.Paragraph style={{ margin: 0 }}>
+              <Markdown>{r.output_content || r.error_msg || '（无内容）'}</Markdown>
             </Typography.Paragraph>
           ),
         }}

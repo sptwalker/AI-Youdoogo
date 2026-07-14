@@ -11,6 +11,7 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Modal, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
+import Markdown from '../components/Markdown'
 import {
   aiResearch,
   convertProposal,
@@ -138,8 +139,8 @@ export default function Proposals() {
             <Tag color={rv.review_type === 'ai_research' ? 'blue' : 'green'}>
               {rv.review_type === 'ai_research' ? 'AI预研' : `真人评审 · ${rv.decision}`}
             </Tag>
-            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
-              {rv.conclusion}
+            <Typography.Paragraph style={{ marginTop: 4 }}>
+              <Markdown>{rv.conclusion}</Markdown>
             </Typography.Paragraph>
           </div>
         ))}

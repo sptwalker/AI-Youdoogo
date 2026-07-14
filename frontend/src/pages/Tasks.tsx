@@ -11,6 +11,7 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Space, Tag, Typography, message } from 'antd'
 import { useRef } from 'react'
+import Markdown from '../components/Markdown'
 import { listRoles } from '../api/agents'
 import {
   createTask,
@@ -116,8 +117,8 @@ export default function Tasks() {
           expandedRowRender: (r) => (
             <Space direction="vertical">
               {r.assignee_agent_id && <span>指派智能体：{r.assignee_agent_id}</span>}
-              <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-                {r.result_content || '（暂无执行结果）'}
+              <Typography.Paragraph style={{ margin: 0 }}>
+                <Markdown>{r.result_content || '（暂无执行结果）'}</Markdown>
               </Typography.Paragraph>
             </Space>
           ),
