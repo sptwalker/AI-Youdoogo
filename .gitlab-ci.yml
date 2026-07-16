@@ -1,0 +1,248 @@
+# Delivery policy: merge requests run verification only. Until GitLab has an
+# approved production-stable branch, protected `dev` is the sole CCE delivery
+# ref. This intentionally does not invent `main` or deploy MR pipelines.
+stages:
+  - verify
+  - build
+  - scan
+  - deploy
+  - notify
+
+default:
+  tags:
+    - AI
+  retry: 2
+  interruptible: true
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+    - when: never
+
+variables:
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: "2"
+  GET_SOURCES_ATTEMPTS: "3"
+  KUBECTL_VERSION: v1.31.5
+  KUBECTL_SHA256: fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+  UV_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+  NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+
+.verify_rules:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+    - when: never
+
+.delivery_rules:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'
+    - when: never
+
+verify_backend:
+  stage: verify
+  image:
+    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    pull_policy: always
+  extends: .verify_rules
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - .cache/uv/
+  before_script:
+    - python -m pip install --no-cache-dir uv==0.11.7
+    - uv sync --frozen
+  script:
+    - uv run ruff check .
+    - uv run mypy app
+    - uv run pytest -q
+
+verify_frontend:
+  stage: verify
+  image:
+    name: m.daocloud.io/docker.io/library/node:20-alpine
+    pull_policy: always
+  extends: .verify_rules
+  script:
+    - npm --prefix frontend ci
+    - npm --prefix frontend run lint
+    - npm --prefix frontend run build
+
+verify_delivery_contract:
+  stage: verify
+  image:
+    name: m.daocloud.io/docker.io/library/python:3.12-alpine
+    pull_policy: always
+  extends: .verify_rules
+  before_script:
+    - apk add --no-cache bash
+    - python -m pip install --no-cache-dir pytest PyYAML
+  script:
+    - python -m pytest -q tests/test_cce_delivery_contract.py
+    - bash -n scripts/ci/deploy-cce.sh scripts/ci/smoke-youdoogo.sh
+    - python -m py_compile scripts/ci/render_cce.py scripts/ci/preflight_vars.py scripts/ci/notify.py
+
+preflight_delivery:
+  stage: verify
+  image:
+    name: m.daocloud.io/docker.io/library/python:3.12-alpine
+    pull_policy: always
+  extends: .delivery_rules
+  script:
+    - python scripts/ci/preflight_vars.py
+
+.swr_build:
+  stage: build
+  image:
+    name: m.daocloud.io/docker.io/library/docker:git
+    pull_policy: always
+  extends: .delivery_rules
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+    DOCKER_BUILDKIT: "1"
+    BUILDX_GIT_INFO: "0"
+  before_script:
+    # The AI runner mounts the host Docker socket; no privileged DinD service is used.
+    - test -n "${SWR_REGION:-}" && test -n "${SWR_REGISTRY_OVERRIDE:-}"
+    - test -n "${SWR_AK:-}" && test -n "${SWR_PASSWORD:-}"
+    - export SWR_REGISTRY="${SWR_REGISTRY_OVERRIDE%/}"
+    - export SWR_REGISTRY_HOST="${SWR_REGISTRY%%/*}"
+    - export IMAGE_TAG="ci-${CI_COMMIT_SHA}"
+    - docker info >/dev/null
+    - printf '%s' "$SWR_PASSWORD" | docker login -u "${SWR_REGION}@${SWR_AK}" --password-stdin "$SWR_REGISTRY_HOST"
+  after_script:
+    - if [ -n "${SWR_REGISTRY_OVERRIDE:-}" ]; then docker logout "${SWR_REGISTRY_OVERRIDE%%/*}" >/dev/null 2>&1 || true; fi
+
+build_backend:
+  extends: .swr_build
+  script:
+    - docker buildx build
+        --pull
+        --push
+        --provenance=false
+        --platform linux/amd64
+        --tag "${SWR_REGISTRY}/youdoogo-backend:${IMAGE_TAG}"
+        .
+
+build_frontend:
+  extends: .swr_build
+  script:
+    - docker buildx build
+        --pull
+        --push
+        --provenance=false
+        --platform linux/amd64
+        --file frontend/Dockerfile
+        --tag "${SWR_REGISTRY}/youdoogo-frontend:${IMAGE_TAG}"
+        .
+
+.trivy_scan:
+  stage: scan
+  image:
+    name: m.daocloud.io/docker.io/aquasec/trivy:latest
+    entrypoint: [""]
+    pull_policy: always
+  extends: .delivery_rules
+  variables:
+    TRIVY_NO_PROGRESS: "true"
+    TRIVY_SEVERITY: HIGH,CRITICAL
+    TRIVY_DB_REPOSITORY: m.daocloud.io/ghcr.io/aquasecurity/trivy-db:2
+    TRIVY_JAVA_DB_REPOSITORY: m.daocloud.io/ghcr.io/aquasecurity/trivy-java-db:1
+  before_script:
+    - test -n "${SWR_REGION:-}" && test -n "${SWR_REGISTRY_OVERRIDE:-}"
+    - test -n "${SWR_AK:-}" && test -n "${SWR_PASSWORD:-}"
+    - export SWR_REGISTRY="${SWR_REGISTRY_OVERRIDE%/}"
+    - export IMAGE_TAG="ci-${CI_COMMIT_SHA}"
+    - export TRIVY_USERNAME="${SWR_REGION}@${SWR_AK}"
+    - export TRIVY_PASSWORD="$SWR_PASSWORD"
+
+scan_backend:
+  extends: .trivy_scan
+  needs:
+    - job: build_backend
+  script:
+    - trivy image --scanners vuln --exit-code 1 --severity "$TRIVY_SEVERITY"
+        "${SWR_REGISTRY}/youdoogo-backend:${IMAGE_TAG}"
+
+scan_frontend:
+  extends: .trivy_scan
+  needs:
+    - job: build_frontend
+  script:
+    - trivy image --scanners vuln --exit-code 1 --severity "$TRIVY_SEVERITY"
+        "${SWR_REGISTRY}/youdoogo-frontend:${IMAGE_TAG}"
+
+deploy_cce:
+  stage: deploy
+  image:
+    name: m.daocloud.io/docker.io/library/alpine:3.22
+    pull_policy: always
+  extends: .delivery_rules
+  needs:
+    - job: scan_backend
+    - job: scan_frontend
+  retry: 0
+  interruptible: false
+  resource_group: youdoogo-cce-production
+  environment:
+    name: cce-production
+    url: https://ai.youdoogo.com/
+  before_script:
+    - apk add --no-cache bash ca-certificates curl python3 py3-yaml
+    - curl --fail --silent --show-error --location
+        --retry 5 --retry-delay 2 --retry-all-errors
+        --connect-timeout 15 --max-time 180
+        --output /tmp/kubectl
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    - echo "${KUBECTL_SHA256}  /tmp/kubectl" | sha256sum -c -
+    - chmod 0755 /tmp/kubectl && mv /tmp/kubectl /usr/local/bin/kubectl
+    - kubectl version --client=true
+    - test -n "${KUBECONFIG_CCE_B64:-}"
+    - export KUBECONFIG="/tmp/youdoogo-kubeconfig-${CI_JOB_ID}"
+    - umask 077
+    - printf '%s' "$KUBECONFIG_CCE_B64" | base64 -d >"$KUBECONFIG"
+    - test -s "$KUBECONFIG"
+    - kubectl config current-context >/dev/null
+    - export SWR_REGISTRY="${SWR_REGISTRY_OVERRIDE%/}"
+    - export IMAGE_TAG="ci-${CI_COMMIT_SHA}"
+    - export BACKEND_IMAGE="${SWR_REGISTRY}/youdoogo-backend:${IMAGE_TAG}"
+    - export FRONTEND_IMAGE="${SWR_REGISTRY}/youdoogo-frontend:${IMAGE_TAG}"
+  script:
+    - bash scripts/ci/deploy-cce.sh
+  after_script:
+    - rm -f "/tmp/youdoogo-kubeconfig-${CI_JOB_ID}" /tmp/kubectl
+
+# Feishu credentials come from the `ai` group; notify.py owns the shared fixed destination.
+notify_success:
+  stage: notify
+  image:
+    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    pull_policy: always
+  needs:
+    - job: deploy_cce
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'
+      when: on_success
+    - when: never
+  retry: 0
+  allow_failure: true
+  script:
+    - python scripts/ci/notify.py success
+
+notify_failure:
+  stage: notify
+  image:
+    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    pull_policy: always
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'
+      when: on_failure
+    - when: never
+  retry: 0
+  allow_failure: true
+  script:
+    - python scripts/ci/notify.py failure
