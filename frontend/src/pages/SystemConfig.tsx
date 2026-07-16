@@ -24,6 +24,8 @@ const KEY_LABEL: Record<string, string> = {
   embedding_base_url: 'Embedding 端点', embedding_model: 'Embedding 模型',
   embedding_api_key: 'Embedding API Key',
   feishu_app_id: '飞书 App ID', feishu_app_secret: '飞书 App Secret',
+  feishu_oauth_enabled: '飞书登录开关（true/false）',
+  feishu_redirect_url: '飞书登录回调 URL',
   feishu_notify_enabled: '飞书通知开关（true/false）', feishu_ops_chat_id: '运营群 chat_id',
   td_base_url: 'ThinkingData 地址（http://HOST:8992）', td_api_secret: 'ThinkingData 密钥',
   td_daily_metrics_sql: 'TD 每日拉取 SQL', td_field_mapping: 'TD 字段映射（JSON）',

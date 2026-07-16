@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     # 飞书
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
+    feishu_oauth_enabled: bool = False
+    feishu_redirect_url: str = ""
     feishu_notify_enabled: bool = False
     feishu_ops_chat_id: str = ""  # 运营通知群 chat_id（日报/告警推送目标）
 
