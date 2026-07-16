@@ -17,13 +17,15 @@ use them. Do not enter examples, placeholders, test credentials, or guessed obje
 | `KUBECONFIG_CCE_B64` | masked + protected credential | Base64-encoded least-privilege kubeconfig for the target CCE cluster. |
 | `SWR_AK` | masked + protected credential | Huawei Cloud SWR access key identifier approved for these repositories. |
 | `SWR_PASSWORD` | masked + protected secret | SWR login password/secret paired with `SWR_AK`. |
-| `FEISHU_APP_ID` | masked + protected group credential | Existing organization-standard Feishu application ID. |
-| `FEISHU_APP_SECRET` | masked + protected group credential | Secret for that Feishu application. |
+| `FEISHU_APP_ID` | masked + protected group credential | Existing organization-standard Feishu application ID used by the CI notification job only. |
+| `FEISHU_APP_SECRET` | masked + protected group credential | Secret for that Feishu application, used by the CI notification job only. |
 
 The SWR username is formed only in CI as `SWR_REGION@SWR_AK`. The notification uses the Feishu
 application API with `receive_id_type=chat_id`. Its destination is the shared, fixed organization
 chat already used by sibling delivery pipelines; that nonsecret target is a code constant, not an
 `ai` group variable. There is no repository webhook or project-specific target configuration.
+These group credentials are not copied into the backend Deployment and do not enable application
+login.
 
 ### Platform-approved nonsecret configuration
 
@@ -57,6 +59,13 @@ dry runs, and RBAC before mutating a workload.
   `MINIO_BUCKET`; `APP_ENV` must equal `production`. Optional application variables may be added
   to the same references by the runtime owner. The runtime Secret must not duplicate these four
   keys, so it cannot silently override the validated nonsecret configuration.
+- Feishu OAuth login is optional and remains disabled for first release unless separately approved.
+  Enabling it requires `FEISHU_APP_ID` and `FEISHU_APP_SECRET` in the referenced runtime Secret,
+  plus `FEISHU_OAUTH_ENABLED=true` and the exact
+  `FEISHU_REDIRECT_URL=https://ai.youdoogo.com/api/v1/auth/feishu/callback` in the referenced
+  runtime ConfigMap (or the documented administrator runtime-config flow). The same callback must
+  first be registered manually in Feishu Open Platform and users must be pre-bound by app-scoped
+  `open_id`; the pipeline does not perform or claim those actions.
 - `TLS_SECRET_NAME` already contains nonempty `tls.crt` and `tls.key` entries and its certificate
   covers `ai.youdoogo.com`. CI never creates or renews certificates.
 - `INGRESS_CLASS_NAME` already exists and its controller is configured to use the ELB reached by
@@ -87,4 +96,7 @@ frontend. Frontend Nginx serves the SPA and proxies `/api/` to the private backe
 
 Before enabling the first release, confirm the selected Ingress controller also permits this
 application's 50 MiB request bodies and 120-second upstream operations through an approved
-controller policy. No controller-specific annotation is included without cluster evidence.
+controller policy. Before enabling Feishu OAuth, the ELB/Ingress access-log policy must also avoid
+recording callback query strings for `/api/v1/auth/feishu/callback`; frontend Nginx and Uvicorn
+already suppress them at their own layers. No controller-specific annotation is included without
+cluster evidence.

@@ -145,7 +145,14 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
     nginx = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
     assert "location /api/" in nginx
     assert "proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};" in nginx
+    assert "location = /nginx-health" in nginx
     assert "try_files $uri $uri/ /index.html;" in nginx
+    callback = nginx.split(
+        "location = /api/v1/auth/feishu/callback {", maxsplit=1
+    )[1].split("\n    }", maxsplit=1)[0]
+    assert "access_log off;" in callback
+    assert "proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};" in callback
+    assert "proxy_set_header X-Forwarded-Proto $upstream_forwarded_proto;" in callback
     client = (ROOT / "frontend/src/api/client.ts").read_text(encoding="utf-8")
     assert "baseURL: '/api/v1'" in client
 
