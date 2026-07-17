@@ -16,6 +16,7 @@ import Meetings from './pages/Meetings'
 import OpsBoard from './pages/OpsBoard'
 import OrgAdmin from './pages/OrgAdmin'
 import Proposals from './pages/Proposals'
+import SemanticTerms from './pages/SemanticTerms'
 import SystemConfig from './pages/SystemConfig'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
@@ -47,6 +48,7 @@ export const router = createBrowserRouter([
       { path: 'users', element: <Users /> },
       { path: 'knowledge-bases', element: <KnowledgeBases /> },
       { path: 'data-sources', element: <DataSources /> },
+      { path: 'semantic-terms', element: <SemanticTerms /> },
       { path: 'ai-providers', element: <AiProviders /> },
       { path: 'system-config', element: <SystemConfig /> },
       { path: 'audit-log', element: <AuditLog /> },

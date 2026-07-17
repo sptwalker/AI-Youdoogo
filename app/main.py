@@ -25,6 +25,7 @@ from app.api.v1.meetings import router as meetings_router
 from app.api.v1.ops_data import router as ops_data_router
 from app.api.v1.org import router as org_router
 from app.api.v1.proposals import router as proposals_router
+from app.api.v1.semantic import router as semantic_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
 from app.core.config import get_settings
@@ -75,6 +76,7 @@ app.include_router(admin_router, prefix="/api/v1")
 app.include_router(grants_router, prefix="/api/v1")
 app.include_router(collab_router, prefix="/api/v1")
 app.include_router(ai_providers_router, prefix="/api/v1")
+app.include_router(semantic_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")

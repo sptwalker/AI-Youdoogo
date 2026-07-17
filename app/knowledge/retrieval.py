@@ -25,7 +25,7 @@ from app.knowledge.embedding import embed_query
 from app.llm import get_llm_for_role
 from app.llm.usage import extract_usage, record_usage
 from app.models.knowledge import KnowledgeFile, KnowledgeVector
-from app.services import config_service
+from app.services import config_service, semantic_service
 
 logger = logging.getLogger(__name__)
 
@@ -203,10 +203,13 @@ async def search(
 
     cand_n = max(top_k * _DEFAULT_CAND_MULT, _MIN_CANDIDATES)
     cand_n = await _int_config(db, "retrieval_candidate_n", cand_n)
+    # 语义层查询扩展（docs/15 §4.2）:别名→规范名+同义词，仅喂关键词臂（向量臂语义已覆盖）。
+    # 字典为空 → expand_query 原样返回，等价无扩展（优雅降级，无需开关）。
+    kw_query = await semantic_service.expand_query(db, query)
     # 向量臂异常向上传播（主臂）；关键词臂内部已吞异常返回 []
     vec, kw = await asyncio.gather(
         _vector_arm(db, query, cand_n, visible_kb_ids),
-        _keyword_arm(db, query, cand_n, visible_kb_ids),
+        _keyword_arm(db, kw_query, cand_n, visible_kb_ids),
     )
     k = await _int_config(db, "retrieval_rrf_k", _DEFAULT_RRF_K)
     fused = rrf_fuse([vec, kw], k=k)

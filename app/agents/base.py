@@ -109,10 +109,14 @@ async def _prepare(
         logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
         global_prompt = _DEFAULT_GLOBAL_PROMPT
     # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）+ 该 AI 启用技能的注入段（§11）
+    # + 统一语义层业务术语（docs/15 §4.2，统一跨部门口径；字典空则为空串）
     from app.agents import skills  # 局部 import 防循环（skills→collab_protocol→base）
+    from app.services import semantic_service
 
     system_content = (
-        f"{global_prompt}\n\n{role.prompt_template}{await skills.prompt_sections(db, role)}"
+        f"{global_prompt}\n\n{role.prompt_template}"
+        f"{await skills.prompt_sections(db, role)}"
+        f"{await semantic_service.term_prompt(db)}"
     )
     effective_message = user_message
     if use_knowledge:
