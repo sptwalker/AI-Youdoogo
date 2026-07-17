@@ -38,6 +38,7 @@ _SYSTEM_PROMPT = (
 _DEFAULT_RRF_K = 60  # RRF 常数：越大越弱化高排名的主导，60 为文献常用稳健默认
 _DEFAULT_CAND_MULT = 4  # 每臂候选数 = max(top_k * 本倍数, 下限)
 _MIN_CANDIDATES = 20
+_DEFAULT_RERANK_POOL = 20  # rerank 精排的候选池上限（融合后取前 N 送 rerank，再截 top_k）
 
 
 @dataclass
@@ -146,11 +147,39 @@ async def _hybrid_on(db: AsyncSession) -> bool:
     return str(flag).lower() not in ("false", "0")
 
 
+async def _rerank_on(db: AsyncSession) -> bool:
+    flag = await config_service.resolve(db, "retrieval_rerank_enabled", False)
+    return str(flag).lower() in ("true", "1")
+
+
 async def _int_config(db: AsyncSession, key: str, default: int) -> int:
     try:
         return int(await config_service.resolve(db, key, default))
     except (TypeError, ValueError):
         return default
+
+
+async def _maybe_rerank(
+    db: AsyncSession, query: str, fused: list[Hit], top_k: int
+) -> list[Hit]:
+    """对 RRF 融合结果做 cross-encoder 精排（A.2）。异常/未配 → 沿用融合序，不阻断。
+
+    只把融合后前 pool 个候选送 rerank（控体积/成本），精排后返回;失败原样退回。
+    """
+    if not fused:
+        return fused
+    from app.knowledge import rerank as rerank_mod
+
+    pool = await _int_config(db, "retrieval_rerank_pool", _DEFAULT_RERANK_POOL)
+    cand = fused[:pool]
+    try:
+        order = await rerank_mod.rerank(query, [h.chunk_text for h in cand], top_n=len(cand))
+    except Exception:  # noqa: BLE001 - rerank 故障不连累检索，退回 RRF 融合序
+        logger.warning("rerank 精排失败，沿用 RRF 融合序", exc_info=True)
+        return fused
+    if not order:
+        return fused
+    return [cand[i] for i, _ in order if 0 <= i < len(cand)]
 
 
 async def search(
@@ -160,11 +189,11 @@ async def search(
     *,
     visible_kb_ids: list[uuid.UUID] | None = None,
 ) -> list[Hit]:
-    """混合检索 top_k:向量臂 + 关键词臂并发召回 → RRF 融合。签名对调用方保持不变。
+    """混合检索 top_k:向量臂 + 关键词臂并发召回 → RRF 融合 →（可选）rerank 精排。
 
-    visible_kb_ids 传入时按可见知识库范围过滤（契约② 范围隔离）；
+    签名对调用方保持不变。visible_kb_ids 传入时按可见知识库范围过滤（契约② 范围隔离）；
     传 None = 不加范围过滤（内部/兼容调用）；传空列表 = 无可见库，直接返回空。
-    开关 retrieval_hybrid_enabled 关闭 → 纯向量（等价旧行为）。
+    开关 retrieval_hybrid_enabled 关 → 纯向量;retrieval_rerank_enabled 开 → 融合后再精排。
     """
     if visible_kb_ids is not None and len(visible_kb_ids) == 0:
         return []
@@ -180,7 +209,10 @@ async def search(
         _keyword_arm(db, query, cand_n, visible_kb_ids),
     )
     k = await _int_config(db, "retrieval_rrf_k", _DEFAULT_RRF_K)
-    return rrf_fuse([vec, kw], k=k)[:top_k]
+    fused = rrf_fuse([vec, kw], k=k)
+    if await _rerank_on(db):
+        fused = await _maybe_rerank(db, query, fused, top_k)
+    return fused[:top_k]
 
 
 
