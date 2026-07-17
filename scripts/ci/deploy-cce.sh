@@ -28,7 +28,23 @@ render_dir="$(mktemp -d)"
 trap 'rm -rf "$render_dir"' EXIT
 python3 scripts/ci/render_cce.py --output-dir "$render_dir"
 runtime_manifest="$render_dir/runtime.yaml"
+workloads_manifest="$render_dir/workloads.yaml"
+ingress_manifest="$render_dir/ingress.yaml"
 migration_manifest="$render_dir/migration-job.yaml"
+python3 - "$runtime_manifest" "$workloads_manifest" "$ingress_manifest" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+source, workloads_path, ingress_path = map(Path, sys.argv[1:])
+documents = [doc for doc in yaml.safe_load_all(source.read_text(encoding="utf-8")) if doc]
+workloads = [doc for doc in documents if doc.get("kind") in {"Service", "Deployment"}]
+ingresses = [doc for doc in documents if doc.get("kind") == "Ingress"]
+if len(workloads) != 4 or len(ingresses) != 1:
+    raise SystemExit("ERROR: runtime template must contain four workloads and one Ingress")
+workloads_path.write_text(yaml.safe_dump_all(workloads, sort_keys=False), encoding="utf-8")
+ingress_path.write_text(yaml.safe_dump_all(ingresses, sort_keys=False), encoding="utf-8")
+PY
 migration_job="youdoogo-migrate-${IMAGE_TAG}"
 
 echo "[preflight] checking namespace and referenced objects"
@@ -116,7 +132,9 @@ if [[ "$public_status" == "000" ]]; then
 fi
 
 kubectl apply --dry-run=server -f "$migration_manifest" >/dev/null
-kubectl apply --dry-run=server -f "$runtime_manifest" >/dev/null
+kubectl apply --dry-run=server -f "$workloads_manifest" >/dev/null
+# Validate the Ingress only after its referenced Services have been created;
+# CCE admission rejects an otherwise valid first-release Ingress before then.
 
 echo "[migrate] ensuring exactly one bounded Job for ${IMAGE_TAG}"
 if kubectl get job "$migration_job" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
@@ -147,10 +165,14 @@ else
   fi
 fi
 
-echo "[deploy] applying project-owned Services, Deployments, and Ingress"
-kubectl apply -f "$runtime_manifest"
+echo "[deploy] applying project-owned Services and Deployments"
+kubectl apply -f "$workloads_manifest"
 kubectl rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
 kubectl rollout status "deployment/${FRONTEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
+
+echo "[deploy] applying project-owned Ingress after its Services exist"
+kubectl apply --dry-run=server -f "$ingress_manifest" >/dev/null
+kubectl apply -f "$ingress_manifest"
 
 verify_deployment_image() {
   local deployment="$1" container="$2" expected="$3" actual

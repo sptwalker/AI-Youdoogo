@@ -90,6 +90,15 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert deploy["interruptible"] is False
     assert "sha256sum -c" in str(deploy["before_script"])
 
+    deploy_script = (ROOT / "scripts/ci/deploy-cce.sh").read_text(encoding="utf-8")
+    assert "workloads_manifest" in deploy_script
+    assert "ingress_manifest" in deploy_script
+    assert 'kubectl apply -f "$workloads_manifest"' in deploy_script
+    assert 'kubectl apply -f "$ingress_manifest"' in deploy_script
+    assert deploy_script.index('kubectl apply -f "$workloads_manifest"') < deploy_script.index(
+        'kubectl apply -f "$ingress_manifest"'
+    )
+
 
 def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
     objects = rendered_objects(tmp_path)
