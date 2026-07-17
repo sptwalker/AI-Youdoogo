@@ -1,5 +1,5 @@
 /** 真人工作桌面 API（对应后端 app/api/v1/desktop.py）。取代 workbench。 */
-import { request, sseRequest, type SseHandler } from './client'
+import { request, sseRequest, TOKEN_KEY, type SseHandler } from './client'
 
 export interface PendingItem {
   kind: 'task' | 'proposal' | 'resolution' | 'collab'
@@ -67,4 +67,39 @@ export function sendDesktopChat(
   onEvent: SseHandler,
 ): Promise<void> {
   return sseRequest('/desktop/chat', { message, add_agent_ids: addAgentIds }, onEvent)
+}
+
+// ── 文件交付区（AI 交付的文档/表格）──────────────────────────
+export interface Deliverable {
+  id: string
+  file_name: string
+  file_format: 'csv' | 'xlsx' | 'md' | 'txt'
+  agent_name: string
+  file_size: number
+  create_time: string
+}
+
+/** 我的交付区文件（AI 交付的文档/表格，最近优先）。 */
+export function listDeliverables(userId?: string): Promise<Deliverable[]> {
+  return request({
+    method: 'GET',
+    url: '/desktop/deliverables',
+    params: userId ? { user_id: userId } : undefined,
+  })
+}
+
+/** 下载一份交付物：Bearer 在 header 无法用 <a href> 直链，故 fetch 取 blob 触发保存。 */
+export async function downloadDeliverable(id: string, fileName: string): Promise<void> {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const resp = await fetch(`/api/v1/desktop/deliverables/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) throw new Error('下载失败')
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
 }

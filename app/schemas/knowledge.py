@@ -84,6 +84,7 @@ class DataSourceCreate(BaseModel):
     department_id: uuid.UUID | None = None
     config: dict[str, Any] | None = None
     secret_ref: str | None = Field(default=None, max_length=128)
+    owner_agent_id: uuid.UUID | None = None  # 对接该接口的 AI 员工
 
 
 class DataSourceUpdate(BaseModel):
@@ -94,3 +95,4 @@ class DataSourceUpdate(BaseModel):
     secret_ref: str | None = Field(default=None, max_length=128)
     is_active: bool | None = None
     department_id: uuid.UUID | None = None  # 改部门
+    owner_agent_id: uuid.UUID | None = None  # 指派对接AI

@@ -42,12 +42,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """启动时载入 sys_config 覆盖层 + 把 AI 卡片推进 LLM 网关（无卡片时 AI 不可用）。"""
     from app.core import runtime_config
     from app.core.database import async_session_factory
-    from app.services import ai_provider_service, config_service
+    from app.services import ai_provider_service, config_service, environment_service
 
     try:
         async with async_session_factory() as db:
             runtime_config.load(await config_service.all_values(db))
             await ai_provider_service.sync_to_factory(db)
+            await environment_service.ensure_archivist(db)  # 系统档案员自举（docs/13 §9）
         logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - 载入失败退回 .env，不阻断启动
         logger.exception("载入配置覆盖层/AI 卡片失败")

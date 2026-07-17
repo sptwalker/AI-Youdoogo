@@ -36,6 +36,7 @@ async def create_ds(body: DataSourceCreate, db: DB, _: Admin) -> dict:
         department_id=body.department_id,
         config=body.config,
         secret_ref=body.secret_ref,
+        owner_agent_id=body.owner_agent_id,
     )
     return ok({"id": str(ds.id), "name": ds.name, "code": ds.code})
 
@@ -47,7 +48,7 @@ async def update_ds(ds_id: uuid.UUID, body: DataSourceUpdate, db: DB, _: Admin) 
         db, ds_id,
         name=body.name, config=body.config,
         secret_ref=body.secret_ref, is_active=body.is_active,
-        department_id=body.department_id,
+        department_id=body.department_id, owner_agent_id=body.owner_agent_id,
     )
     return ok({"id": str(ds.id), "name": ds.name})
 

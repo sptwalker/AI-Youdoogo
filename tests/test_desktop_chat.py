@@ -134,6 +134,37 @@ async def test_send_rejects_more_than_two_added(db: AsyncSession) -> None:
         await _send_all(db, u, "hi", ids)
 
 
+async def test_send_consult_directive_emits_extra_message(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """协作原语集成：助理产出含【咨询 @X】→ 流中出现被咨询 AI 的独立消息。"""
+    from app.services import collab_protocol
+
+    async def _stream_with_directive(db_: AsyncSession, role: AgentRole, **kw: Any):
+        yield "我先咨询一下。"
+        yield AgentTaskRecord(
+            id=uuid.uuid4(), agent_role_id=role.id, task_type="desktop_chat",
+            output_content="我先咨询一下。\n【咨询 @财务总监】预算多少？", status="success",
+        )
+
+    async def _consult_run(db_: AsyncSession, role: AgentRole, **kw: Any) -> AgentTaskRecord:
+        return AgentTaskRecord(
+            id=uuid.uuid4(), agent_role_id=role.id, task_type="agent_consult",
+            output_content="预算上限100万。", status="success",
+        )
+
+    monkeypatch.setattr(svc, "run_agent_stream", _stream_with_directive)
+    monkeypatch.setattr(collab_protocol, "run_agent", _consult_run)
+    u = await _user(db)
+    await agent_role_service.create_agent_role(db, name="财务总监", prompt_template="x")
+
+    msgs, _ = await _send_all(db, u, "预算是多少", [])
+    # user + 助理（1轮1人）+ 被咨询AI答复 = 3
+    assert len(msgs) == 3
+    assert msgs[2]["speaker_name"] == "财务总监"
+    assert msgs[2]["content"] == "预算上限100万。"
+
+
 async def _add_msg(db: AsyncSession, user_id: uuid.UUID, content: str, days_ago: int) -> None:
     db.add(
         DesktopMessage(

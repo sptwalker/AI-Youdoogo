@@ -30,6 +30,13 @@ def _check_tier(tier: str) -> None:
         raise AppError(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
 
 
+async def _refresh_env(db: AsyncSession) -> None:
+    """AI 员工变更后刷新环境快照（docs/13 §9）。局部 import 防循环依赖；内部吞异常。"""
+    from app.services import environment_service
+
+    await environment_service.refresh_env_doc(db)
+
+
 async def create_agent_role(
     db: AsyncSession,
     *,
@@ -59,6 +66,7 @@ async def create_agent_role(
         await db.rollback()
         raise AppError("角色名或编码已存在", code=409, status_code=409) from exc
     await db.refresh(role)
+    await _refresh_env(db)
     return role
 
 
@@ -112,6 +120,7 @@ async def update_agent_role(
         await db.rollback()
         raise AppError("角色名已被占用", code=409, status_code=409) from exc
     await db.refresh(role)
+    await _refresh_env(db)
     return role
 
 
@@ -123,6 +132,7 @@ async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
         raise AppError("智能体员工不存在", code=404, status_code=404)
     role.is_delete = True
     await db.commit()
+    await _refresh_env(db)
 
 
 async def list_agent_roles(db: AsyncSession) -> list[AgentRole]:

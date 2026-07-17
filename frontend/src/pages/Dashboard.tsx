@@ -3,7 +3,7 @@
  *  红线：桌面只发起/处理，生效动作走各自真人确认端点；AI 对话仅参考。 */
 import { ModalForm, PageContainer, ProFormSelect, ProFormTextArea } from '@ant-design/pro-components'
 import { Badge, Button, Card, Col, Empty, Input, List, Popconfirm, Row, Select, Space, Spin, Tag, Typography, message } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import Markdown from '../components/Markdown'
 import { listUsers, type UserInfo } from '../api/auth'
@@ -11,8 +11,11 @@ import { reviewCollab } from '../api/collab'
 import {
   getDesktop,
   getDesktopChat,
+  listDeliverables,
+  downloadDeliverable,
   sendDesktopChat,
   type AddableAgent,
+  type Deliverable,
   type Desktop,
   type DesktopMessage,
   type PendingItem,
@@ -41,11 +44,24 @@ export default function Dashboard() {
   const [chatMsgs, setChatMsgs] = useState<DesktopMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [deliverables, setDeliverables] = useState<Deliverable[]>([])
+  const chatBoxRef = useRef<HTMLDivElement>(null)
+  // 载入/新消息后自动滚到底（始终停在最新对话上）
+  useEffect(() => {
+    const el = chatBoxRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chatMsgs])
 
   const reload = useCallback(async () => setData(await getDesktop(viewUser)), [viewUser])
+  const loadDeliverables = useCallback(async () => {
+    setDeliverables(await listDeliverables(viewUser))
+  }, [viewUser])
   useEffect(() => {
     void reload()
   }, [reload])
+  useEffect(() => {
+    void loadDeliverables()
+  }, [loadDeliverables])
   useEffect(() => {
     if (me?.role_code === 'admin') void listUsers().then(setUsers)
   }, [me])
@@ -94,6 +110,7 @@ export default function Dashboard() {
       setChatInput(q)
     } finally {
       setChatSending(false)
+      void loadDeliverables()  // AI 可能刚交付了文件，刷新交付区
     }
   }
 
@@ -163,13 +180,15 @@ export default function Dashboard() {
           : undefined
       }
     >
-      <Row gutter={16}>
-        {/* 左主栏：待我处理 + AI 对话 */}
+      <Row gutter={16} style={{ overflow: 'hidden' }}>
+        {/* 左主栏：待我处理 + AI 对话（flex 列布满视口，待办缩小时对话自动增高） */}
         <Col xs={24} lg={15}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 130px)', minHeight: 480 }}>
           <Card
             size="small"
             title={<Badge count={data?.pending_count ?? 0} showZero offset={[10, 0]}>待我处理</Badge>}
             // 空态收缩到最小；有内容按量增高，最多占窗口一半后内部滚动
+            style={{ flex: 'none' }}
             styles={{ body: { maxHeight: '50vh', overflowY: 'auto', padding: data && data.pending.length === 0 ? '8px 16px' : undefined } }}
           >
             {data && data.pending.length === 0 && <Typography.Text type="secondary">暂无待处理</Typography.Text>}
@@ -199,7 +218,9 @@ export default function Dashboard() {
           {!isSupervising && (
             <Card
               title={assistant ? `与${assistant.name}对话` : '我的助理'}
-              style={{ marginTop: 16 }}
+              // 占满剩余高度：卡片整体 flex 列，消息区 flex:1 内部滚动
+              style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }}
               extra={
                 <Select
                   mode="multiple"
@@ -214,7 +235,7 @@ export default function Dashboard() {
                 />
               }
             >
-              <div style={{ height: 300, overflowY: 'auto', padding: '4px 2px', background: '#fafafa', borderRadius: 6, marginBottom: 10 }}>
+              <div ref={chatBoxRef} style={{ flex: 1, minHeight: 200, overflowY: 'auto', padding: '4px 2px', background: '#fafafa', borderRadius: 6, marginBottom: 10, fontSize: 12 }}>
                 {chatMsgs.length === 0 && (
                   <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 120 }}>
                     向你的助理提问，它会结合知识库与过往对话回答（仅供参考）。可加入其他 AI 一起圆桌讨论。
@@ -256,10 +277,12 @@ export default function Dashboard() {
               </Space.Compact>
             </Card>
           )}
+          </div>
         </Col>
 
-        {/* 右栏：发起需求 + 我的任务 */}
+        {/* 右栏：发起需求 + 我的任务 + 文件交付区（固定高度内部滚动，不顶高页面） */}
         <Col xs={24} lg={9}>
+          <div style={{ height: 'calc(100vh - 130px)', minHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
           {!isSupervising && (
             <Card title="发起需求">
               <Space wrap>
@@ -286,6 +309,33 @@ export default function Dashboard() {
               )}
             />
           </Card>
+          <Card
+            title={<Badge count={deliverables.length} showZero offset={[10, 0]}>文件交付区</Badge>}
+            style={{ marginTop: 16 }}
+            extra={<a onClick={() => void loadDeliverables()}>刷新</a>}
+          >
+            {deliverables.length === 0 && <Empty description="AI 交付的文档/表格会出现在这里" />}
+            <List
+              dataSource={deliverables}
+              renderItem={(d) => (
+                <List.Item
+                  actions={[
+                    <a key="dl" onClick={() => void downloadDeliverable(d.id, d.file_name)}>下载</a>,
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={<Space><Tag color="cyan">{d.file_format.toUpperCase()}</Tag>{d.file_name}</Space>}
+                    description={
+                      <Typography.Text type="secondary">
+                        {d.agent_name || 'AI'} 交付 · {new Date(d.create_time).toLocaleString()}
+                      </Typography.Text>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+          </div>
         </Col>
       </Row>
     </PageContainer>

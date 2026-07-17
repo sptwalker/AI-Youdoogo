@@ -43,6 +43,13 @@ def _check_role(role_code: str) -> None:
         raise AppError(f"非法角色：{role_code}，可选 {'/'.join(VALID_ROLES)}")
 
 
+async def _refresh_env(db: AsyncSession) -> None:
+    """用户变更后刷新环境快照（docs/13 §9）。局部 import 防循环依赖；内部吞异常。"""
+    from app.services import environment_service
+
+    await environment_service.refresh_env_doc(db)
+
+
 async def create_user(db: AsyncSession, data: UserCreate) -> SysUser:
     """创建用户（用户名唯一）。"""
     _check_role(data.role_code)
@@ -65,6 +72,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> SysUser:
         await db.rollback()
         raise AppError("用户名已存在", code=409, status_code=409) from exc
     await db.refresh(user)
+    await _refresh_env(db)
     return user
 
 
@@ -96,4 +104,5 @@ async def update_user(db: AsyncSession, user_id: uuid.UUID, data: UserUpdate) ->
         user.is_active = data.is_active
     await db.commit()
     await db.refresh(user)
+    await _refresh_env(db)
     return user

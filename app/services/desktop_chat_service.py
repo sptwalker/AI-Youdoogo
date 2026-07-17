@@ -18,6 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent_stream
+from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
 from app.knowledge.ingest import ingest_text
@@ -272,6 +273,10 @@ async def send_stream(
                     yield ("delta", {"text": item})
             assert record is not None  # run_agent_stream 末项必为记录
             reply = record.output_content or record.error_msg or "（无回应）"
+            # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库（DB 与显示一致）
+            # user_intent 透传用户原句：取数解读轮据此判断是否还要交付日报（阶段A,docs/14）
+            proto = await execute_all(db, agent, reply, user_id=user.id, user_intent=message)
+            reply = fold_notes(reply, proto)
             ai_msg = DesktopMessage(
                 owner_user_id=user.id, speaker_type=SPEAKER_AI,
                 speaker_agent_id=agent.id, speaker_name=agent.name, content=reply,
@@ -281,3 +286,20 @@ async def send_stream(
             await db.refresh(ai_msg)
             convo.append((agent.name, reply))
             yield ("message_end", _msg_dict(ai_msg))
+            # 被咨询 AI 的答复作为独立消息追加（下一轮圆桌经 convo 可见，无需追问轮）
+            for consulted, rec in proto.consult_replies:
+                answer = rec.output_content or rec.error_msg or "（无回应）"
+                yield (
+                    "message_start",
+                    {"speaker_agent_id": str(consulted.id), "speaker_name": consulted.name},
+                )
+                yield ("delta", {"text": answer})  # 咨询是单发非流式，整段一个 delta
+                c_msg = DesktopMessage(
+                    owner_user_id=user.id, speaker_type=SPEAKER_AI,
+                    speaker_agent_id=consulted.id, speaker_name=consulted.name, content=answer,
+                )
+                db.add(c_msg)
+                await db.commit()
+                await db.refresh(c_msg)
+                convo.append((consulted.name, answer))
+                yield ("message_end", _msg_dict(c_msg))

@@ -69,6 +69,14 @@ async def run_task(
 
     # executing → reported，产出写回
     result = record.output_content or record.error_msg or "（无产出）"
+    # 协作原语（docs/13 §10）：咨询答复与执行注记折进任务结果（真人验收时一并可见）
+    from app.agents import skills
+
+    proto = await skills.execute_all(db, role, result, user_id=operator_id)
+    for consulted, rec in proto.consult_replies:
+        answer = rec.output_content or rec.error_msg or "（无产出）"
+        result += f"\n\n---\n【{consulted.name} 答复】\n{answer}"
+    result = skills.fold_notes(result, proto)
     return await task_service.transition(
         db, task_id, task_flow.REPORTED,
         operator_id=role.id,  # 执行者为智能体

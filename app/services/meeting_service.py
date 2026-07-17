@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import get_agent_role, run_agent, run_agent_stream
+from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
 from app.models.agent import AgentTaskRecord
@@ -143,14 +144,34 @@ async def ai_expert_speak_stream(
         else:
             yield ("delta", {"text": item})
     assert record is not None  # run_agent_stream 末项必为记录
+    content = record.output_content or record.error_msg or "（无产出）"
+    # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库
+    proto = await execute_all(db, role, content, user_id=operator_id)
+    content = fold_notes(content, proto)
     d = MeetingDiscuss(
         meeting_id=meeting_id, speaker_type="ai", speaker_id=role.id,
-        speaker_name=role.name, content=record.output_content or record.error_msg or "（无产出）",
+        speaker_name=role.name, content=content,
     )
     db.add(d)
     await db.commit()
     await db.refresh(d)
     yield ("message_end", DiscussOut.model_validate(d).model_dump(mode="json"))
+    # 被咨询 AI 的答复作为独立会议发言追加
+    for consulted, rec in proto.consult_replies:
+        answer = rec.output_content or rec.error_msg or "（无回应）"
+        yield (
+            "message_start",
+            {"speaker_agent_id": str(consulted.id), "speaker_name": consulted.name},
+        )
+        yield ("delta", {"text": answer})
+        c = MeetingDiscuss(
+            meeting_id=meeting_id, speaker_type="ai", speaker_id=consulted.id,
+            speaker_name=consulted.name, content=answer,
+        )
+        db.add(c)
+        await db.commit()
+        await db.refresh(c)
+        yield ("message_end", DiscussOut.model_validate(c).model_dump(mode="json"))
 
 
 async def cast_vote(

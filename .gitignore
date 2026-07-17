@@ -35,3 +35,6 @@ data/
 
 # Claude Code local
 .claude/settings.local.json
+
+# CodeGraph 本地索引（机器生成，不入库）
+.codegraph/

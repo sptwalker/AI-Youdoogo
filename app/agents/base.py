@@ -98,7 +98,7 @@ async def _prepare(
     """run_agent / run_agent_stream 共用的执行前准备。
 
     返回 (llm_role, system_content, effective_message)：档位映射 → 全局红线前缀
-    （配置层故障回退内置默认）→ 可选知识注入。
+    （配置层故障回退内置默认）→ 技能提示词段（docs/13 §11）→ 可选知识注入。
     """
     llm_role = _LLM_ROLE_BY_TIER.get(role.model_role, "default")
     try:
@@ -108,8 +108,12 @@ async def _prepare(
     except Exception:  # noqa: BLE001 - sys_config 不可用时用内置默认，不阻断 AI
         logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
         global_prompt = _DEFAULT_GLOBAL_PROMPT
-    # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）
-    system_content = f"{global_prompt}\n\n{role.prompt_template}"
+    # 提示词分层：全局红线不变量前缀 + 该角色特有段（docs/13 §4）+ 该 AI 启用技能的注入段（§11）
+    from app.agents import skills  # 局部 import 防循环（skills→collab_protocol→base）
+
+    system_content = (
+        f"{global_prompt}\n\n{role.prompt_template}{await skills.prompt_sections(db, role)}"
+    )
     effective_message = user_message
     if use_knowledge:
         effective_message = await _inject_knowledge(db, role, user_message)

@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent_stream
+from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -174,16 +175,37 @@ async def post_message_stream(
             else:
                 yield ("delta", {"text": item})
         assert record is not None  # run_agent_stream 末项必为记录
+        reply = record.output_content or record.error_msg or "（无产出）"
+        # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库
+        proto = await execute_all(db, role, reply, user_id=speaker_id)
+        reply = fold_notes(reply, proto)
         ai = DiscussionMessage(
             channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=role.id,
             speaker_name=role.name,
-            content=record.output_content or record.error_msg or "（无产出）",
+            content=reply,
             ai_source_record_id=record.id, mentioned_agent_ids=[],  # 护栏4：AI 不 @人，不回环
         )
         db.add(ai)
         await db.commit()
         await db.refresh(ai)
         yield ("message_end", _msg_dict(ai))
+        # 被咨询 AI 的答复作为独立消息追加（带留痕溯源，不 @人）
+        for consulted, rec in proto.consult_replies:
+            answer = rec.output_content or rec.error_msg or "（无回应）"
+            yield (
+                "message_start",
+                {"speaker_agent_id": str(consulted.id), "speaker_name": consulted.name},
+            )
+            yield ("delta", {"text": answer})
+            c_msg = DiscussionMessage(
+                channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=consulted.id,
+                speaker_name=consulted.name, content=answer,
+                ai_source_record_id=rec.id, mentioned_agent_ids=[],
+            )
+            db.add(c_msg)
+            await db.commit()
+            await db.refresh(c_msg)
+            yield ("message_end", _msg_dict(c_msg))
 
 
 async def promote_message(

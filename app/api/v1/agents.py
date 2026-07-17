@@ -126,6 +126,20 @@ async def list_roles(db: DB, _: CurrentUser) -> dict:
     return ok([AgentRoleOut.model_validate(r).model_dump(mode="json") for r in roles])
 
 
+@router.get("/skills")
+async def list_skills(_: CurrentUser) -> dict:
+    """技能注册表（docs/13 §11），供「配置技能」多选。"""
+    from app.agents.skills import REGISTRY
+
+    return ok([
+        {
+            "key": s.key, "label": s.label,
+            "description": s.description, "default_on": s.default_on,
+        }
+        for s in REGISTRY.values()
+    ])
+
+
 @router.post("/roles")
 async def create_role(body: AgentRoleCreate, db: DB, _: Admin) -> dict:
     """新增部门智能体角色（仅 admin）——新增部门智能体即建一行，零新代码。"""

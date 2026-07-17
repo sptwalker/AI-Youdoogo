@@ -2,24 +2,28 @@
 import {
   ModalForm,
   PageContainer,
+  ProFormSelect,
   ProFormText,
   ProFormTextArea,
   ProTable,
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Card, Modal, Rate, Tag, Typography, message } from 'antd'
-import { useRef, useState } from 'react'
+import { Button, Card, Modal, Rate, Space, Tag, Typography, message } from 'antd'
+import { useEffect, useRef, useState } from 'react'
 import Markdown from '../components/Markdown'
 import {
   addFeedback,
   generateProposal,
   listRecords,
   listRoles,
+  listSkills,
   optimizePrompt,
   updateRolePrompt,
+  updateRoleTools,
   type AgentRole,
   type OptimizeResult,
+  type SkillInfo,
   type TaskRecord,
 } from '../api/agents'
 
@@ -107,11 +111,18 @@ export default function Agents() {
 
 function RolesCard() {
   const [opt, setOpt] = useState<OptimizeResult | null>(null)
+  const [skillList, setSkillList] = useState<SkillInfo[]>([])
+  const rolesRef = useRef<ActionType>(null)
+  useEffect(() => {
+    void listSkills().then(setSkillList)
+  }, [])
+  const skillLabel = (k: string) => skillList.find((s) => s.key === k)?.label ?? k
 
   return (
     <Card title="智能体角色" style={{ marginBottom: 16 }}>
       <ProTable<AgentRole>
         rowKey="id"
+        actionRef={rolesRef}
         search={false}
         options={false}
         pagination={false}
@@ -120,6 +131,20 @@ function RolesCard() {
           { title: '角色', dataIndex: 'name' },
           { title: '职责', dataIndex: 'duty', render: (_, r) => r.duty || '-' },
           { title: '模型档位', dataIndex: 'model_role' },
+          {
+            title: '技能',
+            dataIndex: 'tools',
+            render: (_, r) =>
+              r.tools.length === 0 ? (
+                <Tag>默认全开</Tag>
+              ) : (
+                <Space size={4} wrap>
+                  {r.tools.map((k) => (
+                    <Tag key={k} color="blue">{skillLabel(k)}</Tag>
+                  ))}
+                </Space>
+              ),
+          },
           {
             title: '启用',
             dataIndex: 'is_active',
@@ -130,19 +155,45 @@ function RolesCard() {
           {
             title: '操作',
             render: (_, r) => (
-              <a
-                onClick={async () => {
-                  message.loading({ content: '基于低分反馈优化中…', key: 'o' })
-                  try {
-                    setOpt(await optimizePrompt(r.id))
-                    message.destroy('o')
-                  } catch {
-                    message.destroy('o')
-                  }
-                }}
-              >
-                优化提示词
-              </a>
+              <Space>
+                <ModalForm<{ tools: string[] }>
+                  key="skills"
+                  title={`配置技能 · ${r.name}`}
+                  trigger={<a>配置技能</a>}
+                  modalProps={{ destroyOnHidden: true }}
+                  initialValues={{ tools: r.tools }}
+                  onFinish={async (v) => {
+                    await updateRoleTools(r.id, v.tools ?? [])
+                    message.success('已更新技能')
+                    rolesRef.current?.reload()
+                    return true
+                  }}
+                >
+                  <ProFormSelect
+                    name="tools"
+                    label="启用技能"
+                    mode="multiple"
+                    tooltip="留空 = 默认技能全开"
+                    options={skillList.map((s) => ({
+                      value: s.key,
+                      label: `${s.label}（${s.description}）`,
+                    }))}
+                  />
+                </ModalForm>
+                <a
+                  onClick={async () => {
+                    message.loading({ content: '基于低分反馈优化中…', key: 'o' })
+                    try {
+                      setOpt(await optimizePrompt(r.id))
+                      message.destroy('o')
+                    } catch {
+                      message.destroy('o')
+                    }
+                  }}
+                >
+                  优化提示词
+                </a>
+              </Space>
             ),
           },
         ]}

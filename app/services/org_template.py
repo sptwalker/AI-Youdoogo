@@ -177,6 +177,10 @@ async def seed_org_template(
         director.report_to_id = exec_by_code[exec_code].id
 
     await db.commit()
+    # 骨架落定后刷新环境快照（批量种子只刷一次；局部 import 防循环，内部吞异常）
+    from app.services import environment_service
+
+    await environment_service.refresh_env_doc(db)
     return {
         "root": root.name,
         "departments": len(_DEPARTMENTS),

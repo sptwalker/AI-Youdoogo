@@ -20,8 +20,15 @@ export interface AgentRole {
   duty: string | null
   model_role: string
   permission_scope: Record<string, unknown>
-  tools: unknown[]
+  tools: string[]
   is_active: boolean
+}
+
+export interface SkillInfo {
+  key: string
+  label: string
+  description: string
+  default_on: boolean
 }
 
 export interface Alert {
@@ -52,6 +59,16 @@ export function listRecords(limit = 20): Promise<TaskRecord[]> {
 
 export function listRoles(): Promise<AgentRole[]> {
   return request({ method: 'GET', url: '/agents/roles' })
+}
+
+/** 技能注册表（docs/13 §11），供「配置技能」多选。 */
+export function listSkills(): Promise<SkillInfo[]> {
+  return request({ method: 'GET', url: '/agents/skills' })
+}
+
+/** 配置某 AI 的启用技能（空列表 = 默认全开）。 */
+export function updateRoleTools(roleId: string, tools: string[]) {
+  return request({ method: 'PATCH', url: `/agents/roles/${roleId}`, data: { tools } })
 }
 
 export interface ChatTurn {

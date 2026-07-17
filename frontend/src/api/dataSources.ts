@@ -11,6 +11,8 @@ export interface DataSource {
   secret_ref: string | null
   secret_status: 'not_set' | 'configured' | 'missing'
   is_active: boolean
+  owner_agent_id: string | null
+  owner_agent_name: string | null
 }
 
 export const DS_TYPES = ['thinkingdata', 'feishu_bitable', 'feishu_docx', 'excel', 'http_api']
@@ -25,13 +27,20 @@ export function createDataSource(payload: {
   code?: string
   department_id?: string
   secret_ref?: string
+  owner_agent_id?: string
 }): Promise<{ id: string }> {
   return request({ method: 'POST', url: '/data-sources', data: payload })
 }
 
 export function updateDataSource(
   id: string,
-  payload: { name?: string; secret_ref?: string; is_active?: boolean; department_id?: string },
+  payload: {
+    name?: string
+    secret_ref?: string
+    is_active?: boolean
+    department_id?: string
+    owner_agent_id?: string
+  },
 ): Promise<{ id: string }> {
   return request({ method: 'PATCH', url: `/data-sources/${id}`, data: payload })
 }

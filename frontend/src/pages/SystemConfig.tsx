@@ -11,6 +11,7 @@ import { Alert, Button, Card, List, Popconfirm, Space, Tag, Typography, message 
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listConfigs, testConnectivity, updateConfig, type ConnResult, type SysConfig } from '../api/admin'
+import { testReadOpsData, type TestReadResult } from '../api/opsData'
 import { initTemplate } from '../api/org'
 
 const CAT_LABEL: Record<string, string> = {
@@ -54,6 +55,9 @@ export default function SystemConfig() {
   const [configs, setConfigs] = useState<SysConfig[]>([])
   const [conn, setConn] = useState<ConnResult[] | null>(null)
   const [testing, setTesting] = useState(false)
+  const [readDate, setReadDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [readResult, setReadResult] = useState<TestReadResult | null>(null)
+  const [reading, setReading] = useState(false)
 
   const load = () => listConfigs().then(setConfigs)
   useEffect(() => {
@@ -66,6 +70,15 @@ export default function SystemConfig() {
       setConn(await testConnectivity())
     } finally {
       setTesting(false)
+    }
+  }
+
+  const runReadTest = async () => {
+    setReading(true)
+    try {
+      setReadResult(await testReadOpsData(readDate))
+    } finally {
+      setReading(false)
     }
   }
   const CONN = {
@@ -139,6 +152,52 @@ export default function SystemConfig() {
             </Tag>
           ))}
         </Space>
+      </Card>
+
+      <Card
+        title="运营数据读取测试 (ThinkingData)"
+        size="small"
+        style={{ marginBottom: 16 }}
+        extra={
+          <Space>
+            <input
+              type="date"
+              value={readDate}
+              onChange={(e) => setReadDate(e.target.value)}
+              style={{ padding: '2px 6px' }}
+            />
+            <Button size="small" type="primary" loading={reading} onClick={runReadTest}>
+              测试读取该日数据
+            </Button>
+          </Space>
+        }
+      >
+        {!readResult && (
+          <Typography.Text type="secondary">
+            填好 TD 地址/密钥/拉取 SQL 后，选统计日点「测试读取」，用生效配置真跑一次查询（不落库、不回显密钥）。
+          </Typography.Text>
+        )}
+        {readResult && (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space>
+              <Tag color={CONN[readResult.status].color}>{CONN[readResult.status].text}</Tag>
+              <Typography.Text>{readResult.msg}</Typography.Text>
+            </Space>
+            {readResult.sample.length > 0 && (
+              <List
+                size="small"
+                header={<Typography.Text type="secondary">映射后样例（前 {readResult.sample.length} 行）</Typography.Text>}
+                bordered
+                dataSource={readResult.sample}
+                renderItem={(r) => (
+                  <List.Item>
+                    产品：{String(r.product ?? '（空，检查映射）')} · DAU：{String(r.dau ?? '-')} · 新增：{String(r.new_users ?? '-')}
+                  </List.Item>
+                )}
+              />
+            )}
+          </Space>
+        )}
       </Card>
 
       {cats.map((cat) => (

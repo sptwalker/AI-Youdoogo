@@ -68,6 +68,9 @@ class DataSource(CommonMixin, Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("sys_department.id"), nullable=True
     )  # 公司级=根节点
+    owner_agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_role.id"), nullable=True
+    )  # 对接该数据接口的 AI 员工（环境快照展示，docs/13 §9）
     config: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict)  # 仅非密参数
     secret_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)  # .env 变量名
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

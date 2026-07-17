@@ -65,14 +65,17 @@ async def _test_feishu() -> dict[str, Any]:
 
 
 async def _test_thinkingdata() -> dict[str, Any]:
-    s = get_settings()
-    if not s.td_base_url:
+    from app.core import runtime_config
+
+    # 读生效地址：UI 填的 sys_config 覆盖优先，回退 .env（与 ops_data 取数口径一致）
+    base_url = str(runtime_config.effective("td_base_url", get_settings().td_base_url) or "")
+    if not base_url:
         return {"target": "thinkingdata", "status": "not_configured", "latency_ms": 0,
-                "msg": "未配置 TD_BASE_URL"}
+                "msg": "未配置 TD 地址"}
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=5) as c:
-            await c.get(s.td_base_url)  # 网络可达即算通（鉴权靠真实查询）
+            await c.get(base_url)  # 网络可达即算通（鉴权/取数靠「运营数据读取测试」）
         return {"target": "thinkingdata", "status": "ok", "latency_ms": _elapsed(t0),
                 "msg": "网络可达"}
     except Exception as exc:  # noqa: BLE001

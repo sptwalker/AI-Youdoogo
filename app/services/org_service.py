@@ -70,6 +70,13 @@ async def get_tree(db: AsyncSession) -> list[dict[str, Any]]:
     return roots
 
 
+async def _refresh_env(db: AsyncSession) -> None:
+    """组织变更后刷新环境快照（docs/13 §9）。局部 import 防循环依赖；内部吞异常。"""
+    from app.services import environment_service
+
+    await environment_service.refresh_env_doc(db)
+
+
 async def create_node(
     db: AsyncSession, *, name: str, parent_id: uuid.UUID, code: str | None = None
 ) -> SysDepartment:
@@ -96,6 +103,7 @@ async def create_node(
         await db.rollback()
         raise AppError("同级下已有同名部门", code=409, status_code=409) from exc
     await db.refresh(node)
+    await _refresh_env(db)
     return node
 
 
@@ -111,6 +119,7 @@ async def update_node(
         node.sort_order = sort_order
     await db.commit()
     await db.refresh(node)
+    await _refresh_env(db)
     return node
 
 
@@ -139,6 +148,7 @@ async def delete_node(db: AsyncSession, dept_id: uuid.UUID) -> None:
         raise AppError("该部门下还有智能体员工，请先移除或转移")
     node.is_delete = True
     await db.commit()
+    await _refresh_env(db)
 
 
 async def set_supervisor(
@@ -153,6 +163,7 @@ async def set_supervisor(
     node.supervisor_user_id = supervisor_user_id
     await db.commit()
     await db.refresh(node)
+    await _refresh_env(db)
     return node
 
 

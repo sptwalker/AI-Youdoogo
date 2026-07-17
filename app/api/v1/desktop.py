@@ -3,10 +3,12 @@
 每人只见自己（GET /desktop）；admin 可查他人做监督（GET /desktop/{user_id}）。
 """
 
+import io
 import uuid
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,8 +17,10 @@ from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.core.sse import sse_response
+from app.knowledge import storage
+from app.models.deliverable import Deliverable
 from app.models.system import SysUser
-from app.services import auth_service, desktop_chat_service, desktop_service
+from app.services import auth_service, deliver_service, desktop_chat_service, desktop_service
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])
 
@@ -55,6 +59,41 @@ async def send_chat(body: ChatSend, db: DB, user: CurrentUser) -> StreamingRespo
     """发消息 → 助理（+最多2个被加入AI）圆桌逐字流式回复（SSE）。"""
     return sse_response(
         desktop_chat_service.send_stream(db, user, body.message, body.add_agent_ids)
+    )
+
+
+@router.get("/deliverables")
+async def list_deliverables(
+    db: DB,
+    user: CurrentUser,
+    user_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> dict:
+    """我的文件交付区（AI 交付的文档/表格）。admin 可传 user_id 监督他人。"""
+    owner_id = user.id
+    if user_id is not None and user_id != user.id:
+        if user.role_code != "admin":
+            raise AppError("仅管理员可查看他人交付区", code=403, status_code=403)
+        owner_id = user_id
+    return ok(await deliver_service.list_deliverables(db, owner_id))
+
+
+@router.get("/deliverables/{deliverable_id}/download")
+async def download_deliverable(
+    deliverable_id: uuid.UUID, db: DB, user: CurrentUser
+) -> StreamingResponse:
+    """下载一份交付物（仅本人或 admin）。storage_path 去桶前缀取 object key 回读。"""
+    row = await db.get(Deliverable, deliverable_id)
+    if row is None or row.is_delete:
+        raise AppError("交付物不存在", code=404, status_code=404)
+    if row.owner_user_id != user.id and user.role_code != "admin":
+        raise AppError("无权下载该交付物", code=403, status_code=403)
+    _, _, object_name = row.storage_path.partition("/")  # "bucket/object" → "object"
+    data = await storage.get_object_bytes(object_name)
+    disposition = f"attachment; filename*=UTF-8''{quote(row.file_name)}"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": disposition},
     )
 
 
