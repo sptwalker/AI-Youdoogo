@@ -45,7 +45,6 @@ def inputs() -> dict[str, str]:
     runtime_secret = required("RUNTIME_SECRET_NAME")
     runtime_configmap = required("RUNTIME_CONFIGMAP_NAME")
     ingress_class = required("INGRESS_CLASS_NAME")
-    tls_secret = required("TLS_SECRET_NAME")
     image_tag = required("IMAGE_TAG")
     backend_image = required("BACKEND_IMAGE")
     frontend_image = required("FRONTEND_IMAGE")
@@ -56,7 +55,6 @@ def inputs() -> dict[str, str]:
         ("RUNTIME_SECRET_NAME", runtime_secret),
         ("RUNTIME_CONFIGMAP_NAME", runtime_configmap),
         ("INGRESS_CLASS_NAME", ingress_class),
-        ("TLS_SECRET_NAME", tls_secret),
         ("IMAGE_TAG", image_tag),
     ):
         validate_name(name, value)
@@ -71,7 +69,6 @@ def inputs() -> dict[str, str]:
         "__RUNTIME_SECRET_NAME__": runtime_secret,
         "__RUNTIME_CONFIGMAP_NAME__": runtime_configmap,
         "__INGRESS_CLASS_NAME__": ingress_class,
-        "__TLS_SECRET_NAME__": tls_secret,
         "__IMAGE_TAG__": image_tag,
         "__BACKEND_IMAGE__": backend_image,
         "__FRONTEND_IMAGE__": frontend_image,

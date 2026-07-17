@@ -238,10 +238,6 @@ metadata:
     kubernetes.io/elb.tls-certificate-ids: 56de20421757445ea53f5af51ecb4e10
 spec:
   ingressClassName: __INGRESS_CLASS_NAME__
-  tls:
-    - hosts:
-        - ai.youdoogo.com
-      secretName: __TLS_SECRET_NAME__
   rules:
     - host: ai.youdoogo.com
       http:

@@ -27,7 +27,6 @@ def rendered_objects(tmp_path: Path) -> list[dict]:
         "RUNTIME_SECRET_NAME": "youdoogo-runtime",
         "RUNTIME_CONFIGMAP_NAME": "youdoogo-runtime-config",
         "INGRESS_CLASS_NAME": "cce-public",
-        "TLS_SECRET_NAME": "ai-youdoogo-com-tls",
         "IMAGE_TAG": IMAGE_TAG,
         "BACKEND_IMAGE": f"swr.example.com/approved/youdoogo-backend:{IMAGE_TAG}",
         "FRONTEND_IMAGE": f"swr.example.com/approved/youdoogo-frontend:{IMAGE_TAG}",
@@ -103,9 +102,7 @@ def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
         "kubernetes.io/elb.tls-certificate-ids": "56de20421757445ea53f5af51ecb4e10",
     }
     assert ingress["spec"]["ingressClassName"] == "cce-public"
-    assert ingress["spec"]["tls"] == [
-        {"hosts": ["ai.youdoogo.com"], "secretName": "ai-youdoogo-com-tls"}
-    ]
+    assert "tls" not in ingress["spec"]
     assert ingress["spec"]["rules"][0]["host"] == "ai.youdoogo.com"
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
     assert paths == [
@@ -188,7 +185,6 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
         "KUBE_NAMESPACE",
         "KUBE_IMAGE_PULL_SECRET",
         "INGRESS_CLASS_NAME",
-        "TLS_SECRET_NAME",
         "RUNTIME_SECRET_NAME",
         "RUNTIME_CONFIGMAP_NAME",
     )
@@ -265,7 +261,6 @@ def test_preflight_validates_without_printing_values() -> None:
         "KUBE_NAMESPACE": "youdoogo-prod",
         "KUBE_IMAGE_PULL_SECRET": "swr-pull",
         "INGRESS_CLASS_NAME": "cce-public",
-        "TLS_SECRET_NAME": "ai-youdoogo-com-tls",
         "RUNTIME_SECRET_NAME": "youdoogo-runtime",
         "RUNTIME_CONFIGMAP_NAME": "youdoogo-runtime-config",
     }

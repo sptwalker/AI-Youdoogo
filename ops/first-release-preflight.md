@@ -38,12 +38,11 @@ They are still protected because they select production infrastructure.
 | `SWR_REGISTRY_OVERRIDE` | Full approved SWR registry namespace/repository root without a URL scheme. No default is assumed because the `ai` project repository ownership is not proven. |
 | `KUBE_NAMESPACE` | Existing namespace dedicated or approved for YOUDOOGO workloads. |
 | `KUBE_IMAGE_PULL_SECRET` | Existing Docker registry pull Secret name in `KUBE_NAMESPACE`. |
-| `INGRESS_CLASS_NAME` | Existing IngressClass whose controller publishes host rules through the ELB serving `ai.youdoogo.com`. |
-| `TLS_SECRET_NAME` | Existing `kubernetes.io/tls` Secret in `KUBE_NAMESPACE`, owned by the platform/certificate process and valid for `ai.youdoogo.com`. |
-| `RUNTIME_SECRET_NAME` | Existing application runtime Secret in `KUBE_NAMESPACE`. |
-| `RUNTIME_CONFIGMAP_NAME` | Existing application runtime ConfigMap in `KUBE_NAMESPACE`. |
+| `INGRESS_CLASS_NAME` | Existing CCE controller class used by the approved shared ELB listener (`cce`). |
+| `RUNTIME_SECRET_NAME` | Existing application runtime Secret in `KUBE_NAMESPACE`; first-release bootstrap creates it once. |
+| `RUNTIME_CONFIGMAP_NAME` | Existing application runtime ConfigMap in `KUBE_NAMESPACE`; first-release bootstrap creates it. |
 
-All 13 names are checked by `preflight_delivery` before either image is built. The deployment
+All 12 variables are checked by `preflight_delivery` before either image is built. The deployment
 script validates Kubernetes object existence, type, required keys, host ownership, server-side
 dry runs, and RBAC before mutating a workload.
 
@@ -62,16 +61,20 @@ template and delivery contract together, and review the change before delivery. 
 controller-generated status annotations, another host's routing rules, DNS ownership, or
 certificate material.
 
-- `KUBE_NAMESPACE` already exists. CI is not allowed to create it.
+- The first-release operator runs `KUBE_NAMESPACE=nexus-prod RUNTIME_SECRET_NAME=youdoogo-runtime`
+  `RUNTIME_CONFIGMAP_NAME=youdoogo-runtime-config bash scripts/ci/bootstrap-runtime.sh` with a
+  production kubeconfig before enabling CI. It creates only YOUDOOGO-owned Postgres, Redis, MinIO,
+  `csi-disk` PVCs, ConfigMap, and a one-time generated runtime Secret; it never reads, reuses, or
+  overwrites another application's credentials.
 - `KUBE_IMAGE_PULL_SECRET` already exists and is type `kubernetes.io/dockerconfigjson` or
   `kubernetes.io/dockercfg`; both immutable commit images are pullable from it.
-- `RUNTIME_SECRET_NAME` already exists with nonempty keys `DATABASE_URL`, `REDIS_URL`,
-  `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `JWT_SECRET`. Their values, dependency hosts, and
-  credentials are owned outside this repository and must not be copied into GitLab logs.
-- `RUNTIME_CONFIGMAP_NAME` already exists with keys `APP_ENV`, `LOG_LEVEL`, `MINIO_ENDPOINT`, and
-  `MINIO_BUCKET`; `APP_ENV` must equal `production`. Optional application variables may be added
-  to the same references by the runtime owner. The runtime Secret must not duplicate these four
-  keys, so it cannot silently override the validated nonsecret configuration.
+- `RUNTIME_SECRET_NAME` is generated once by `scripts/ci/bootstrap-runtime.sh`; it contains nonempty
+  keys `DATABASE_URL`, `REDIS_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `JWT_SECRET`, and the
+  private database bootstrap password. The script refuses to overwrite an existing Secret and never
+  prints values. These credentials are not stored in GitLab variables.
+- `RUNTIME_CONFIGMAP_NAME` is created by the same bootstrap with `APP_ENV=production`, `LOG_LEVEL`,
+  `MINIO_ENDPOINT`, and `MINIO_BUCKET`. The runtime Secret must not duplicate these four keys, so it
+  cannot silently override validated nonsecret configuration.
 - Feishu OAuth login is optional and remains disabled for first release unless separately approved.
   Enabling it requires `FEISHU_APP_ID` and `FEISHU_APP_SECRET` in the referenced runtime Secret,
   plus `FEISHU_OAUTH_ENABLED=true` and the exact
@@ -79,14 +82,13 @@ certificate material.
   runtime ConfigMap (or the documented administrator runtime-config flow). The same callback must
   first be registered manually in Feishu Open Platform and users must be pre-bound by app-scoped
   `open_id`; the pipeline does not perform or claim those actions.
-- `TLS_SECRET_NAME` already contains nonempty `tls.crt` and `tls.key` entries and its certificate
-  covers `ai.youdoogo.com`. CI never creates or renews certificates.
-- `INGRESS_CLASS_NAME` already exists and its controller is configured to use the ELB reached by
-  public DNS. If that CCE controller requires ELB-specific annotations or an ELB ID, the platform
-  owner must first establish an approved IngressClass/controller policy; this repository does not
-  guess Huawei annotations or an ELB identifier.
+- HTTPS is supplied by the shared ELB's verified `kubernetes.io/elb.tls-certificate-ids` annotation;
+  no `kubernetes.io/tls` Secret is created, mounted, or required by this project.
+- `INGRESS_CLASS_NAME` is the existing `cce` controller path backed by that ELB. The controller has
+  no cluster `IngressClass` object, so CI validates the rendered Ingress class and shared ELB
+  annotations instead of requiring a nonexistent object.
 - No other Ingress in the cluster owns `ai.youdoogo.com`. A pre-existing
-  `KUBE_NAMESPACE/youdoogo` Ingress is accepted only when its class and TLS Secret already match.
+  `KUBE_NAMESPACE/youdoogo` Ingress is accepted only when its class matches the approved input.
 - Public DNS ownership remains with the platform team: `ai.youdoogo.com` must resolve only to the
   intended ELB. The current ELB 404 is not delivery success; the pipeline must complete and both
   HTTPS smoke probes must pass.

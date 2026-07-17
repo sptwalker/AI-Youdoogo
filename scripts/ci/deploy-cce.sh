@@ -8,7 +8,7 @@ FRONTEND_DEPLOYMENT="youdoogo-frontend"
 
 required=(
   KUBE_NAMESPACE KUBE_IMAGE_PULL_SECRET RUNTIME_SECRET_NAME RUNTIME_CONFIGMAP_NAME
-  INGRESS_CLASS_NAME TLS_SECRET_NAME IMAGE_TAG BACKEND_IMAGE FRONTEND_IMAGE
+  INGRESS_CLASS_NAME IMAGE_TAG BACKEND_IMAGE FRONTEND_IMAGE
 )
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
@@ -72,19 +72,8 @@ if [[ "$production_env" != "production" ]]; then
   exit 1
 fi
 
-kubectl get ingressclass "$INGRESS_CLASS_NAME" >/dev/null
-tls_type="$(kubectl get secret "$TLS_SECRET_NAME" -n "$KUBE_NAMESPACE" -o jsonpath='{.type}')"
-if [[ "$tls_type" != "kubernetes.io/tls" ]]; then
-  echo "ERROR: ${TLS_SECRET_NAME} is not a kubernetes.io/tls Secret" >&2
-  exit 1
-fi
-for key in tls.crt tls.key; do
-  present="$(kubectl get secret "$TLS_SECRET_NAME" -n "$KUBE_NAMESPACE" -o go-template="{{if index .data \"${key}\"}}present{{end}}")"
-  if [[ "$present" != "present" ]]; then
-    echo "ERROR: TLS Secret ${TLS_SECRET_NAME} lacks ${key}" >&2
-    exit 1
-  fi
-done
+# CCE uses the verified ELB certificate-ID annotation; no Kubernetes TLS Secret
+# or IngressClass object is required for the `cce` controller path.
 
 echo "[preflight] checking for conflicting host ownership"
 ingress_inventory="$(kubectl get ingress --all-namespaces -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{range .spec.rules[*]}{.host}{" "}{end}{"\n"}{end}')"
@@ -100,9 +89,8 @@ done <<<"$ingress_inventory"
 
 if kubectl get ingress "$INGRESS_NAME" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
   existing_class="$(kubectl get ingress "$INGRESS_NAME" -n "$KUBE_NAMESPACE" -o jsonpath='{.spec.ingressClassName}')"
-  existing_tls="$(kubectl get ingress "$INGRESS_NAME" -n "$KUBE_NAMESPACE" -o jsonpath='{.spec.tls[0].secretName}')"
-  if [[ "$existing_class" != "$INGRESS_CLASS_NAME" || "$existing_tls" != "$TLS_SECRET_NAME" ]]; then
-    echo "ERROR: existing project Ingress class/TLS ownership differs from required inputs" >&2
+  if [[ "$existing_class" != "$INGRESS_CLASS_NAME" ]]; then
+    echo "ERROR: existing project Ingress class differs from required input" >&2
     exit 1
   fi
 fi

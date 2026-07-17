@@ -19,7 +19,6 @@ REQUIRED = (
     "KUBE_NAMESPACE",
     "KUBE_IMAGE_PULL_SECRET",
     "INGRESS_CLASS_NAME",
-    "TLS_SECRET_NAME",
     "RUNTIME_SECRET_NAME",
     "RUNTIME_CONFIGMAP_NAME",
 )
@@ -43,7 +42,6 @@ def main() -> int:
     for name in (
         "KUBE_IMAGE_PULL_SECRET",
         "INGRESS_CLASS_NAME",
-        "TLS_SECRET_NAME",
         "RUNTIME_SECRET_NAME",
         "RUNTIME_CONFIGMAP_NAME",
     ):
