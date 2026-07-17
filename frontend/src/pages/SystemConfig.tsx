@@ -25,6 +25,10 @@ const KEY_LABEL: Record<string, string> = {
   zhipu_api_key: '智谱 GLM API Key', anthropic_api_key: 'Anthropic API Key',
   embedding_base_url: 'Embedding 端点', embedding_model: 'Embedding 模型',
   embedding_api_key: 'Embedding API Key',
+  rerank_base_url: 'Rerank 端点', rerank_model: 'Rerank 模型',
+  rerank_api_key: 'Rerank API Key',
+  retrieval_hybrid_enabled: '混合检索开关（向量+关键词，true/false）',
+  retrieval_rerank_enabled: 'Rerank 精排开关（需先填 Rerank 密钥，true/false）',
   feishu_app_id: '飞书 App ID', feishu_app_secret: '飞书 App Secret',
   feishu_notify_enabled: '飞书通知开关（true/false）', feishu_ops_chat_id: '运营群 chat_id',
   td_base_url: 'ThinkingData 地址（http://HOST:8992）', td_api_secret: 'ThinkingData 密钥',
@@ -43,6 +47,8 @@ const TARGET_LABEL: Record<string, string> = {
 const EFFECTIVE_DEFAULT: Record<string, string> = {
   embedding_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1（通义默认）',
   embedding_model: 'text-embedding-v3（通义默认）',
+  rerank_base_url: 'https://api.siliconflow.cn/v1（SiliconFlow 默认）',
+  rerank_model: 'BAAI/bge-reranker-v2-m3（SiliconFlow 默认）',
 }
 
 function coerce(valueType: string, raw: string): unknown {

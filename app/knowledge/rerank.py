@@ -16,7 +16,8 @@ from __future__ import annotations
 import httpx
 
 _TIMEOUT = 30.0
-_DEFAULT_MODEL = "gte-rerank-v2"  # 占位默认;默认关，开启时由 rerank_model 覆盖为实际服务模型
+# 默认服务 SiliconFlow（迁移 028 已把端点/模型种入 sys_config）;此处仅作 sys_config 缺失时兜底
+_DEFAULT_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
 class RerankError(RuntimeError):
