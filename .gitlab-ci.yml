@@ -1,6 +1,6 @@
-# Delivery policy: merge requests run verification only. Until GitLab has an
-# approved production-stable branch, protected `dev` is the sole CCE delivery
-# ref. This intentionally does not invent `main` or deploy MR pipelines.
+# The active macOS ARM64 AI runner cannot obtain DaoCloud bearer tokens with
+# pull_policy=always. Use direct upstream images; the runner has demonstrated
+# successful direct Docker Hub pulls in the same pipeline.
 stages:
   - verify
   - build
@@ -44,7 +44,7 @@ variables:
 verify_backend:
   stage: verify
   image:
-    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    name: python:3.12-slim
     pull_policy: always
   extends: .verify_rules
   cache:
@@ -64,7 +64,7 @@ verify_backend:
 verify_frontend:
   stage: verify
   image:
-    name: m.daocloud.io/docker.io/library/node:20-alpine
+    name: node:20-alpine
     pull_policy: always
   extends: .verify_rules
   script:
@@ -75,7 +75,7 @@ verify_frontend:
 verify_delivery_contract:
   stage: verify
   image:
-    name: m.daocloud.io/docker.io/library/python:3.12-alpine
+    name: python:3.12-alpine
     pull_policy: always
   extends: .verify_rules
   before_script:
@@ -89,7 +89,7 @@ verify_delivery_contract:
 preflight_delivery:
   stage: verify
   image:
-    name: m.daocloud.io/docker.io/library/python:3.12-alpine
+    name: python:3.12-alpine
     pull_policy: always
   extends: .delivery_rules
   script:
@@ -98,7 +98,7 @@ preflight_delivery:
 .swr_build:
   stage: build
   image:
-    name: m.daocloud.io/docker.io/library/docker:git
+    name: docker:git
     pull_policy: always
   extends: .delivery_rules
   variables:
@@ -143,7 +143,7 @@ build_frontend:
 .trivy_scan:
   stage: scan
   image:
-    name: m.daocloud.io/docker.io/aquasec/trivy:latest
+    name: aquasec/trivy:latest
     entrypoint: [""]
     pull_policy: always
   extends: .delivery_rules
@@ -179,7 +179,7 @@ scan_frontend:
 deploy_cce:
   stage: deploy
   image:
-    name: m.daocloud.io/docker.io/library/alpine:3.22
+    name: alpine:3.22
     pull_policy: always
   extends: .delivery_rules
   needs:
@@ -220,7 +220,7 @@ deploy_cce:
 notify_success:
   stage: notify
   image:
-    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    name: python:3.12-slim
     pull_policy: always
   needs:
     - job: deploy_cce
@@ -236,7 +236,7 @@ notify_success:
 notify_failure:
   stage: notify
   image:
-    name: m.daocloud.io/docker.io/library/python:3.12-slim
+    name: python:3.12-slim
     pull_policy: always
   rules:
     - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'

@@ -74,8 +74,10 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
         for config in pipeline.values()
         if isinstance(config, dict) and "script" in config
     )
-    assert "m.daocloud.io/" in text
+    assert "name: m.daocloud.io/" not in text
+    assert "TRIVY_DB_REPOSITORY: m.daocloud.io/" in text
     assert "HIGH,CRITICAL" in text
+    assert "node:20-alpine" in text
     assert "${SWR_REGION}@${SWR_AK}" in text
     assert "ci-${CI_COMMIT_SHA}" in text
 

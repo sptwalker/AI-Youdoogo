@@ -1,11 +1,11 @@
 # 后端生产镜像：同一镜像支持一次性 migrate 与纯 serve 两种 CCE 命令。
-FROM m.daocloud.io/docker.io/library/python:3.12-alpine
+FROM python:3.12-alpine
 
-# The mirror tag can lag Alpine point rebuilds; install current security fixes before app layers.
+# Apply current Alpine security fixes before app layers.
 RUN apk upgrade --no-cache
 
 # uv 官方二进制
-COPY --from=m.daocloud.io/ghcr.io/astral-sh/uv:0.11.7 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
