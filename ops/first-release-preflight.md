@@ -49,6 +49,19 @@ dry runs, and RBAC before mutating a workload.
 
 ## Required pre-existing CCE and SWR state
 
+### Shared CCE ELB listener binding
+
+The project Ingress carries the user-managed ELB class, ELB ID, listener ports, listener-master
+Ingress, and TLS certificate-ID annotations verified from working independent-host CCE Ingresses
+on the same production controller. This binds `ai.youdoogo.com` to the existing HTTPS listener;
+without it CCE leaves the host unregistered and the ELB returns its own 404.
+
+These annotations are operational metadata, not application configuration. If ownership of the
+shared ELB or listener changes, obtain the replacement values from the listener owner, update the
+template and delivery contract together, and review the change before delivery. Do not copy
+controller-generated status annotations, another host's routing rules, DNS ownership, or
+certificate material.
+
 - `KUBE_NAMESPACE` already exists. CI is not allowed to create it.
 - `KUBE_IMAGE_PULL_SECRET` already exists and is type `kubernetes.io/dockerconfigjson` or
   `kubernetes.io/dockercfg`; both immutable commit images are pullable from it.

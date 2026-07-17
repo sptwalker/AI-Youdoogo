@@ -228,6 +228,14 @@ metadata:
   labels:
     app.kubernetes.io/name: youdoogo
     app.kubernetes.io/part-of: youdoogo
+  # Verified against working independent-host CCE Ingresses on the shared
+  # production ELB. Keep this listener binding aligned with its owner.
+  annotations:
+    kubernetes.io/elb.class: performance
+    kubernetes.io/elb.id: abab7533-a1c6-4138-a4bc-59d53e3446e2
+    kubernetes.io/elb.listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    kubernetes.io/elb.listener-master-ingress: nexus-prod/nexus-studio
+    kubernetes.io/elb.tls-certificate-ids: 56de20421757445ea53f5af51ecb4e10
 spec:
   ingressClassName: __INGRESS_CLASS_NAME__
   tls:

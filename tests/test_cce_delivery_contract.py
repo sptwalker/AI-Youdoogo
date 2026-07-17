@@ -95,6 +95,13 @@ def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
     assert not {item["kind"] for item in objects} & {"Secret", "ConfigMap"}
 
     ingress = object_by(objects, "Ingress", "youdoogo")
+    assert ingress["metadata"]["annotations"] == {
+        "kubernetes.io/elb.class": "performance",
+        "kubernetes.io/elb.id": "abab7533-a1c6-4138-a4bc-59d53e3446e2",
+        "kubernetes.io/elb.listen-ports": '[{"HTTP":80},{"HTTPS":443}]',
+        "kubernetes.io/elb.listener-master-ingress": "nexus-prod/nexus-studio",
+        "kubernetes.io/elb.tls-certificate-ids": "56de20421757445ea53f5af51ecb4e10",
+    }
     assert ingress["spec"]["ingressClassName"] == "cce-public"
     assert ingress["spec"]["tls"] == [
         {"hosts": ["ai.youdoogo.com"], "secretName": "ai-youdoogo-com-tls"}
@@ -108,7 +115,18 @@ def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
             "backend": {"service": {"name": "youdoogo-frontend", "port": {"number": 80}}},
         }
     ]
-    assert "nexus" not in (ROOT / "ops/cce/runtime.yaml.tmpl").read_text().lower()
+    runtime_template = (ROOT / "ops/cce/runtime.yaml.tmpl").read_text().lower()
+    assert "nexus.youdoogo.com" not in runtime_template
+
+    preflight = (ROOT / "ops/first-release-preflight.md").read_text(encoding="utf-8")
+    for required_evidence in (
+        "Shared CCE ELB listener binding",
+        "working independent-host CCE Ingresses",
+        "existing HTTPS listener",
+        "listener-master",
+        "controller-generated status annotations",
+    ):
+        assert required_evidence in preflight
 
 
 def test_backend_serve_and_probe_contract(tmp_path: Path) -> None:
