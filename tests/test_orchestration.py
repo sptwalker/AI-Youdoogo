@@ -182,3 +182,135 @@ async def test_build_steps_multi_dependency(db: AsyncSession) -> None:
     cards = await orch.build_steps(db, parent.id, steps, creator_id=creator)
     by_no = {c.step_no: c for c in cards}
     assert set(by_no[2].depends_on) == {str(by_no[0].id), str(by_no[1].id)}
+
+
+# ── B.2 调度驱动 ────────────────────────────────────────
+from app.services import task_flow  # noqa: E402
+from app.services.collab_protocol import ProtocolResult  # noqa: E402
+
+
+async def _parent_with_steps(
+    db: AsyncSession, steps: list[orch.PlanStep]
+) -> tuple[uuid.UUID, uuid.UUID, dict[int, Any]]:
+    """建父卡 + 步骤卡，返回 (creator, parent_id, no→card)。"""
+    creator = await _creator(db)
+    parent = await task_service.create_task(
+        db, title="编排", task_type="orchestration", creator_id=creator
+    )
+    cards = await orch.build_steps(db, parent.id, steps, creator_id=creator)
+    return creator, parent.id, {c.step_no: c for c in cards}
+
+
+def _ready_titles(steps: list[Any]) -> set[str]:
+    return {s.title for s in orch._ready_steps(steps)}
+
+
+async def test_ready_steps_gated_by_deps(db: AsyncSession) -> None:
+    """只有依赖全 accepted 的步骤才 ready。"""
+    _, pid, by_no = await _parent_with_steps(db, [
+        orch.PlanStep(no=0, title="A", skill="data_query", instruction="a", depends_on=[]),
+        orch.PlanStep(no=1, title="B", skill="deliver", instruction="b", depends_on=[0]),
+    ])
+    steps = await orch._step_cards(db, pid)
+    assert _ready_titles(steps) == {"A"}  # B 依赖未完成
+    # 手动把 A accept，B 才 ready
+    by_no[0].status = task_flow.ACCEPTED
+    await db.commit()
+    steps = await orch._step_cards(db, pid)
+    assert _ready_titles(steps) == {"B"}
+
+
+async def test_advance_auto_runs_non_redline_pipes_output(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """全非红线链:两步都自动跑完 + 上游 datasets 喂到下游 step_input + 编排完成。"""
+    _, pid, by_no = await _parent_with_steps(db, [
+        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+        orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
+    ])
+    ran: list[str] = []
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
+        ran.append(step.title)
+        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        p = ProtocolResult()
+        if step.task_type == "data_query":
+            p.datasets.append({"sql": "q", "columns": ["dau"], "rows": [{"dau": 42}]})
+        return p
+
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    snap = await orch.advance(db, pid, operator_id=None)
+    assert ran == ["取数", "做报"]  # 拓扑序
+    assert snap["done"] is True and snap["accepted"] == 2
+    # 上游 datasets 已喂到下游 step_input
+    await db.refresh(by_no[1])
+    assert by_no[1].step_input["datasets"][0]["rows"] == [{"dau": 42}]
+
+
+async def test_advance_stops_at_redline(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """红线步骤执行到 reported 后停下，不 accept、不解锁下游。"""
+    _, pid, by_no = await _parent_with_steps(db, [
+        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+        orch.PlanStep(no=1, title="通知", skill="notify", instruction="发", depends_on=[0]),
+    ])
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
+        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        return ProtocolResult()
+
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    snap = await orch.advance(db, pid, operator_id=None)
+    # 取数自动 accept；通知红线停在 reported
+    await db.refresh(by_no[0])
+    await db.refresh(by_no[1])
+    assert by_no[0].status == task_flow.ACCEPTED
+    assert by_no[1].status == task_flow.REPORTED
+    assert snap["done"] is False
+    assert str(by_no[1].id) in snap["awaiting_human"]
+
+
+async def test_advance_resume_after_human_accept(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """红线步被真人 accept 后再 advance → 从停点继续跑完下游。"""
+    _, pid, by_no = await _parent_with_steps(db, [
+        orch.PlanStep(no=0, title="审批", skill="notify", instruction="批", depends_on=[]),
+        orch.PlanStep(no=1, title="交付", skill="deliver", instruction="交", depends_on=[0]),
+    ])
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
+        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        return ProtocolResult()
+
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    snap1 = await orch.advance(db, pid, operator_id=None)
+    assert snap1["done"] is False  # 卡在红线审批步
+    # 真人验收红线步
+    await task_service.transition(
+        db, by_no[0].id, task_flow.ACCEPTED, operator_id=None, note="真人验收"
+    )
+    snap2 = await orch.advance(db, pid, operator_id=None)
+    await db.refresh(by_no[1])
+    assert by_no[1].status == task_flow.ACCEPTED and snap2["done"] is True
+
+
+async def test_advance_failed_step_blocks_downstream(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """步骤失败（_run_step 返 None）→ 停在 reported，下游不解锁。"""
+    _, pid, by_no = await _parent_with_steps(db, [
+        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+        orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
+    ])
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
+        await orch._to_reported(_db, step, operator_id, "失败", "err")
+        return None  # 失败
+
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    snap = await orch.advance(db, pid, operator_id=None)
+    await db.refresh(by_no[1])
+    assert by_no[1].status == task_flow.CREATED  # 下游从未启动
+    assert snap["done"] is False

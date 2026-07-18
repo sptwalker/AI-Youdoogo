@@ -17,13 +17,17 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.base import run_agent
 from app.llm import get_llm_for_role
+from app.models.agent import AgentRole
 from app.models.task import TaskCard
-from app.services import task_service
+from app.services import task_flow, task_service
+from app.services.collab_protocol import ProtocolResult
 
 logger = logging.getLogger(__name__)
 
@@ -185,3 +189,201 @@ async def build_steps(
     for c in cards:
         await db.refresh(c)
     return cards
+
+
+# ── B.2 调度驱动（拓扑推进 + 产出喂下游 + 红线停点 + 父卡聚合）───────────────
+
+_PREVIEW_ROWS = 30  # 喂下游步骤时单数据集渲染的最大行数（控 prompt 体积）
+
+
+async def _step_cards(db: AsyncSession, parent_id: uuid.UUID) -> list[TaskCard]:
+    """取某编排父卡下的全部步骤卡（按 step_no 升序）。"""
+    steps = await task_service.list_tasks(db, parent_id=parent_id, limit=_MAX_STEPS + 2)
+    return sorted(steps, key=lambda s: (s.step_no if s.step_no is not None else 0))
+
+
+def _ready_steps(steps: list[TaskCard]) -> list[TaskCard]:
+    """可执行步骤:自身待执行（created/dispatched）且所有依赖已 accepted。"""
+    done = {str(s.id) for s in steps if s.status == task_flow.ACCEPTED}
+    ready = []
+    for s in steps:
+        if s.status not in (task_flow.CREATED, task_flow.DISPATCHED):
+            continue
+        if all(d in done for d in (s.depends_on or [])):
+            ready.append(s)
+    return ready
+
+
+def _render_dataset(ds: dict[str, Any]) -> str:
+    """把上游取数产出渲染成紧凑表格文本（喂下游步骤）。"""
+    cols = ds.get("columns") or []
+    rows = ds.get("rows") or []
+    if not rows:
+        return f"（查询 {ds.get('sql', '')[:40]} 无数据）"
+    head = "| " + " | ".join(str(c) for c in cols) + " |"
+    sep = "| " + " | ".join("---" for _ in cols) + " |"
+    body = ["| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows[:_PREVIEW_ROWS]]
+    return "\n".join([head, sep, *body])
+
+
+def _step_message(step: TaskCard) -> str:
+    """把步骤卡（含上游注入的 step_input）渲染成给智能体的输入消息。"""
+    payload = step.payload or {}
+    parts = [f"任务：{step.title}", f"要求：{payload.get('instruction', step.title)}"]
+    si = step.step_input or {}
+    datasets = si.get("datasets") or []
+    if datasets:
+        parts.append("\n上游步骤已取得以下真实数据，请据此完成本步（勿另行编造）：")
+        parts.extend(_render_dataset(d) for d in datasets)
+    artifacts = si.get("artifacts") or []
+    if artifacts:
+        names = "、".join(a.get("file_name", "") for a in artifacts)
+        parts.append(f"\n上游已产出文件：{names}")
+    parts.append("\n请完成本步骤。需要数据用【取数】指令，需生成文件用【交付】指令。")
+    return "\n".join(parts)
+
+
+async def _run_step(
+    db: AsyncSession, step: TaskCard, operator_id: uuid.UUID | None
+) -> ProtocolResult | None:
+    """驱动单个步骤卡执行到 reported，返回其技能产出（datasets/artifacts）。
+
+    失败（无执行者/执行异常）→ 推到 reported 记错、返回 None（不 accept，天然阻断下游、留痕）。
+    """
+    from app.agents import skills
+
+    role = await db.get(AgentRole, step.assignee_agent_id) if step.assignee_agent_id else None
+    if role is None or not role.is_active:
+        await _to_reported(db, step, operator_id, "步骤无可用执行者", None)
+        return None
+    # created → dispatched → executing
+    if step.status == task_flow.CREATED:
+        await task_service.transition(
+            db, step.id, task_flow.DISPATCHED, operator_id=operator_id, note="编排分发"
+        )
+    await task_service.transition(
+        db, step.id, task_flow.EXECUTING, operator_id=operator_id, note="编排执行"
+    )
+    record = await run_agent(
+        db, role, task_type=step.task_type,
+        input_summary=f"编排步骤：{step.title[:40]}",
+        user_message=_step_message(step), user_id=operator_id, use_knowledge=True,
+    )
+    result = record.output_content or record.error_msg or "（无产出）"
+    proto = await skills.execute_all(
+        db, role, result, user_id=operator_id,
+        user_intent=(step.payload or {}).get("instruction"),
+    )
+    for consulted, rec in proto.consult_replies:
+        result += f"\n\n---\n【{consulted.name} 答复】\n{rec.output_content or rec.error_msg or ''}"
+    result = skills.fold_notes(result, proto)
+    await _to_reported(db, step, role.id, f"执行 status={record.status}", result)
+    return None if record.status == "failed" else proto
+
+
+async def _to_reported(
+    db: AsyncSession, step: TaskCard, operator_id: uuid.UUID | None,
+    note: str, result: str | None,
+) -> None:
+    """把步骤推到 reported（容忍已 executing/dispatched 的中间态）。"""
+    if step.status in (task_flow.EXECUTING,):
+        await task_service.transition(
+            db, step.id, task_flow.REPORTED, operator_id=operator_id,
+            note=note, result_content=result,
+        )
+        return
+    # 未进入 executing（如无执行者早退）：补齐流转到 reported，保证有终态可验收
+    for nxt in (task_flow.DISPATCHED, task_flow.EXECUTING, task_flow.REPORTED):
+        if task_flow.can_transition(step.status, nxt):
+            await task_service.transition(
+                db, step.id, nxt, operator_id=operator_id,
+                note=note, result_content=result if nxt == task_flow.REPORTED else None,
+            )
+
+
+async def _pipe_outputs(
+    db: AsyncSession, step: TaskCard, proto: ProtocolResult, all_steps: list[TaskCard]
+) -> None:
+    """把步骤产出（datasets/artifacts）注入直接下游步骤的 step_input。"""
+    if not (proto.datasets or proto.artifacts):
+        return
+    sid = str(step.id)
+    for ds in all_steps:
+        if sid not in (ds.depends_on or []):
+            continue
+        si = dict(ds.step_input or {})
+        si["datasets"] = (si.get("datasets") or []) + proto.datasets
+        si["artifacts"] = (si.get("artifacts") or []) + proto.artifacts
+        ds.step_input = si  # 重新赋值触发 JSONB 变更追踪
+    await db.commit()
+
+
+async def advance(
+    db: AsyncSession, parent_id: uuid.UUID, *, operator_id: uuid.UUID | None
+) -> dict[str, Any]:
+    """拓扑推进编排:反复执行「依赖已完成」的步骤。
+
+    - 非红线步骤:执行到 reported → 自动验收（accepted）→ 产出喂下游。
+    - 红线步骤:执行到 reported 后**停下等真人 accept**，绝不自动跨越。
+    - 失败步骤:停在 reported 不验收，天然阻断下游、留痕，不连累其余分支。
+    真人验收某红线步后再次调用本函数即从停点继续（resume）。
+    """
+    await _kickoff_parent(db, parent_id, operator_id)
+    while True:
+        steps = await _step_cards(db, parent_id)
+        ready = _ready_steps(steps)
+        if not ready:
+            break
+        progressed = False
+        for s in ready:
+            proto = await _run_step(db, s, operator_id)
+            if proto is None:
+                continue  # 失败：留在 reported 阻断下游
+            if (s.payload or {}).get("red_line"):
+                continue  # 红线：停在 reported 等真人 accept
+            await task_service.transition(
+                db, s.id, task_flow.ACCEPTED, operator_id=operator_id,
+                note="非红线步骤自动验收",
+            )
+            await _pipe_outputs(db, s, proto, steps)
+            progressed = True
+        if not progressed:
+            break  # 剩余可执行步骤均为红线/失败（已停在 reported），等真人
+    return await progress(db, parent_id)
+
+
+async def _kickoff_parent(
+    db: AsyncSession, parent_id: uuid.UUID, operator_id: uuid.UUID | None
+) -> None:
+    """首次推进时把父编排卡推到 executing（created→dispatched→executing）。"""
+    parent = await task_service.get_task(db, parent_id)
+    if parent.status == task_flow.CREATED:
+        await task_service.transition(
+            db, parent_id, task_flow.DISPATCHED, operator_id=operator_id, note="编排启动"
+        )
+        await task_service.transition(
+            db, parent_id, task_flow.EXECUTING, operator_id=operator_id, note="编排执行中"
+        )
+
+
+async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
+    """编排进度快照:父卡状态 + 各步骤状态/红线标记（供前端进度卡渲染）。"""
+    steps = await _step_cards(db, parent_id)
+    total = len(steps)
+    accepted = sum(1 for s in steps if s.status == task_flow.ACCEPTED)
+    waiting = [s for s in steps if s.status == task_flow.REPORTED]
+    return {
+        "parent_id": str(parent_id),
+        "total": total,
+        "accepted": accepted,
+        "awaiting_human": [str(s.id) for s in waiting if (s.payload or {}).get("red_line")],
+        "done": accepted == total and total > 0,
+        "steps": [
+            {
+                "id": str(s.id), "step_no": s.step_no, "title": s.title,
+                "skill": s.task_type, "status": s.status,
+                "red_line": bool((s.payload or {}).get("red_line")),
+            }
+            for s in steps
+        ],
+    }
