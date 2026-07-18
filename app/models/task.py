@@ -41,6 +41,14 @@ class TaskCard(CommonMixin, Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("task_card.id"), nullable=True
     )  # 拆解出的子任务指向父任务
+    # 任务编排（docs/14 阶段B）：父卡下的 DAG 步骤（纯加列，历史行取默认，不破坏现有卡）
+    step_no: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 步骤序号（0=首步）
+    depends_on: Mapped[list[str]] = mapped_column(
+        _JSONB, default=list, server_default="[]"
+    )  # 依赖的前序步骤卡 id 列表（DAG，空=无依赖可立即执行）
+    step_input: Mapped[dict[str, Any]] = mapped_column(
+        _JSONB, default=dict, server_default="{}"
+    )  # 被依赖步骤的产出注入（datasets/artifacts 引用）
     sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict)
     result_content: Mapped[str | None] = mapped_column(Text, nullable=True)

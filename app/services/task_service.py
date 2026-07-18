@@ -40,12 +40,13 @@ async def create_task(
     parent_id: uuid.UUID | None = None,
     sla_hours: int | None = None,
     payload: dict[str, Any] | None = None,
+    step_no: int | None = None,
 ) -> TaskCard:
     """创建任务卡（初始状态 created），写一条初始流转日志。"""
     task = TaskCard(
         title=title, task_type=task_type, creator_id=creator_id, priority=priority,
         assignee_agent_id=assignee_agent_id, parent_id=parent_id, sla_hours=sla_hours,
-        payload=payload or {},
+        payload=payload or {}, step_no=step_no,
     )
     db.add(task)
     await db.flush()  # 取 task.id
