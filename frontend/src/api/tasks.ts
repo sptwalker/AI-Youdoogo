@@ -63,3 +63,28 @@ export function transitionTask(
 export function runTask(id: string): Promise<TaskCard> {
   return request({ method: 'POST', url: `/tasks/${id}/run` })
 }
+
+// ── 任务编排进度（docs/14 阶段B）──────────────────────────
+export interface OrchStep {
+  id: string
+  step_no: number
+  title: string
+  skill: string
+  status: string
+  red_line: boolean
+}
+
+export interface OrchProgress {
+  parent_id: string
+  total: number
+  accepted: number
+  awaiting_human: string[]
+  done: boolean
+  steps: OrchStep[]
+}
+
+/** 拉取某编排父卡的进度快照（进度卡刷新用）。 */
+export function getOrchestrationProgress(parentId: string): Promise<OrchProgress> {
+  return request({ method: 'GET', url: `/tasks/${parentId}/orchestration` })
+}
+

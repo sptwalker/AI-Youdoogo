@@ -21,7 +21,7 @@ from app.schemas.task import (
     TaskOut,
     TransitionRequest,
 )
-from app.services import audit_service, task_service
+from app.services import audit_service, orchestration_service, task_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -101,7 +101,16 @@ async def transition_task(
             summary=f"任务验收 {task.title[:40]} → {body.to_status}",
             target_type="task_card", target_id=task.id,
         )
+    # 编排步骤被真人验收 → 从停点继续推进父编排（docs/14 阶段B 红线 resume）
+    if body.to_status == "accepted":
+        await orchestration_service.resume_if_step(db, task, operator_id=user.id)
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))
+
+
+@router.get("/{task_id}/orchestration")
+async def orchestration_progress(task_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
+    """编排进度快照（父编排卡 id → 各步骤状态/红线/等真人）。供前端进度卡渲染/刷新。"""
+    return ok(await orchestration_service.progress(db, task_id))
 
 
 @router.post("/{task_id}/run")

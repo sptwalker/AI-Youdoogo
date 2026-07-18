@@ -314,3 +314,62 @@ async def test_advance_failed_step_blocks_downstream(
     await db.refresh(by_no[1])
     assert by_no[1].status == task_flow.CREATED  # 下游从未启动
     assert snap["done"] is False
+
+
+# ── start / resume 入口 ─────────────────────────────────
+async def test_start_non_composite_returns_none(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plan 判定单动作 → start 返 None（走原路），不建卡。"""
+    async def _no_plan(_db: Any, req: str) -> Any:
+        return None
+
+    monkeypatch.setattr(orch, "plan", _no_plan)
+    creator = await _creator(db)
+    snap = await orch.start(
+        db, "今天天气如何呀", creator_id=creator, assignee_agent_id=None, operator_id=creator
+    )
+    assert snap is None
+    assert await task_service.list_tasks(db) == []  # 未建任何卡
+
+
+async def test_start_short_message_skips_planning(db: AsyncSession) -> None:
+    """短消息（问候）不进规划，直接 None。"""
+    creator = await _creator(db)
+    assert await orch.start(
+        db, "你好", creator_id=creator, assignee_agent_id=None, operator_id=creator
+    ) is None
+
+
+async def test_start_builds_and_advances(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """复合任务 → 建父卡+步骤卡+推进（非红线自动跑，红线停）。"""
+    async def _plan(_db: Any, req: str) -> Any:
+        return [
+            orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+            orch.PlanStep(no=1, title="通知", skill="notify", instruction="发", depends_on=[0]),
+        ]
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> Any:
+        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        return ProtocolResult()
+
+    monkeypatch.setattr(orch, "plan", _plan)
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    creator = await _creator(db)
+    snap = await orch.start(
+        db, "取昨天数据并通知总监", creator_id=creator,
+        assignee_agent_id=None, operator_id=creator,
+    )
+    assert snap is not None and snap["total"] == 2
+    assert snap["done"] is False and len(snap["awaiting_human"]) == 1  # 停在红线通知步
+
+
+async def test_resume_if_step_non_step_returns_none(db: AsyncSession) -> None:
+    """非编排步骤卡（无 step_no）→ resume 返 None。"""
+    creator = await _creator(db)
+    plain = await task_service.create_task(
+        db, title="普通卡", task_type="manual", creator_id=creator
+    )
+    assert await orch.resume_if_step(db, plain, operator_id=creator) is None

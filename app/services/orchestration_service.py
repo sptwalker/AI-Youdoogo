@@ -366,6 +366,52 @@ async def _kickoff_parent(
         )
 
 
+_MIN_REQUEST_LEN = 8  # 短消息（问候等）不进规划，省一次 LLM 调用
+
+
+async def start(
+    db: AsyncSession,
+    request: str,
+    *,
+    creator_id: uuid.UUID,
+    assignee_agent_id: uuid.UUID | None,
+    operator_id: uuid.UUID | None,
+    title: str | None = None,
+) -> dict[str, Any] | None:
+    """复合任务入口:规划 → 建父编排卡 + DAG 步骤卡 → 拓扑推进到红线停点。
+
+    返回进度快照;若非复合任务（plan 返回 None）→ 返回 None，调用方走原路（普通单步）。
+    永不 raise（规划/建卡故障退回 None）。
+    """
+    if not request or len(request.strip()) < _MIN_REQUEST_LEN:
+        return None
+    try:
+        steps = await plan(db, request)
+        if steps is None:
+            return None
+        parent = await task_service.create_task(
+            db, title=(title or request.strip())[:200], task_type="orchestration",
+            creator_id=creator_id, assignee_agent_id=assignee_agent_id,
+            payload={"origin": "orchestration", "request": request.strip()},
+        )
+        await build_steps(
+            db, parent.id, steps, creator_id=creator_id, assignee_agent_id=assignee_agent_id
+        )
+        return await advance(db, parent.id, operator_id=operator_id)
+    except Exception:  # noqa: BLE001 - 编排启动故障不阻断，退回普通对话
+        logger.warning("任务编排启动失败，退回普通处理", exc_info=True)
+        return None
+
+
+async def resume_if_step(
+    db: AsyncSession, task: TaskCard, *, operator_id: uuid.UUID | None
+) -> dict[str, Any] | None:
+    """真人验收某卡后:若它是编排步骤卡，从停点继续推进父编排。否则 None。"""
+    if task.step_no is None or task.parent_id is None:
+        return None
+    return await advance(db, task.parent_id, operator_id=operator_id)
+
+
 async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
     """编排进度快照:父卡状态 + 各步骤状态/红线标记（供前端进度卡渲染）。"""
     steps = await _step_cards(db, parent_id)

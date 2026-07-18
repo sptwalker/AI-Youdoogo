@@ -251,6 +251,15 @@ async def send_stream(
     convo.append((user_name, message))
     yield ("message_end", _msg_dict(user_msg))
 
+    # 复合任务编排（docs/14 阶段B）：仅单助理时试规划多步任务；命中则起编排、
+    # 发进度卡消息并跳过圆桌（多 AI 圆桌是讨论，不是任务执行）。故障退回圆桌。
+    if len(participants) == 1:
+        snap = await _try_orchestrate(db, user, assistant, message)
+        if snap is not None:
+            async for ev in _emit_orchestration(db, user, assistant, snap):
+                yield ev
+            return
+
     for _round in range(rounds):
         for agent in participants:
             others = "、".join(p.name for p in participants if p.id != agent.id)
@@ -303,3 +312,51 @@ async def send_stream(
                 await db.refresh(c_msg)
                 convo.append((consulted.name, answer))
                 yield ("message_end", _msg_dict(c_msg))
+
+
+async def _try_orchestrate(
+    db: AsyncSession, user: SysUser, assistant: AgentRole, message: str
+) -> dict[str, Any] | None:
+    """试把用户消息当复合任务规划编排。非复合/故障 → None（调用方走圆桌）。永不 raise。"""
+    from app.services import orchestration_service
+
+    try:
+        return await orchestration_service.start(
+            db, message, creator_id=user.id,
+            assignee_agent_id=assistant.id, operator_id=user.id,
+        )
+    except Exception:  # noqa: BLE001 - 编排故障不阻断对话，退回圆桌
+        logger.warning("桌面编排启动失败，退回普通对话", exc_info=True)
+        return None
+
+
+def _progress_text(snap: dict[str, Any]) -> str:
+    """把编排进度快照渲染成一条对话消息（折叠「任务进度」文本卡）。"""
+    icon = {"accepted": "✅", "reported": "⏸", "executing": "▶", "created": "○",
+            "dispatched": "○", "rejected": "✕", "cancelled": "✕"}
+    lines = [f"【任务进度】已规划 {snap['total']} 步，完成 {snap['accepted']}/{snap['total']}"]
+    for s in snap["steps"]:
+        mark = icon.get(s["status"], "○")
+        rl = "（红线·待您验收）" if s["red_line"] and s["status"] == "reported" else ""
+        lines.append(f"{mark} 步骤{s['step_no'] + 1}：{s['title']} [{s['skill']}]{rl}")
+    if snap["awaiting_human"]:
+        lines.append("\n有红线步骤已执行完，等待您在任务卡中验收后继续。")
+    elif snap["done"]:
+        lines.append("\n全部步骤已完成。")
+    return "\n".join(lines)
+
+
+async def _emit_orchestration(
+    db: AsyncSession, user: SysUser, assistant: AgentRole, snap: dict[str, Any]
+) -> AsyncIterator[Event]:
+    """把编排进度作为助理的一条消息发出（含 orchestration 事件供前端渲染进度卡）。"""
+    text = _progress_text(snap)
+    yield ("orchestration", snap)  # 结构化进度，前端可渲染折叠进度卡
+    msg = DesktopMessage(
+        owner_user_id=user.id, speaker_type=SPEAKER_AI,
+        speaker_agent_id=assistant.id, speaker_name=assistant.name, content=text,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    yield ("message_end", _msg_dict(msg))

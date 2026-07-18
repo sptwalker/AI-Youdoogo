@@ -22,7 +22,7 @@ import {
 } from '../api/desktop'
 import { confirmResolution } from '../api/meetings'
 import { reviewProposal } from '../api/proposals'
-import { STATUS_LABEL, transitionTask } from '../api/tasks'
+import { STATUS_LABEL, transitionTask, getOrchestrationProgress, type OrchProgress } from '../api/tasks'
 
 const KIND: Record<PendingItem['kind'], { label: string; color: string }> = {
   task: { label: '待验收', color: 'blue' },
@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
   const [deliverables, setDeliverables] = useState<Deliverable[]>([])
+  const [orch, setOrch] = useState<OrchProgress | null>(null)  // 当前编排进度（进度卡）
   const chatBoxRef = useRef<HTMLDivElement>(null)
   // 载入/新消息后自动滚到底（始终停在最新对话上）
   useEffect(() => {
@@ -102,6 +103,9 @@ export default function Dashboard() {
           const msg = data as unknown as DesktopMessage
           // 用落库消息替换流式气泡（AI）或乐观气泡（用户回显）
           setChatMsgs((m) => m.map((x) => (x.id === (msg.speaker_type === 'user' ? tmpId : streamId) ? msg : x)))
+        } else if (event === 'orchestration') {
+          // 复合任务编排进度：渲染折叠进度卡（红线步骤含验收按钮）
+          setOrch(data as unknown as OrchProgress)
         }
       })
     } catch {
@@ -112,6 +116,15 @@ export default function Dashboard() {
       setChatSending(false)
       void loadDeliverables()  // AI 可能刚交付了文件，刷新交付区
     }
+  }
+
+  /** 验收编排的某红线步骤 → 后端 resume 推进 → 刷新进度卡。 */
+  const acceptStep = async (stepId: string) => {
+    if (!orch) return
+    await transitionTask(stepId, 'accepted')
+    message.success('已验收，继续推进')
+    setOrch(await getOrchestrationProgress(orch.parent_id))
+    await reload()
   }
 
   /** 一条待办按类型渲染 inline 操作。 */
@@ -264,6 +277,50 @@ export default function Dashboard() {
                 })}
                 {chatSending && <div style={{ textAlign: 'center', margin: 8 }}><Spin size="small" /></div>}
               </div>
+              {orch && (
+                <Card
+                  size="small"
+                  style={{ marginBottom: 10, background: '#f6ffed' }}
+                  title={
+                    <span style={{ fontSize: 12 }}>
+                      任务进度 {orch.accepted}/{orch.total}
+                      {orch.done && <Tag color="green" style={{ marginLeft: 8 }}>已完成</Tag>}
+                      {orch.awaiting_human.length > 0 && (
+                        <Tag color="orange" style={{ marginLeft: 8 }}>待验收</Tag>
+                      )}
+                    </span>
+                  }
+                  extra={<a style={{ fontSize: 12 }} onClick={() => setOrch(null)}>收起</a>}
+                >
+                  <List
+                    size="small"
+                    dataSource={orch.steps}
+                    renderItem={(s) => {
+                      const icon = s.status === 'accepted' ? '✅'
+                        : s.status === 'reported' ? '⏸'
+                        : s.status === 'executing' ? '▶' : '○'
+                      const waiting = s.red_line && s.status === 'reported'
+                      return (
+                        <List.Item
+                          style={{ fontSize: 12, padding: '4px 0' }}
+                          actions={
+                            waiting
+                              ? [<a key="ac" onClick={() => acceptStep(s.id)}>验收并继续</a>]
+                              : []
+                          }
+                        >
+                          <Space size={6}>
+                            <span>{icon}</span>
+                            <span>步骤{s.step_no + 1}·{s.title}</span>
+                            <Tag>{s.skill}</Tag>
+                            {s.red_line && <Tag color="red">红线</Tag>}
+                          </Space>
+                        </List.Item>
+                      )
+                    }}
+                  />
+                </Card>
+              )}
               <Space.Compact style={{ width: '100%' }}>
                 <Input
                   placeholder="向你的助理提问，回车发送"
