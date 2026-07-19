@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.crypto import EncryptedStr
 from app.models.base import Base, CommonMixin
 
 TIER_DAILY = "daily"
@@ -27,7 +28,9 @@ class AiProvider(CommonMixin, Base):
     name: Mapped[str] = mapped_column(String(64))
     tier: Mapped[str] = mapped_column(String(16), default=TIER_DAILY, server_default=TIER_DAILY)
     base_url: Mapped[str] = mapped_column(String(512))
-    api_key: Mapped[str] = mapped_column(String(512), default="", server_default="")
+    # api_key 透明加密存储（H1.1）：ORM 写入自动加密、读取自动解密；列宽放大容纳密文。
+    # service 层读写仍拿明文；list 仍只回 hint 末4位，绝不回显明文。
+    api_key: Mapped[str] = mapped_column(EncryptedStr(1024), default="", server_default="")
     api_key_hint: Mapped[str] = mapped_column(String(16), default="", server_default="")
     model: Mapped[str] = mapped_column(String(128))
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

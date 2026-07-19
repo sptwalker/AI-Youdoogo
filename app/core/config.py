@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     api_port: int = 8000
     jwt_secret: str = _DEFAULT_JWT_SECRET  # 仅 local 可用默认值，非 local 启动即校验
     jwt_expire_minutes: int = 720  # 访问令牌有效期（分钟），首版12小时免刷新负担
+    # 应用密钥：派生 Fernet 加密密钥，加密存库的敏感字段（AI 卡片 api_key 等，H1.1）。
+    # 留空则回退 jwt_secret 派生；生产建议单独设置，与 jwt_secret 分离。
+    app_secret_key: str = ""
 
     # 数据库
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/youdoo"
