@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage, record_usage
+from app.llm.usage import budget_exceeded, extract_usage, record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.services import config_service
 
@@ -184,6 +184,7 @@ async def _finalize(
         db, role=llm_role, model=model_used,
         prompt_tokens=usage[0], completion_tokens=usage[1], total_tokens=usage[2],
         duration_ms=duration_ms, status=status, task_id=record.id, user_id=user_id,
+        department_id=role.department_id,  # 部门级成本归因（H2.2）
     )
     return record
 
@@ -216,6 +217,8 @@ async def run_agent(
     error_msg: str | None = None
     usage: tuple[int, int, int] = (0, 0, 0)
     try:
+        if budget_exceeded():  # 预算硬闸（H2.2）：超日预算直接拒绝，不发起调用
+            raise RuntimeError("已达当日 LLM 用量预算上限，暂停调用（请联系管理员调整预算）")
         llm = get_llm_for_role(llm_role, temperature=0.3)
         reply = await llm.ainvoke(
             [SystemMessage(content=system_content), HumanMessage(content=effective_message)]
@@ -262,6 +265,8 @@ async def run_agent_stream(
     status = "success"
     error_msg: str | None = None
     try:
+        if budget_exceeded():  # 预算硬闸（H2.2）
+            raise RuntimeError("已达当日 LLM 用量预算上限，暂停调用（请联系管理员调整预算）")
         llm = get_llm_for_role(llm_role, temperature=0.3)
         async for chunk in llm.astream(
             [SystemMessage(content=system_content), HumanMessage(content=effective_message)]

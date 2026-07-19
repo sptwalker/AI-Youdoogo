@@ -43,6 +43,8 @@ class Settings(BaseSettings):
 
     # LLM 用量：当日 token 预算，超阈值告警（0=不启用）
     llm_daily_token_budget: int = 0
+    # 预算硬闸（H2.2）：True 时超预算直接拒绝新 LLM 调用（默认 False=仅告警不拒绝）
+    llm_budget_hard_limit: bool = False
     # LLM 调用护栏（H2.1）：单次请求超时、SDK 重试、failover 尝试上限、总超时封顶
     llm_request_timeout: float = 60.0  # 单候选单次请求超时（秒）
     llm_max_retries: int = 1  # 单候选 SDK 层重试次数（有 failover，不必多）

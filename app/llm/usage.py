@@ -20,6 +20,26 @@ from app.models.llm_log import LlmCallLog
 logger = logging.getLogger(__name__)
 
 
+class BudgetExceededError(RuntimeError):
+    """当日 LLM token 预算已耗尽且开启硬闸，拒绝新调用（H2.2）。"""
+
+
+def budget_exceeded() -> bool:
+    """当日累计是否已超预算（硬闸判据，读 Redis 原子计数，跨 worker 一致）。
+
+    仅在 llm_daily_token_budget>0 且 llm_budget_hard_limit=True 时生效;否则恒 False。
+    """
+    s = get_settings()
+    if s.llm_daily_token_budget <= 0 or not s.llm_budget_hard_limit:
+        return False
+    from datetime import UTC, datetime
+
+    from app.core import shared_state
+
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    return shared_state.budget_add(day, 0) >= s.llm_daily_token_budget
+
+
 def extract_usage(reply: BaseMessage) -> tuple[int, int, int]:
     """从模型返回的 usage_metadata 取 (prompt, completion, total) token；缺失返回 0。"""
     meta: dict[str, Any] = getattr(reply, "usage_metadata", None) or {}
@@ -41,6 +61,7 @@ async def record_usage(
     status: str = "success",
     user_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
+    department_id: uuid.UUID | None = None,
 ) -> None:
     """落一行用量记录并做日预算告警。异常吞掉（用量留痕绝不影响主链路）。"""
     try:
@@ -49,7 +70,7 @@ async def record_usage(
                 role=role, model=model,
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=total_tokens, duration_ms=duration_ms, status=status,
-                user_id=user_id, task_id=task_id,
+                user_id=user_id, task_id=task_id, department_id=department_id,
             )
         )
         await db.commit()
