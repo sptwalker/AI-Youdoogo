@@ -7,7 +7,10 @@ set -e
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 STAMP=$(date +%Y%m%d_%H%M%S)
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
-NETWORK="${COMPOSE_NETWORK:-ai-youdoogo_default}"
+# compose 网络名 = <项目名>_default，项目名默认取部署目录名。
+# 手册部署在 /opt/youdoo → youdoo_default。若你的目录名不同请用 COMPOSE_NETWORK 覆盖，
+# 或先 `docker network ls | grep default` 查实际名。
+NETWORK="${COMPOSE_NETWORK:-youdoo_default}"
 mkdir -p "$BACKUP_DIR/pg" "$BACKUP_DIR/minio"
 
 # 读取 MinIO 凭证（.env.production）

@@ -48,6 +48,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         async with async_session_factory() as db:
             runtime_config.load(await config_service.all_values(db))
+            seeded = await ai_provider_service.seed_from_env(db)  # 首次部署兜底建卡（docs/12）
+            if seeded:
+                logger.info("首次部署：从 .env 种子 %d 张 AI 卡片", seeded)
             await ai_provider_service.sync_to_factory(db)
             await environment_service.ensure_archivist(db)  # 系统档案员自举（docs/13 §9）
         logger.info("配置覆盖层 + AI 卡片已载入")

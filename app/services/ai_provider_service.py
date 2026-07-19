@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.llm import factory
 from app.llm.model_tester import test_card
-from app.models.ai_provider import VALID_TIERS, AiProvider
+from app.models.ai_provider import TIER_DAILY, TIER_REASONING, VALID_TIERS, AiProvider
 
 
 def _provider_id(card: AiProvider) -> str:
@@ -202,6 +202,34 @@ async def list_providers(db: AsyncSession) -> list[dict[str, Any]]:
         }
         for c in (await db.execute(stmt)).scalars()
     ]
+
+
+async def seed_from_env(db: AsyncSession) -> int:
+    """首次部署兜底：库中无任何卡片且 .env 有 DeepSeek 密钥 → 自动建 daily+reasoning 两张卡。
+
+    让全新生产库开箱即 AI 可用（docs/12 缺口1 方案A），避免"无卡片 AI 不可用"卡住首屏。
+    幂等:已存在任何卡片则跳过（返回 0）;开发库已手动建卡故为空操作。返回新建卡片数。
+    """
+    from app.core.config import get_settings
+
+    existing = (
+        await db.execute(select(AiProvider).where(AiProvider.is_delete.is_(False)).limit(1))
+    ).first()
+    if existing is not None:
+        return 0  # 已有卡片，不覆盖
+    key = (get_settings().deepseek_api_key or "").strip()
+    if not key:
+        return 0  # 无密钥，无从建卡（部署者需登录后手动建）
+    # DeepSeek 一家两档：daily=deepseek-chat，reasoning=deepseek-reasoner
+    await create(
+        db, name="DeepSeek 日常", tier=TIER_DAILY,
+        base_url="https://api.deepseek.com", api_key=key, model="deepseek-chat",
+    )
+    await create(
+        db, name="DeepSeek 推理", tier=TIER_REASONING,
+        base_url="https://api.deepseek.com", api_key=key, model="deepseek-reasoner",
+    )
+    return 2
 
 
 async def sync_to_factory(db: AsyncSession) -> None:

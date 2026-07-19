@@ -48,6 +48,45 @@ async def test_first_card_of_tier_is_primary(db: AsyncSession) -> None:
     assert cards[str(b)]["is_primary"] is False
 
 
+async def test_seed_from_env_creates_two_cards(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """首启无卡片 + 有 DeepSeek 密钥 → 种 daily+reasoning 两张卡（docs/12 缺口1）。"""
+    class _S:
+        deepseek_api_key = "sk-deepseek-xxxx"
+
+    monkeypatch.setattr("app.core.config.get_settings", lambda: _S())
+    n = await svc.seed_from_env(db)
+    assert n == 2
+    cards = await svc.list_providers(db)
+    tiers = {c["tier"] for c in cards}
+    assert tiers == {"daily", "reasoning"} and len(cards) == 2
+
+
+async def test_seed_from_env_idempotent(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """已有卡片 → 不重复种（返回 0）。"""
+    class _S:
+        deepseek_api_key = "sk-deepseek-xxx"
+
+    monkeypatch.setattr("app.core.config.get_settings", lambda: _S())
+    await _mk(db, "已有卡")
+    assert await svc.seed_from_env(db) == 0
+
+
+async def test_seed_from_env_no_key_skips(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """无密钥 → 不建卡（返回 0），留待部署者 UI 手动建。"""
+    class _S:
+        deepseek_api_key = ""
+
+    monkeypatch.setattr("app.core.config.get_settings", lambda: _S())
+    assert await svc.seed_from_env(db) == 0
+    assert await svc.list_providers(db) == []
+
+
 async def test_list_masks_api_key(db: AsyncSession) -> None:
     """list 不回显明文，只回 hint 末4位 + is_set。"""
     await _mk(db, "A", key="sk-abcd-9876")
