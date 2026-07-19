@@ -19,6 +19,7 @@ from app.api.v1.data_sources import router as data_sources_router
 from app.api.v1.desktop import router as desktop_router
 from app.api.v1.discussion import message_router as discussion_message_router
 from app.api.v1.discussion import router as discussion_router
+from app.api.v1.eval import router as eval_router
 from app.api.v1.grants import router as grants_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.knowledge_bases import router as knowledge_bases_router
@@ -81,6 +82,7 @@ app.include_router(grants_router, prefix="/api/v1")
 app.include_router(collab_router, prefix="/api/v1")
 app.include_router(ai_providers_router, prefix="/api/v1")
 app.include_router(semantic_router, prefix="/api/v1")
+app.include_router(eval_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")
