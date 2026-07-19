@@ -12,7 +12,6 @@ import uuid
 from typing import Any
 
 from langchain_core.messages import BaseMessage
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -54,24 +53,30 @@ async def record_usage(
             )
         )
         await db.commit()
-        await _check_daily_budget(db)
+        await _check_daily_budget(db, total_tokens)
     except Exception:  # noqa: BLE001 - 用量记录失败不得影响业务
         logger.exception("记录 LLM 用量失败 role=%s model=%s", role, model)
 
 
-async def _check_daily_budget(db: AsyncSession) -> None:
-    """当日累计 token 超预算则告警。"""
+async def _check_daily_budget(db: AsyncSession, tokens: int) -> None:
+    """当日累计 token 超预算则告警。用 Redis 原子计数（跨 worker 一致，H1.4）。
+
+    原子 INCRBY 累加 + 判超限，消除多 worker 各自 DB 求和的竞态;Redis 不可用时
+    shared_state 自动降级本地计数（单 worker 仍准）。仅在"刚越过阈值"那一刻告警一次。
+    """
     budget = get_settings().llm_daily_token_budget
     if budget <= 0:
         return
-    stmt = select(func.coalesce(func.sum(LlmCallLog.total_tokens), 0)).where(
-        func.date(LlmCallLog.create_time) == func.current_date()
-    )
-    today_total = int((await db.execute(stmt)).scalar_one())
-    if today_total > budget:
-        msg = f"LLM 日用量告警：当日累计 {today_total} tokens 已超预算 {budget}，请关注成本。"
+    from datetime import UTC, datetime
+
+    from app.core import shared_state
+
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    before = shared_state.budget_add(day, 0)  # 当前累计（未加本次）
+    after = shared_state.budget_add(day, max(0, tokens))
+    if before <= budget < after:  # 恰好本次越过阈值 → 只告警一次
+        msg = f"LLM 日用量告警：当日累计 {after} tokens 已超预算 {budget}，请关注成本。"
         logger.warning(msg)
-        # best-effort 推运营群（未开启通知或未配群时静默跳过）
         from app.integrations.feishu import notify
 
         await notify.push_ops_message(f"【成本告警】{msg}")

@@ -1,0 +1,13 @@
+feat(可靠性): H1.4 熔断+预算迁Redis跨worker一致(P0-4,docs/16)
+
+- app/core/shared_state.py:同步Redis客户端(紧超时0.3s)+本地兜底
+  熔断冷却用TTL键;预算用原子INCRBY(跨worker一致消除竞态)
+  Redis不可用/操作异常→降级本地态,30s内不重连,绝不阻断LLM主链路
+- health.ProviderHealth委托shared_state,接口不变(fallback/roles/测试零改动)
+- usage日预算改原子Redis计数,仅刚越阈值告警一次
+- 7单测(冷却/预算/归一/降级本地/操作异常降级)
+
+验收:跨进程实测进程B读到进程A的熔断+预算原子累加(500+300=800);
+Redis挂降级本地功能不断;网关8测试零改动全过;357测试全绿。P0全部完成。
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

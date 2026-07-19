@@ -1,19 +1,19 @@
-"""LLM provider 运行时健康度（进程内熔断器）— 移植自 Bottleneck-Hunter llm_clients.health。
+"""LLM provider 运行时健康度（熔断器）。
 
-- ProviderHealth：进程内熔断记忆。某 provider 失败即按原因进入冷却期，
+- ProviderHealth：熔断记忆，某 provider 失败即按原因进入冷却期，
   冷却期内 rank_providers 把它沉底，避免对已知失效模型反复耗超时。
 - rank_providers：简化排序 —— 健康(未熔断)优先，同组内保持传入顺序（稳定排序）。
 
-相对源实现的减法：删除逐用户隔离（key 只有 provider）、遥测落库、成功率/能力分/
-用户策略加权排序。多 worker 需跨进程共享时再上 Redis。
+跨 worker 一致（H1.4，docs/16 P0-4）:冷却态委托 app.core.shared_state（Redis + 本地兜底），
+多 worker 共享同一冷却记忆;Redis 不可用时自动降级进程内本地态，接口不变。
 """
 
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from collections.abc import Sequence
+
+from app.core import shared_state
 
 logger = logging.getLogger(__name__)
 
@@ -31,50 +31,30 @@ _CANCEL_REASON = "调用被取消"  # 用户主动取消，不惩罚
 
 
 class ProviderHealth:
-    """进程内熔断记忆：provider → 冷却截止时刻(monotonic)。线程安全。"""
-
-    def __init__(self) -> None:
-        self._until: dict[str, float] = {}
-        self._lock = threading.Lock()
+    """熔断记忆（委托 shared_state，跨 worker 一致 + 本地兜底）。接口不变。"""
 
     def record_failure(self, provider: str, reason: str = "") -> None:
         """记一次失败：按原因设定冷却期（取消不惩罚）。"""
         if reason == _CANCEL_REASON:
             return
         cd = _COOLDOWN_BY_REASON.get(reason, _DEFAULT_COOLDOWN)
-        if cd <= 0:
-            return
-        with self._lock:
-            self._until[(provider or "").lower().strip()] = time.monotonic() + cd
+        shared_state.cooldown_set(provider, cd)
 
     def record_success(self, provider: str) -> None:
         """记一次成功：清除该 provider 的熔断状态。"""
-        with self._lock:
-            self._until.pop((provider or "").lower().strip(), None)
+        shared_state.cooldown_clear(provider)
 
     def is_open(self, provider: str) -> bool:
         """True = 该 provider 处于冷却期，应沉底/避免选作主模型。"""
-        key = (provider or "").lower().strip()
-        with self._lock:
-            t = self._until.get(key)
-            if t is None:
-                return False
-            if time.monotonic() >= t:
-                self._until.pop(key, None)
-                return False
-            return True
+        return shared_state.cooldown_active(provider)
 
     def cooldown_remaining(self, provider: str) -> int:
         """剩余冷却秒数（未熔断为 0）。"""
-        key = (provider or "").lower().strip()
-        with self._lock:
-            t = self._until.get(key)
-            return max(0, int(t - time.monotonic())) if t else 0
+        return shared_state.cooldown_ttl(provider)
 
     def reset(self) -> None:
-        """清空全部熔断状态（测试用）。"""
-        with self._lock:
-            self._until.clear()
+        """清空本地兜底熔断状态（测试用）。"""
+        shared_state.reset()
 
 
 health = ProviderHealth()
