@@ -48,18 +48,22 @@ async def audit(
     detail: dict[str, Any] | None = None,
     result: str = "ok",
 ) -> None:
-    """写一条审计。异常吞掉——留痕失败不得让业务动作失败。"""
-    try:
-        db.add(
-            AuditLog(
-                actor_id=actor_id, actor_role=actor_role, action=action,
-                target_type=target_type, target_id=target_id, summary=summary,
-                detail=_mask(detail), result=result,
-            )
-        )
-        await db.commit()
-    except Exception:  # noqa: BLE001 - 审计失败不阻断主链
-        logger.exception("写审计失败 action=%s", action)
+    """写一条审计。失败重试一次仍不成则记 ERROR（不阻断主链，但可告警，H2.3）。"""
+    log = AuditLog(
+        actor_id=actor_id, actor_role=actor_role, action=action,
+        target_type=target_type, target_id=target_id, summary=summary,
+        detail=_mask(detail), result=result,
+    )
+    for attempt in (1, 2):  # 重试一次，缓解瞬时故障
+        try:
+            db.add(log)
+            await db.commit()
+            return
+        except Exception:  # noqa: BLE001 - 审计失败不阻断主链，但要留痕可告警
+            await db.rollback()
+            if attempt == 2:
+                # ERROR 级（非 warning）:审计是红线合规证据链，失败须可被监控告警
+                logger.error("写审计最终失败 action=%s actor=%s", action, actor_id, exc_info=True)
 
 
 async def list_audit_logs(

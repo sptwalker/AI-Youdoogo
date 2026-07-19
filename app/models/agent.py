@@ -68,6 +68,9 @@ class AgentTaskRecord(CommonMixin, Base):
     input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     tools_called: Mapped[list[Any]] = mapped_column(_JSONB, default=list)
+    # 检索引用溯源（H2.3）：本次注入用了哪些知识库片段 [{file_id,file_name,chunk_index}]。
+    # 让"某AI产出用了哪些资料"事后可精确重建，不再只临时拼进 prompt。
+    sources: Mapped[list[Any]] = mapped_column(_JSONB, default=list, server_default="[]")
     model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="success", server_default="success")
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)

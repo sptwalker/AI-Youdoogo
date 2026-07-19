@@ -151,14 +151,14 @@ async def test_env_context_injection_flag(
         db, name="助理甲", prompt_template="你是助理。"
     )
 
-    _, system_on, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    _, system_on, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
     assert "【系统环境快照】" in system_on and "助理甲" in system_on
 
     async def _off(_db: AsyncSession, key: str, default: Any) -> Any:
         return False if key == "agent_env_context" else default
 
     monkeypatch.setattr(base.config_service, "resolve", _off)
-    _, system_off, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    _, system_off, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
     assert "【系统环境快照】" not in system_off
 
     monkeypatch.undo()
@@ -168,7 +168,7 @@ async def test_env_context_injection_flag(
         raise RuntimeError("db down")
 
     monkeypatch.setattr(svc, "build_snapshot", _boom)
-    _, system_fail, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    _, system_fail, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
     assert "【系统环境快照】" not in system_fail  # 失败静默跳过，不抛
 
 

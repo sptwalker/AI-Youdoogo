@@ -82,6 +82,37 @@ async def test_run_agent_injects_knowledge(
     assert "参考资料" in human and "创想悦动成立于2020年" in human
 
 
+async def test_run_agent_persists_sources(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """检索引用溯源落库到 AgentTaskRecord.sources（H2.3），可事后重建用了哪些资料。"""
+    llm = _CaptureLLM()
+    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: llm)
+    fid = uuid.uuid4()
+    hit = retrieval.Hit(
+        file_id=fid, file_name="公司资料.txt", chunk_index=2,
+        chunk_text="创想悦动成立于2020年", distance=0.1,
+    )
+
+    async def fake_search(*a: Any, **k: Any) -> list[retrieval.Hit]:
+        return [hit]
+
+    monkeypatch.setattr(retrieval, "search", fake_search)
+    role = AgentRole(name="顾问S", prompt_template="x", model_role="daily")
+    db.add(role)
+    await db.commit()
+    await db.refresh(role)
+
+    rec = await base.run_agent(
+        db, role, task_type="t", input_summary="s",
+        user_message="写简介", use_knowledge=True,
+    )
+    assert len(rec.sources) == 1
+    assert rec.sources[0]["file_id"] == str(fid)
+    assert rec.sources[0]["file_name"] == "公司资料.txt"
+    assert rec.sources[0]["chunk_index"] == 2
+
+
 # ── 注入防护 spotlighting（H1.3，docs/16 P0-3）─────────
 def test_knowledge_block_wraps_with_spotlighting() -> None:
     """资料被分隔符包裹 + 带"非指令"安全须知 + 任务段分离。"""

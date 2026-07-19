@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import cast
+from typing import Any, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -95,10 +95,13 @@ def build_knowledge_block(materials: list[tuple[str, str]], user_message: str) -
     )
 
 
-async def _inject_knowledge(db: AsyncSession, role: AgentRole, user_message: str) -> str:
+async def _inject_knowledge(
+    db: AsyncSession, role: AgentRole, user_message: str
+) -> tuple[str, list[dict[str, Any]]]:
     """按 AI 员工的部门可见范围检索知识库，把相关资料 spotlighting 包裹后拼进消息。
 
-    检索/embedding 任何失败都不阻断任务：记 warning、返回原消息。
+    返回 (注入后的消息, 引用溯源列表)。检索/embedding 任何失败都不阻断任务：
+    记 warning、返回 (原消息, [])。引用溯源供 _finalize 落库（H2.3），可事后精确重建。
     注入防护（H1.3）:资料用分隔符隔离 + 明确非指令，挡 prompt injection。
     """
     try:
@@ -110,21 +113,26 @@ async def _inject_knowledge(db: AsyncSession, role: AgentRole, user_message: str
         )
         hits = await retrieval.search(db, user_message, top_k=5, visible_kb_ids=kb_ids)
         if not hits:
-            return user_message
-        return build_knowledge_block(
+            return user_message, []
+        sources = [
+            {"file_id": str(h.file_id), "file_name": h.file_name, "chunk_index": h.chunk_index}
+            for h in hits
+        ]
+        block = build_knowledge_block(
             [(h.chunk_text, h.file_name) for h in hits], user_message
         )
+        return block, sources
     except Exception:  # noqa: BLE001 - 知识检索故障不阻断 AI 任务
         logger.warning("知识库检索注入失败，改为无资料执行 role=%s", role.name, exc_info=True)
-        return user_message
+        return user_message, []
 
 
 async def _prepare(
     db: AsyncSession, role: AgentRole, user_message: str, use_knowledge: bool
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, list[dict[str, Any]]]:
     """run_agent / run_agent_stream 共用的执行前准备。
 
-    返回 (llm_role, system_content, effective_message)：档位映射 → 全局红线前缀
+    返回 (llm_role, system_content, effective_message, sources)：档位映射 → 全局红线前缀
     （配置层故障回退内置默认）→ 技能提示词段（docs/13 §11）→ 可选知识注入。
     """
     llm_role = _LLM_ROLE_BY_TIER.get(role.model_role, "default")
@@ -146,9 +154,10 @@ async def _prepare(
         f"{await semantic_service.term_prompt(db)}"
     )
     effective_message = user_message
+    sources: list[dict[str, Any]] = []
     if use_knowledge:
-        effective_message = await _inject_knowledge(db, role, user_message)
-    return llm_role, system_content, effective_message
+        effective_message, sources = await _inject_knowledge(db, role, user_message)
+    return llm_role, system_content, effective_message, sources
 
 
 async def _finalize(
@@ -165,6 +174,7 @@ async def _finalize(
     usage: tuple[int, int, int],
     duration_ms: int,
     user_id: uuid.UUID | None,
+    sources: list[dict[str, Any]] | None = None,
 ) -> AgentTaskRecord:
     """落 AgentTaskRecord 留痕 + 记 usage（run_agent / run_agent_stream 共用收尾）。"""
     record = AgentTaskRecord(
@@ -176,6 +186,7 @@ async def _finalize(
         status=status,
         error_msg=error_msg,
         duration_ms=duration_ms,
+        sources=sources or [],  # 检索引用溯源（H2.3）
     )
     db.add(record)
     await db.commit()
@@ -207,7 +218,7 @@ async def run_agent(
     use_knowledge=True 时，先按该 AI 员工的部门可见范围检索知识库，把相关资料注入
     提示词（开卷作答）；检索失败不阻断执行。AI 只能检索自己部门范围内的知识。
     """
-    llm_role, system_content, effective_message = await _prepare(
+    llm_role, system_content, effective_message, sources = await _prepare(
         db, role, user_message, use_knowledge
     )
     t0 = time.monotonic()
@@ -236,6 +247,7 @@ async def run_agent(
         db, role=role, llm_role=llm_role, task_type=task_type, input_summary=input_summary,
         output=output, model_used=model_used, status=status, error_msg=error_msg,
         usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
+        sources=sources,
     )
 
 
@@ -256,7 +268,7 @@ async def run_agent_stream(
     无法安全重启（fallback.py 设计），在此收敛为 failed 记录。
     调用方按 isinstance(item, AgentTaskRecord) 识别末项。
     """
-    llm_role, system_content, effective_message = await _prepare(
+    llm_role, system_content, effective_message, sources = await _prepare(
         db, role, user_message, use_knowledge
     )
     t0 = time.monotonic()
@@ -292,4 +304,5 @@ async def run_agent_stream(
         db, role=role, llm_role=llm_role, task_type=task_type, input_summary=input_summary,
         output=output, model_used=model_used, status=status, error_msg=error_msg,
         usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
+        sources=sources,
     )

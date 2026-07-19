@@ -52,6 +52,33 @@ async def test_audit_inserts_row(db: AsyncSession) -> None:
     assert logs[0]["detail"]["secret"] == "***"  # 落库前打码
 
 
+async def test_audit_retries_then_logs_error(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """审计写失败 → 重试一次仍失败 → 记 ERROR，但不抛（不阻断主链，H2.3）。"""
+    calls = {"commit": 0}
+
+    async def _boom() -> None:
+        calls["commit"] += 1
+        raise RuntimeError("db down")
+
+    async def _noop() -> None:
+        return None
+
+    monkeypatch.setattr(db, "commit", _boom)
+    monkeypatch.setattr(db, "rollback", _noop)
+    errors: list[str] = []
+    monkeypatch.setattr(
+        audit_service.logger, "error",
+        lambda *a, **k: errors.append(str(a[0]) if a else ""),
+    )
+    # 不抛异常（吞掉），但重试了 2 次并记 error
+    await audit_service.audit(
+        db, actor_id=uuid.uuid4(), actor_role="admin", action="x", summary="s",
+    )
+    assert calls["commit"] == 2 and len(errors) == 1
+
+
 # ---- config_service ----
 
 async def test_config_resolve_and_set(db: AsyncSession) -> None:

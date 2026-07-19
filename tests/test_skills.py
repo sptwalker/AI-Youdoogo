@@ -117,5 +117,5 @@ async def test_prepare_uses_skills(db: AsyncSession, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("app.services.environment_service.get_env_context", _fake_env)
     role = _role(["env_context"])
-    _, system, _ = await base._prepare(db, role, "hi", use_knowledge=False)
+    _, system, _, _ = await base._prepare(db, role, "hi", use_knowledge=False)
     assert "【系统环境快照】" in system and "【协作能力】" not in system
