@@ -31,7 +31,7 @@ from app.schemas.meeting import (
     VoteRequest,
 )
 from app.schemas.task import TaskOut
-from app.services import audit_service, meeting_service
+from app.services import audit_service, meeting_service, permission_service
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -52,19 +52,20 @@ async def create_meeting(body: MeetingCreate, db: DB, user: CurrentUser) -> dict
 @router.get("")
 async def list_meetings(
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     status: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """会议列表（默认最多 100 条）。"""
-    ms = await meeting_service.list_meetings(db, status=status, limit=limit)
+    """会议列表（行级可见性：普通员工只见本人/本部门，管理层全见）。"""
+    ms = await meeting_service.list_meetings(db, status=status, limit=limit, viewer=user)
     return ok([MeetingOut.model_validate(m).model_dump(mode="json") for m in ms])
 
 
 @router.get("/{meeting_id}")
-async def get_meeting(meeting_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
-    """会议详情 + 发言 + 决议。"""
+async def get_meeting(meeting_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """会议详情 + 发言 + 决议（行级可见性守卫）。"""
     m = await meeting_service.get_meeting(db, meeting_id)
+    permission_service.assert_can_see(user, creator_id=m.creator_id, department_id=m.department_id)
     discussions = await meeting_service.list_discussions(db, meeting_id)
     resolutions = await meeting_service.list_resolutions(db, meeting_id)
     return ok(

@@ -21,7 +21,7 @@ from app.schemas.task import (
     TaskOut,
     TransitionRequest,
 )
-from app.services import audit_service, orchestration_service, task_service
+from app.services import audit_service, orchestration_service, permission_service, task_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -48,19 +48,23 @@ async def create_task(body: TaskCreate, db: DB, user: CurrentUser) -> dict:
 @router.get("")
 async def list_tasks(
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     status: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """任务列表（可按状态过滤，默认最多 100 条）。"""
-    tasks = await task_service.list_tasks(db, status=status, limit=limit)
+    """任务列表（行级可见性：普通员工只见本人/本部门/派给己，管理层全见）。"""
+    tasks = await task_service.list_tasks(db, status=status, limit=limit, viewer=user)
     return ok([TaskOut.model_validate(t).model_dump(mode="json") for t in tasks])
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
-    """任务详情 + 流转日志。"""
+async def get_task(task_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """任务详情 + 流转日志（行级可见性守卫）。"""
     task = await task_service.get_task(db, task_id)
+    permission_service.assert_can_see(
+        user, creator_id=task.creator_id, department_id=task.department_id,
+        assignee_user_id=task.assignee_user_id,
+    )
     logs = await task_service.list_logs(db, task_id)
     return ok(
         {

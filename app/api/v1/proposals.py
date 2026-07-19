@@ -22,7 +22,7 @@ from app.schemas.proposal import (
     ReviewOut,
 )
 from app.schemas.task import TaskOut
-from app.services import audit_service, proposal_service
+from app.services import audit_service, permission_service, proposal_service
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -49,19 +49,20 @@ async def create_proposal(body: ProposalCreate, db: DB, user: CurrentUser) -> di
 @router.get("")
 async def list_proposals(
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     status: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
-    """提案列表（可按状态过滤，默认最多 100 条）。"""
-    items = await proposal_service.list_proposals(db, status=status, limit=limit)
+    """提案列表（行级可见性：普通员工只见本人/本部门，管理层全见）。"""
+    items = await proposal_service.list_proposals(db, status=status, limit=limit, viewer=user)
     return ok([ProposalOut.model_validate(p).model_dump(mode="json") for p in items])
 
 
 @router.get("/{proposal_id}")
-async def get_proposal(proposal_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
-    """提案详情 + 评审记录。"""
+async def get_proposal(proposal_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """提案详情 + 评审记录（行级可见性守卫）。"""
     p = await proposal_service.get_proposal(db, proposal_id)
+    permission_service.assert_can_see(user, creator_id=p.creator_id, department_id=p.department_id)
     reviews = await proposal_service.list_reviews(db, proposal_id)
     return ok(
         {

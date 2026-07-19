@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.models.task import TaskCard, TaskCardLog
 from app.services import task_flow
+
+if TYPE_CHECKING:
+    from app.models.system import SysUser
 
 
 async def _log(
@@ -135,13 +138,24 @@ async def list_tasks(
     status: str | None = None,
     parent_id: uuid.UUID | None = None,
     limit: int = 100,
+    viewer: SysUser | None = None,
 ) -> list[TaskCard]:
-    """列出任务卡（可按状态 / 父任务过滤），按创建时间倒序，默认最多 100 条防全量返回。"""
+    """列出任务卡（可按状态 / 父任务过滤），按创建时间倒序，默认最多 100 条防全量返回。
+
+    viewer 传入时按行级可见性过滤（H1.2）：普通员工只见本人创建/本部门/派给己；
+    内部编排调用不传 viewer（需看全部步骤卡）。
+    """
     stmt = select(TaskCard).where(TaskCard.is_delete.is_(False))
     if status:
         stmt = stmt.where(TaskCard.status == status)
     if parent_id:
         stmt = stmt.where(TaskCard.parent_id == parent_id)
+    if viewer is not None:
+        from app.services import permission_service
+
+        cond = permission_service.row_filter(TaskCard, viewer)
+        if cond is not None:
+            stmt = stmt.where(cond)
     stmt = stmt.order_by(TaskCard.create_time.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars())
 

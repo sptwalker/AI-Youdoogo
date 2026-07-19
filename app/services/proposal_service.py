@@ -7,9 +7,13 @@ AI 预研仅产出参考结论（reasoning 档位 = deepseek-reasoner），不�
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.models.system import SysUser
 
 from app.agents.base import get_agent_role, run_agent
 from app.core.exceptions import AppError
@@ -170,11 +174,18 @@ async def convert_to_task(
 
 
 async def list_proposals(
-    db: AsyncSession, *, status: str | None = None, limit: int = 100
+    db: AsyncSession, *, status: str | None = None, limit: int = 100,
+    viewer: SysUser | None = None,
 ) -> list[ProposalCard]:
     stmt = select(ProposalCard).where(ProposalCard.is_delete.is_(False))
     if status:
         stmt = stmt.where(ProposalCard.status == status)
+    if viewer is not None:  # 行级可见性（H1.2）：普通员工只见本人/本部门
+        from app.services import permission_service
+
+        cond = permission_service.row_filter(ProposalCard, viewer)
+        if cond is not None:
+            stmt = stmt.where(cond)
     stmt = stmt.order_by(ProposalCard.create_time.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars())
 

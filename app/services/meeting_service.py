@@ -10,10 +10,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.models.system import SysUser
 
 from app.agents.base import get_agent_role, run_agent, run_agent_stream
 from app.agents.skills import execute_all, fold_notes
@@ -383,11 +386,18 @@ async def list_resolutions(db: AsyncSession, meeting_id: uuid.UUID) -> list[Meet
 
 
 async def list_meetings(
-    db: AsyncSession, *, status: str | None = None, limit: int = 100
+    db: AsyncSession, *, status: str | None = None, limit: int = 100,
+    viewer: SysUser | None = None,
 ) -> list[MeetingInfo]:
     stmt = select(MeetingInfo).where(MeetingInfo.is_delete.is_(False))
     if status:
         stmt = stmt.where(MeetingInfo.status == status)
+    if viewer is not None:  # 行级可见性（H1.2）
+        from app.services import permission_service
+
+        cond = permission_service.row_filter(MeetingInfo, viewer)
+        if cond is not None:
+            stmt = stmt.where(cond)
     return list(
         (await db.execute(stmt.order_by(MeetingInfo.create_time.desc()).limit(limit))).scalars()
     )
