@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from sqlalchemy import text
 
 from app.api.v1.admin import router as admin_router
@@ -86,6 +87,29 @@ app.include_router(semantic_router, prefix="/api/v1")
 async def health() -> dict:
     """存活探针。"""
     return ok({"version": app.version, "env": settings.app_env})
+
+
+@app.get("/api/v1/health/ready")
+async def health_ready() -> Response:
+    """就绪探针（H2.4）：DB 可达 + 至少一张 active AI 卡片。未就绪回 503。"""
+    from app.core.database import async_session_factory
+    from app.services import metrics_service
+
+    async with async_session_factory() as db:
+        is_ready, detail = await metrics_service.readiness(db)
+    body = ok(detail) if is_ready else {"code": 1, "msg": "not ready", "data": detail}
+    return JSONResponse(body, status_code=200 if is_ready else 503)
+
+
+@app.get("/api/v1/metrics")
+async def metrics() -> Response:
+    """Prometheus 指标（H2.4，文本格式）。从 DB 聚合，跨 worker 一致。"""
+    from app.core.database import async_session_factory
+    from app.services import metrics_service
+
+    async with async_session_factory() as db:
+        text_body = await metrics_service.render_metrics(db)
+    return PlainTextResponse(text_body, media_type="text/plain; version=0.0.4")
 
 
 @app.get("/api/v1/health/deps")
