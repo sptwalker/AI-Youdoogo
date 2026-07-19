@@ -28,8 +28,10 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # The production CCE cluster is currently at its pod ceiling. Replace one
+      # ready replica at a time rather than creating an additional surge pod.
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: youdoogo-backend
@@ -138,8 +140,10 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      # The production CCE cluster is currently at its pod ceiling. Replace one
+      # ready replica at a time rather than creating an additional surge pod.
+      maxUnavailable: 1
+      maxSurge: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: youdoogo-frontend

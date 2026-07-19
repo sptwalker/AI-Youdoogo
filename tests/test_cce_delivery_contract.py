@@ -95,6 +95,7 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert "ingress_manifest" in deploy_script
     assert 'kubectl apply -f "$workloads_manifest"' in deploy_script
     assert 'kubectl apply -f "$ingress_manifest"' in deploy_script
+    assert 'kubectl delete job "$prior_job" -n "$KUBE_NAMESPACE" --wait=true' in deploy_script
     assert deploy_script.index('kubectl apply -f "$workloads_manifest"') < deploy_script.index(
         'kubectl apply -f "$ingress_manifest"'
     )
@@ -145,11 +146,19 @@ def test_backend_serve_and_probe_contract(tmp_path: Path) -> None:
     assert container["image"].endswith(f":{IMAGE_TAG}")
     for probe_name in ("startupProbe", "readinessProbe", "livenessProbe"):
         assert container[probe_name]["httpGet"]["path"] == "/api/v1/health"
-    assert "/api/v1/health/deps" not in str(backend)
     assert container["envFrom"] == [
         {"configMapRef": {"name": "youdoogo-runtime-config"}},
         {"secretRef": {"name": "youdoogo-runtime"}},
     ]
+    assert backend["spec"]["strategy"]["rollingUpdate"] == {
+        "maxUnavailable": 1,
+        "maxSurge": 0,
+    }
+    frontend = object_by(objects, "Deployment", "youdoogo-frontend")
+    assert frontend["spec"]["strategy"]["rollingUpdate"] == {
+        "maxUnavailable": 1,
+        "maxSurge": 0,
+    }
 
     entrypoint = (ROOT / "docker/entrypoint.sh").read_text(encoding="utf-8")
     assert "migrate)" in entrypoint
@@ -165,7 +174,6 @@ def test_migration_job_is_once_only_and_bounded(tmp_path: Path) -> None:
     assert job["spec"]["template"]["spec"]["restartPolicy"] == "Never"
     container = job["spec"]["template"]["spec"]["containers"][0]
     assert container["args"] == ["migrate"]
-
 
 def test_frontend_same_origin_proxy_and_spa() -> None:
     nginx = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")

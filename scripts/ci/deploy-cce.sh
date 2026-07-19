@@ -136,6 +136,19 @@ kubectl apply --dry-run=server -f "$workloads_manifest" >/dev/null
 # Validate the Ingress only after its referenced Services have been created;
 # CCE admission rejects an otherwise valid first-release Ingress before then.
 
+echo "[migrate] reclaiming terminal YOUDOOGO migration Pods before creating a new Job"
+while IFS= read -r prior_job; do
+  [[ -z "$prior_job" || "$prior_job" == "$migration_job" ]] && continue
+  prior_active="$(kubectl get job "$prior_job" -n "$KUBE_NAMESPACE" -o jsonpath='{.status.active}')"
+  prior_succeeded="$(kubectl get job "$prior_job" -n "$KUBE_NAMESPACE" -o jsonpath='{.status.succeeded}')"
+  prior_failed="$(kubectl get job "$prior_job" -n "$KUBE_NAMESPACE" -o jsonpath='{.status.failed}')"
+  if [[ -z "$prior_active" && ( "$prior_succeeded" == "1" || ( -n "$prior_failed" && "$prior_failed" != "0" ) ) ]]; then
+    kubectl delete job "$prior_job" -n "$KUBE_NAMESPACE" --wait=true
+  fi
+done < <(kubectl get jobs -n "$KUBE_NAMESPACE" \
+  -l app.kubernetes.io/name=youdoogo-migration,app.kubernetes.io/part-of=youdoogo \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+
 echo "[migrate] ensuring exactly one bounded Job for ${IMAGE_TAG}"
 if kubectl get job "$migration_job" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
   succeeded="$(kubectl get job "$migration_job" -n "$KUBE_NAMESPACE" -o jsonpath='{.status.succeeded}')"
