@@ -105,6 +105,59 @@ def test_fallback_all_failed_raises() -> None:
         fb.invoke("你好")
 
 
+# ── H2.1 调用护栏：尝试上限 + 总超时封顶 + 超时注入 ────────
+def test_fallback_max_attempts_caps_candidates() -> None:
+    """max_attempts=1 → 只试主候选，不碰备选（主失败即抛，不切换）。"""
+    echo = _EchoModel()
+    fb = FallbackChatModel(
+        candidates=[(_BoomModel(), "deepseek", "deepseek-chat"), (echo, "qwen", "qwen-plus")],
+        max_attempts=1,
+    )
+    with pytest.raises(TimeoutError):
+        fb.invoke("你好")  # 被截断到 1 个候选，不 fallback 到 echo
+
+
+def test_fallback_total_budget_stops_chain() -> None:
+    """总墙钟预算耗尽 → 不再尝试后续候选（用极小预算 + 慢主候选模拟）。"""
+    import time as _t
+
+    class _SlowBoom(_BoomModel):
+        def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None,
+                      **kwargs: Any) -> Any:
+            _t.sleep(0.05)
+            raise TimeoutError("slow boom")
+
+    echo = _EchoModel()
+    fb = FallbackChatModel(
+        candidates=[(_SlowBoom(), "deepseek", "deepseek-chat"), (echo, "qwen", "qwen-plus")],
+        total_budget_s=0.01,  # 主候选就已超预算，第二个不再起
+    )
+    with pytest.raises(TimeoutError):
+        fb.invoke("你好")  # 预算耗尽，不 fallback 到 echo
+
+
+def test_active_respects_max_attempts() -> None:
+    """_active 截取到 max_attempts 个候选。"""
+    fb = FallbackChatModel(
+        candidates=[(_EchoModel(), "a", "m"), (_EchoModel(), "b", "m"), (_EchoModel(), "c", "m")],
+        max_attempts=2,
+    )
+    assert len(fb._active()) == 2
+    fb2 = FallbackChatModel(candidates=fb.candidates)  # 默认 0 = 不限
+    assert len(fb2._active()) == 3
+
+
+def test_create_raw_llm_injects_timeout_and_retries() -> None:
+    """_create_raw_llm 给底层模型注入 timeout + max_retries（H2.1）。"""
+    factory.register_custom_provider("cardx", "https://api.x.com", api_key="sk", default_model="m")
+    llm = factory._create_raw_llm("cardx", "m")
+    from app.core.config import get_settings
+
+    s = get_settings()
+    assert llm.request_timeout == s.llm_request_timeout  # type: ignore[attr-defined]
+    assert llm.max_retries == s.llm_max_retries  # type: ignore[attr-defined]
+
+
 def test_get_llm_for_role_builds_from_tier_cards() -> None:
     """daily 档有卡片时 default 角色能构造 FallbackChatModel，主候选=主用卡片。"""
     _register({"daily": [("card_a", "m1", True), ("card_b", "m2", False)]})

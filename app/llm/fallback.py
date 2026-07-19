@@ -98,10 +98,23 @@ class FallbackChatModel(BaseChatModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     candidates: list[tuple[BaseChatModel, str, str]]
+    # 调用护栏（H2.1）：failover 尝试上限 + 整链总墙钟预算（0=不限）。
+    max_attempts: int = 0
+    total_budget_s: float = 0.0
 
     @property
     def _llm_type(self) -> str:
         return "fallback"
+
+    def _active(self) -> list[tuple[BaseChatModel, str, str]]:
+        """按 max_attempts 截取候选（首版并行度=1，串行尝试前 N 个）。"""
+        if self.max_attempts and self.max_attempts > 0:
+            return self.candidates[: self.max_attempts]
+        return self.candidates
+
+    def _over_budget(self, start: float) -> bool:
+        """整链总墙钟是否已超预算（超则不再起新候选）。"""
+        return self.total_budget_s > 0 and (time.monotonic() - start) >= self.total_budget_s
 
     def _notify(self, first_reason: str, win_provider: str, win_model: str) -> None:
         fp, fm = self.candidates[0][1], self.candidates[0][2]
@@ -120,7 +133,11 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         last_exc: Exception | None = None
         first_reason: str | None = None
-        for i, (llm, provider, model) in enumerate(self.candidates):
+        run_start = time.monotonic()
+        for i, (llm, provider, model) in enumerate(self._active()):
+            if i > 0 and self._over_budget(run_start):
+                logger.warning("failover 总超时预算耗尽，停止尝试剩余候选")
+                break
             t0 = time.monotonic()
             try:
                 msg = await llm.ainvoke(messages, stop=stop, **kwargs)
@@ -155,7 +172,11 @@ class FallbackChatModel(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         last_exc: Exception | None = None
         first_reason: str | None = None
-        for i, (llm, provider, model) in enumerate(self.candidates):
+        run_start = time.monotonic()
+        for i, (llm, provider, model) in enumerate(self._active()):
+            if i > 0 and self._over_budget(run_start):
+                logger.warning("failover 总超时预算耗尽，停止尝试剩余候选")
+                break
             emitted = False
             t0 = time.monotonic()
             try:
@@ -188,7 +209,11 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         last_exc: Exception | None = None
         first_reason: str | None = None
-        for i, (llm, provider, model) in enumerate(self.candidates):
+        run_start = time.monotonic()
+        for i, (llm, provider, model) in enumerate(self._active()):
+            if i > 0 and self._over_budget(run_start):
+                logger.warning("failover 总超时预算耗尽，停止尝试剩余候选")
+                break
             t0 = time.monotonic()
             try:
                 msg = llm.invoke(messages, stop=stop, **kwargs)
@@ -223,7 +248,11 @@ class FallbackChatModel(BaseChatModel):
     ) -> Iterator[ChatGenerationChunk]:
         last_exc: Exception | None = None
         first_reason: str | None = None
-        for i, (llm, provider, model) in enumerate(self.candidates):
+        run_start = time.monotonic()
+        for i, (llm, provider, model) in enumerate(self._active()):
+            if i > 0 and self._over_budget(run_start):
+                logger.warning("failover 总超时预算耗尽，停止尝试剩余候选")
+                break
             emitted = False
             t0 = time.monotonic()
             try:

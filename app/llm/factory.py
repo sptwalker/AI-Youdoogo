@@ -181,6 +181,12 @@ def _create_raw_llm(
     if not resolved_model:
         raise ValueError(f"provider {p} 未指定模型且无默认模型")
     resolved_base = base_url or resolve_provider_base_url(p)
+    # 调用护栏（H2.1）：单次请求超时 + SDK 重试上限（调用方可显式覆盖，如测试传 0）。
+    from app.core.config import get_settings
+
+    _s = get_settings()
+    kwargs.setdefault("timeout", _s.llm_request_timeout)
+    kwargs.setdefault("max_retries", _s.llm_max_retries)
 
     if p == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -272,4 +278,11 @@ def create_llm(
     )
     if not backups:
         return llm  # 无可用备选 → 不套壳
-    return FallbackChatModel(candidates=[(llm, p, resolved_model), *backups])
+    from app.core.config import get_settings
+
+    _s = get_settings()
+    return FallbackChatModel(
+        candidates=[(llm, p, resolved_model), *backups],
+        max_attempts=_s.llm_failover_max_attempts,
+        total_budget_s=_s.llm_total_timeout,
+    )

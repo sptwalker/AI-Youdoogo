@@ -43,6 +43,11 @@ class Settings(BaseSettings):
 
     # LLM 用量：当日 token 预算，超阈值告警（0=不启用）
     llm_daily_token_budget: int = 0
+    # LLM 调用护栏（H2.1）：单次请求超时、SDK 重试、failover 尝试上限、总超时封顶
+    llm_request_timeout: float = 60.0  # 单候选单次请求超时（秒）
+    llm_max_retries: int = 1  # 单候选 SDK 层重试次数（有 failover，不必多）
+    llm_failover_max_attempts: int = 3  # failover 最多尝试候选数（0=不限）
+    llm_total_timeout: float = 120.0  # 整条 failover 链总墙钟预算（秒，0=不限）
 
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
