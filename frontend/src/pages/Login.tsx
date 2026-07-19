@@ -1,4 +1,4 @@
-/** 登录页：保留账号密码，并提供飞书 OAuth 一次性交换登录。 */
+/** 登录页：支持账号密码与飞书 OAuth 登录。 */
 import {
   BarChartOutlined,
   LockOutlined,
@@ -82,10 +82,10 @@ export default function Login() {
               subTitle="创想悦动 AI 决策大脑"
               onFinish={onFinish}
               submitter={{
-                searchConfig: { submitText: '账号密码登录' },
-                submitButtonProps: { size: 'large', block: true },
-                render: (_, dom) => [
-                  ...dom,
+                render: () => [
+                  <Button key="password" type="primary" htmlType="submit" size="large" block>
+                    账号密码登录
+                  </Button>,
                   <Divider key="divider" plain>或使用企业身份</Divider>,
                   <Button
                     key="feishu"
