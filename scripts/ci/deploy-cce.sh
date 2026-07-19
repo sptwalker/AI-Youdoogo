@@ -149,6 +149,15 @@ done < <(kubectl get jobs -n "$KUBE_NAMESPACE" \
   -l app.kubernetes.io/name=youdoogo-migration,app.kubernetes.io/part-of=youdoogo \
   -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 
+echo "[migrate] reserving one YOUDOOGO backend slot for the bounded migration Job"
+current_backend_replicas="$(kubectl get deployment "$BACKEND_DEPLOYMENT" -n "$KUBE_NAMESPACE" -o jsonpath='{.spec.replicas}')"
+if [[ "$current_backend_replicas" =~ ^[2-9][0-9]*$ ]]; then
+  # This cluster is at its pod limit. Keep one serving backend replica while
+  # temporarily freeing exactly one project-owned pod slot for migration.
+  kubectl scale deployment "$BACKEND_DEPLOYMENT" -n "$KUBE_NAMESPACE" --replicas=1
+  kubectl rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
+fi
+
 echo "[migrate] ensuring exactly one bounded Job for ${IMAGE_TAG}"
 if kubectl get job "$migration_job" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
   succeeded="$(kubectl get job "$migration_job" -n "$KUBE_NAMESPACE" -o jsonpath='{.status.succeeded}')"

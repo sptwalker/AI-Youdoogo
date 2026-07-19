@@ -96,6 +96,10 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert 'kubectl apply -f "$workloads_manifest"' in deploy_script
     assert 'kubectl apply -f "$ingress_manifest"' in deploy_script
     assert 'kubectl delete job "$prior_job" -n "$KUBE_NAMESPACE" --wait=true' in deploy_script
+    assert 'kubectl scale deployment "$BACKEND_DEPLOYMENT" -n "$KUBE_NAMESPACE" --replicas=1' in deploy_script
+    assert deploy_script.index('kubectl scale deployment "$BACKEND_DEPLOYMENT"') < deploy_script.index(
+        'kubectl apply -f "$migration_manifest"'
+    )
     assert deploy_script.index('kubectl apply -f "$workloads_manifest"') < deploy_script.index(
         'kubectl apply -f "$ingress_manifest"'
     )
