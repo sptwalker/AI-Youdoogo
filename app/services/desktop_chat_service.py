@@ -133,9 +133,18 @@ async def archive_old(db: AsyncSession, user: SysUser, days: int | None = None) 
         return 0
     transcript = "\n".join(f"{m.speaker_name}：{m.content}" for m in old)
     span = f"{old[0].create_time:%Y-%m-%d} ~ {old[-1].create_time:%Y-%m-%d}"
+    # 结构化分层记忆（H3.2）：先提炼成摘要/事实/实体/偏好再入库（更易检索）；
+    # 提炼失败兜底存原始 transcript，绝不丢数据。
+    from app.services import memory_service
+
+    distilled = await memory_service.distill_conversation(db, transcript, user_id=user.id)
+    if distilled:
+        text, title_suffix = distilled, "记忆"
+    else:
+        text, title_suffix = transcript, "存档"
     try:
         await ingest_text(
-            db, title=f"{_display(user)}对话存档 {span}", text=transcript,
+            db, title=f"{_display(user)}对话{title_suffix} {span}", text=text,
             uploader_id=user.id, knowledge_base_id=kb.id, category="conversation",
         )
     except Exception:  # noqa: BLE001 - 归档失败不删消息，下次重试
