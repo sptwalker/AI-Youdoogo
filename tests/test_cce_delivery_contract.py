@@ -106,6 +106,32 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     ) < deploy_script.index(
         'kubectl apply -f "$migration_manifest"'
     )
+    assert '-l "job-name=${migration_job}"' in deploy_script
+    assert "--field-selector=status.phase=Succeeded" in deploy_script
+    cleanup_index = deploy_script.index(
+        'echo "[migrate] releasing completed migration Pod capacity'
+    )
+    assert deploy_script.index('kubectl apply -f "$migration_manifest"') < cleanup_index
+    assert cleanup_index < deploy_script.index('kubectl apply -f "$workloads_manifest"')
+    assert 'print_rollout_diagnostics()' in deploy_script
+    diagnostics = deploy_script[
+        deploy_script.index("print_object_events()") : deploy_script.index(
+            "wait_for_deployment_rollout()"
+        )
+    ]
+    for status_command in (
+        "kubectl get deployment",
+        "kubectl get replicasets",
+        "kubectl get pods",
+    ):
+        assert status_command in diagnostics
+    assert "custom-columns=" in diagnostics
+    assert 'involvedObject.uid=${uid}' in diagnostics
+    assert "kubectl describe" not in diagnostics
+    assert deploy_script.count(
+        'wait_for_deployment_rollout "$BACKEND_DEPLOYMENT"'
+    ) == 2
+    assert 'wait_for_deployment_rollout "$FRONTEND_DEPLOYMENT"' in deploy_script
     assert deploy_script.index('kubectl apply -f "$workloads_manifest"') < deploy_script.index(
         'kubectl apply -f "$ingress_manifest"'
     )

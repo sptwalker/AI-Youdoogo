@@ -47,6 +47,61 @@ ingress_path.write_text(yaml.safe_dump_all(ingresses, sort_keys=False), encoding
 PY
 migration_job="youdoogo-migrate-${IMAGE_TAG}"
 
+print_object_events() {
+  local kind="$1" name="$2" uid
+  uid="$(kubectl get "$kind" "$name" -n "$KUBE_NAMESPACE" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
+  [[ -z "$uid" ]] && return
+  echo "[diagnostic] events for ${kind}/${name}" >&2
+  kubectl get events -n "$KUBE_NAMESPACE" \
+    --field-selector "involvedObject.uid=${uid}" --sort-by=.metadata.creationTimestamp >&2 || true
+}
+
+print_rollout_diagnostics() {
+  local deployment="$1" selector rs_inventory pod_inventory
+  selector="app.kubernetes.io/name=${deployment}"
+
+  echo "[diagnostic] deployment/${deployment} status" >&2
+  kubectl get deployment "$deployment" -n "$KUBE_NAMESPACE" \
+    -o 'custom-columns=NAME:.metadata.name,GENERATION:.metadata.generation,OBSERVED:.status.observedGeneration,DESIRED:.spec.replicas,UPDATED:.status.updatedReplicas,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas,UNAVAILABLE:.status.unavailableReplicas,CONDITIONS:.status.conditions[*].type,REASONS:.status.conditions[*].reason' \
+    >&2 || true
+
+  echo "[diagnostic] ReplicaSets for deployment/${deployment}" >&2
+  kubectl get replicasets -n "$KUBE_NAMESPACE" -l "$selector" \
+    -o 'custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,CURRENT:.status.replicas,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas' \
+    >&2 || true
+
+  echo "[diagnostic] Pods for deployment/${deployment}" >&2
+  kubectl get pods -n "$KUBE_NAMESPACE" -l "$selector" \
+    -o 'custom-columns=NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,WAITING:.status.containerStatuses[*].state.waiting.reason,CONDITION_REASONS:.status.conditions[*].reason,RESTARTS:.status.containerStatuses[*].restartCount,NODE:.spec.nodeName' \
+    >&2 || true
+
+  print_object_events deployment "$deployment"
+  rs_inventory="$(kubectl get replicasets -n "$KUBE_NAMESPACE" -l "$selector" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+  while IFS= read -r replica_set; do
+    [[ -z "$replica_set" ]] && continue
+    print_object_events replicaset "$replica_set"
+  done <<<"$rs_inventory"
+  pod_inventory="$(kubectl get pods -n "$KUBE_NAMESPACE" -l "$selector" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+  while IFS= read -r pod; do
+    [[ -z "$pod" ]] && continue
+    print_object_events pod "$pod"
+  done <<<"$pod_inventory"
+}
+
+wait_for_deployment_rollout() {
+  local deployment="$1" status
+  if kubectl rollout status "deployment/${deployment}" -n "$KUBE_NAMESPACE" --timeout=5m; then
+    return 0
+  else
+    status=$?
+  fi
+  echo "ERROR: deployment/${deployment} rollout did not complete" >&2
+  print_rollout_diagnostics "$deployment"
+  return "$status"
+}
+
 echo "[preflight] checking namespace and referenced objects"
 kubectl get namespace "$KUBE_NAMESPACE" >/dev/null
 
@@ -113,7 +168,8 @@ fi
 
 for check in \
   "create jobs.batch" "create services" "create deployments.apps" "create ingresses.networking.k8s.io" \
-  "patch jobs.batch" "patch services" "patch deployments.apps" "patch ingresses.networking.k8s.io"; do
+  "patch jobs.batch" "patch services" "patch deployments.apps" "patch ingresses.networking.k8s.io" \
+  "delete jobs.batch" "delete pods"; do
   verb="${check%% *}"
   resource="${check#* }"
   if [[ "$(kubectl auth can-i "$verb" "$resource" -n "$KUBE_NAMESPACE")" != "yes" ]]; then
@@ -155,7 +211,7 @@ if [[ "$current_backend_replicas" =~ ^[2-9][0-9]*$ ]]; then
   # This cluster is at its pod limit. Keep one serving backend replica while
   # temporarily freeing exactly one project-owned pod slot for migration.
   kubectl scale deployment "$BACKEND_DEPLOYMENT" -n "$KUBE_NAMESPACE" --replicas=1
-  kubectl rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
+  wait_for_deployment_rollout "$BACKEND_DEPLOYMENT"
 fi
 
 echo "[migrate] ensuring exactly one bounded Job for ${IMAGE_TAG}"
@@ -187,10 +243,16 @@ else
   fi
 fi
 
+echo "[migrate] releasing completed migration Pod capacity before workload rollouts"
+# Retain the successful commit-scoped Job so this migration is not rerun, but
+# remove its completed Pod before restoring both Deployments at the pod ceiling.
+kubectl delete pods -n "$KUBE_NAMESPACE" -l "job-name=${migration_job}" \
+  --field-selector=status.phase=Succeeded --wait=true --ignore-not-found=true
+
 echo "[deploy] applying project-owned Services and Deployments"
 kubectl apply -f "$workloads_manifest"
-kubectl rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
-kubectl rollout status "deployment/${FRONTEND_DEPLOYMENT}" -n "$KUBE_NAMESPACE" --timeout=5m
+wait_for_deployment_rollout "$BACKEND_DEPLOYMENT"
+wait_for_deployment_rollout "$FRONTEND_DEPLOYMENT"
 
 echo "[deploy] applying project-owned Ingress after its Services exist"
 kubectl apply --dry-run=server -f "$ingress_manifest" >/dev/null
