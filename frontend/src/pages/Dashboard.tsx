@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import Markdown from '../components/Markdown'
 import { listUsers, type UserInfo } from '../api/auth'
+import { roster } from '../api/auth'
 import { reviewCollab } from '../api/collab'
 import {
   getDesktop,
@@ -23,6 +24,15 @@ import {
 import { confirmResolution } from '../api/meetings'
 import { reviewProposal } from '../api/proposals'
 import { STATUS_LABEL, transitionTask, getOrchestrationProgress, type OrchProgress } from '../api/tasks'
+import GroupChat from '../components/GroupChat'
+import {
+  createChannel,
+  myChannels,
+  subscribeRealtime,
+  type ChannelWithUnread,
+  type Message as ChanMessage,
+} from '../api/discussion'
+import { listRoles, type AgentRole } from '../api/agents'
 
 const KIND: Record<PendingItem['kind'], { label: string; color: string }> = {
   task: { label: '待验收', color: 'blue' },
@@ -46,7 +56,37 @@ export default function Dashboard() {
   const [chatSending, setChatSending] = useState(false)
   const [deliverables, setDeliverables] = useState<Deliverable[]>([])
   const [orch, setOrch] = useState<OrchProgress | null>(null)  // 当前编排进度（进度卡）
+  // 会话列表（讨论组，I1-I7）：统一列表 = 我的助理 + 讨论组
+  const [channels, setChannels] = useState<ChannelWithUnread[]>([])
+  const [activeConv, setActiveConv] = useState<{ type: 'assistant' } | { type: 'group'; id: string; name: string }>({ type: 'assistant' })
+  const [liveMsg, setLiveMsg] = useState<(ChanMessage & { channel_id?: string }) | null>(null)
+  const [newGroupOpen, setNewGroupOpen] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupAis, setNewGroupAis] = useState<string[]>([])
+  const [newGroupHumans, setNewGroupHumans] = useState<string[]>([])
+  const [allAgents, setAllAgents] = useState<AgentRole[]>([])
+  const [roster2, setRoster2] = useState<{ id: string; real_name: string; username: string }[]>([])
   const chatBoxRef = useRef<HTMLDivElement>(null)
+
+  const loadChannels = useCallback(() => void myChannels().then(setChannels), [])
+  useEffect(() => {
+    loadChannels()
+    void listRoles().then(setAllAgents)
+    void roster().then(setRoster2).catch(() => {})
+  }, [loadChannels])
+  // 桌面级实时订阅：任何群来消息 → 传给 GroupChat（当前群）或未读+1（其它群）
+  useEffect(() => {
+    const cancel = subscribeRealtime((event, data) => {
+      if (event !== 'message') return
+      const msg = data as unknown as ChanMessage & { channel_id?: string }
+      setLiveMsg(msg)
+      const active = activeConv.type === 'group' ? activeConv.id : null
+      if (msg.channel_id && msg.channel_id !== active) {
+        setChannels((cs) => cs.map((c) => (c.id === msg.channel_id ? { ...c, unread: (c.unread ?? 0) + 1 } : c)))
+      }
+    })
+    return cancel
+  }, [activeConv])
   // 载入/新消息后自动滚到底（始终停在最新对话上）
   useEffect(() => {
     const el = chatBoxRef.current
@@ -229,10 +269,46 @@ export default function Dashboard() {
           </Card>
 
           {!isSupervising && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, marginTop: 16 }}>
+            {/* 左：会话列表（我的助理 + 讨论组，带未读红点） */}
+            <Card
+              size="small" title="对话"
+              style={{ width: 152, flexShrink: 0, overflowY: 'auto' }}
+              styles={{ body: { padding: 6 } }}
+              extra={<a style={{ fontSize: 12 }} onClick={() => setNewGroupOpen(true)}>+群</a>}
+            >
+              <div
+                onClick={() => setActiveConv({ type: 'assistant' })}
+                style={{ cursor: 'pointer', padding: '6px 6px', borderRadius: 4, fontSize: 12,
+                  background: activeConv.type === 'assistant' ? '#e6f4ff' : undefined }}
+              >💬 我的助理</div>
+              {channels.map((ch) => {
+                const on = activeConv.type === 'group' && activeConv.id === ch.id
+                return (
+                  <div key={ch.id}
+                    onClick={() => setActiveConv({ type: 'group', id: ch.id, name: ch.name })}
+                    style={{ cursor: 'pointer', padding: '6px 6px', borderRadius: 4, fontSize: 12,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      background: on ? '#e6f4ff' : undefined }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}># {ch.name}</span>
+                    {ch.unread > 0 && !on && <Badge count={ch.unread} size="small" />}
+                  </div>
+                )
+              })}
+            </Card>
+            {/* 右：当前会话 */}
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {activeConv.type === 'group' ? (
+              <GroupChat
+                channelId={activeConv.id} channelName={activeConv.name} liveMessage={liveMsg}
+                onRead={(cid) => setChannels((cs) => cs.map((c) => (c.id === cid ? { ...c, unread: 0 } : c)))}
+              />
+            ) : (
             <Card
               title={assistant ? `与${assistant.name}对话` : '我的助理'}
               // 占满剩余高度：卡片整体 flex 列，消息区 flex:1 内部滚动
-              style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
               styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } }}
               extra={
                 <Select
@@ -333,6 +409,9 @@ export default function Dashboard() {
                 </Button>
               </Space.Compact>
             </Card>
+            )}
+            </div>
+          </div>
           )}
           </div>
         </Col>
@@ -395,6 +474,43 @@ export default function Dashboard() {
           </div>
         </Col>
       </Row>
+
+      {/* 新建讨论组：起名 + 拉真人/AI 进群 */}
+      <ModalForm
+        open={newGroupOpen}
+        title="新建讨论组"
+        modalProps={{ destroyOnHidden: true, onCancel: () => setNewGroupOpen(false) }}
+        onOpenChange={setNewGroupOpen}
+        submitter={{ searchConfig: { submitText: '创建' } }}
+        onFinish={async () => {
+          if (!newGroupName.trim()) { message.warning('请输入群名'); return false }
+          const mems = [
+            ...newGroupHumans.map((id) => ({ member_type: 'human' as const, member_id: id })),
+            ...newGroupAis.map((id) => ({ member_type: 'ai' as const, member_id: id })),
+          ]
+          const c = await createChannel({ name: newGroupName.trim(), members: mems })
+          message.success('讨论组已创建')
+          setNewGroupName(''); setNewGroupHumans([]); setNewGroupAis([])
+          setNewGroupOpen(false)
+          loadChannels()
+          setActiveConv({ type: 'group', id: c.id, name: c.name })
+          return true
+        }}
+      >
+        <Input placeholder="群名称" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} style={{ marginBottom: 12 }} />
+        <div style={{ marginBottom: 4, fontSize: 13 }}>拉真人员工</div>
+        <Select
+          mode="multiple" allowClear style={{ width: '100%', marginBottom: 12 }} placeholder="选择同事"
+          value={newGroupHumans} onChange={setNewGroupHumans} optionFilterProp="label"
+          options={roster2.map((u) => ({ value: u.id, label: u.real_name || u.username }))}
+        />
+        <div style={{ marginBottom: 4, fontSize: 13 }}>拉 AI 员工</div>
+        <Select
+          mode="multiple" allowClear style={{ width: '100%' }} placeholder="选择 AI"
+          value={newGroupAis} onChange={setNewGroupAis} optionFilterProp="label"
+          options={allAgents.map((a) => ({ value: a.id, label: a.name }))}
+        />
+      </ModalForm>
     </PageContainer>
   )
 }

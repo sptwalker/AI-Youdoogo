@@ -45,6 +45,20 @@ export function listUsers(): Promise<UserInfo[]> {
   return request({ method: 'GET', url: '/users' })
 }
 
+export interface Colleague {
+  id: string
+  real_name: string
+  en_name: string
+  username: string
+  title: string
+  department_id: string | null
+}
+
+/** 同事花名册（任意登录用户可读，群聊选人用）。 */
+export function roster(): Promise<Colleague[]> {
+  return request({ method: 'GET', url: '/users/roster' })
+}
+
 export interface UserCreatePayload {
   username: string
   password: string
