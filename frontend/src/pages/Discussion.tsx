@@ -10,6 +10,7 @@ import {
   listMessages,
   postMessage,
   promoteMessage,
+  subscribeRealtime,
   type Channel,
   type Message,
 } from '../api/discussion'
@@ -32,6 +33,17 @@ export default function Discussion() {
   }, [])
 
   const loadMessages = (channelId: string) => void listMessages(channelId).then(setMessages)
+
+  // 实时订阅（I3）：别人在当前群发言即时追加（按 id 去重，防与本地流式重复）
+  useEffect(() => {
+    const cancel = subscribeRealtime((event, data) => {
+      if (event !== 'message') return
+      const msg = data as unknown as Message & { channel_id?: string }
+      if (!current || msg.channel_id !== current.id) return
+      setMessages((m) => (m.some((x) => x.id === msg.id) ? m : [...m, msg]))
+    })
+    return cancel
+  }, [current])
   useEffect(() => {
     if (current) loadMessages(current.id)
   }, [current])

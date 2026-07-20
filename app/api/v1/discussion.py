@@ -45,6 +45,18 @@ async def create_channel(body: ChannelCreate, db: DB, manager: Manager) -> dict:
     return ok({"id": str(c.id), "name": c.name})
 
 
+@router.get("/realtime/stream")
+async def realtime_stream(db: DB, user: CurrentUser) -> StreamingResponse:
+    """实时消息订阅流（SSE，I3）：订阅用户可见群频道，别人发言即时推送到本连接。
+
+    这是"服务端主动推送"——A 发言 B/C 不刷新即收到（Redis pub/sub 跨 worker 广播）。
+    """
+    from app.services import realtime_service
+
+    channel_ids = await discussion_service.all_channel_ids(db)  # I4 收窄为该用户的群
+    return sse_response(realtime_service.subscribe(channel_ids))
+
+
 @router.post("/{channel_id}/archive")
 async def archive_channel(channel_id: uuid.UUID, db: DB, _: Manager) -> dict:
     """归档频道。"""

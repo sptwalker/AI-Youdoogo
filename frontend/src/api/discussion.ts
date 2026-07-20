@@ -1,5 +1,5 @@
 /** 协作空间 API（对应后端 app/api/v1/discussion.py）。 */
-import { request, sseRequest, type SseHandler } from './client'
+import { request, sseRequest, sseSubscribe, type SseHandler } from './client'
 
 export interface Channel {
   id: string
@@ -53,6 +53,11 @@ export function postMessage(
   onEvent: SseHandler,
 ): Promise<void> {
   return sseRequest(`/channels/${channelId}/messages`, { content, mentioned_agent_ids }, onEvent)
+}
+
+/** 订阅实时消息推送（I3）。别人在群发言即时收到。返回取消函数。 */
+export function subscribeRealtime(onEvent: SseHandler): () => void {
+  return sseSubscribe('/channels/realtime/stream', onEvent)
 }
 
 export function promoteMessage(

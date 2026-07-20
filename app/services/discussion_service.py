@@ -27,7 +27,7 @@ from app.models.discussion import (
     DiscussionChannel,
     DiscussionMessage,
 )
-from app.services import proposal_service, task_service
+from app.services import proposal_service, realtime_service, task_service
 
 MAX_FANOUT = 3  # 护栏3：单条消息最多触发 3 个 AI
 _CONTEXT_N = 20  # 拼给 AI 的近期消息条数
@@ -98,6 +98,12 @@ async def list_channels(
     return [_channel_dict(c) for c in (await db.execute(stmt)).scalars()]
 
 
+async def all_channel_ids(db: AsyncSession) -> list[str]:
+    """全部未删除频道 id（供实时订阅，I3；I4 按群成员收窄）。"""
+    stmt = select(DiscussionChannel.id).where(DiscussionChannel.is_delete.is_(False))
+    return [str(i) for i in (await db.execute(stmt)).scalars()]
+
+
 async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:
     c = await get_channel(db, channel_id)
     c.is_archived = True
@@ -146,7 +152,10 @@ async def post_message_stream(
     db.add(human)
     await db.commit()
     await db.refresh(human)
-    yield ("message_end", _msg_dict(human))
+    human_dict = _msg_dict(human)
+    yield ("message_end", human_dict)
+    # 实时广播（I3）：把真人消息推给该群所有在线订阅者（跨 worker）
+    await realtime_service.publish(str(channel_id), "message", human_dict)
 
     targets = _dedup(mentioned_agent_ids)[:MAX_FANOUT]  # 护栏 1(空则不进循环)/2/3
     # 频道近期上下文取一次（含刚发的这条），循环内复用——避免每个 @agent 重查（N+1）
@@ -188,7 +197,9 @@ async def post_message_stream(
         db.add(ai)
         await db.commit()
         await db.refresh(ai)
-        yield ("message_end", _msg_dict(ai))
+        ai_dict = _msg_dict(ai)
+        yield ("message_end", ai_dict)
+        await realtime_service.publish(str(channel_id), "message", ai_dict)  # 广播 AI 回复
         # 被咨询 AI 的答复作为独立消息追加（带留痕溯源，不 @人）
         for consulted, rec in proto.consult_replies:
             answer = rec.output_content or rec.error_msg or "（无回应）"
