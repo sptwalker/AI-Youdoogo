@@ -55,6 +55,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 logger.info("首次部署：从 .env 种子 %d 张 AI 卡片", seeded)
             await ai_provider_service.sync_to_factory(db)
             await environment_service.ensure_archivist(db)  # 系统档案员自举（docs/13 §9）
+            # 崩溃恢复（H4.1）：复位孤儿步骤 + 续跑未完成的编排（best-effort，不阻断启动）
+            from app.services import orchestration_service
+
+            try:
+                await orchestration_service.recover_incomplete(db)
+            except Exception:  # noqa: BLE001 - 恢复失败不阻断启动
+                logger.warning("编排崩溃恢复失败", exc_info=True)
         logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - 载入失败退回 .env，不阻断启动
         logger.exception("载入配置覆盖层/AI 卡片失败")

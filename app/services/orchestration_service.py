@@ -433,3 +433,55 @@ async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
             for s in steps
         ],
     }
+
+
+# ── 崩溃恢复扫描（H4.1，docs/16）─────────────────────────
+
+async def recover_incomplete(db: AsyncSession) -> dict[str, int]:
+    """启动时崩溃恢复:复位孤儿步骤 + 重新推进未完成的编排。永不 raise。
+
+    进程崩在某步 LLM 调用中途 → 那步卡在 executing/dispatched（无人复位），
+    且没人重新触发 advance。本函数扫出仍 executing 的编排父卡:
+    1. 把其下卡在 executing/dispatched 的孤儿步骤复位到 created（可重跑;取数只读、
+       交付幂等，重跑安全）。已 reported（含红线等真人）的步骤不动。
+    2. 对每个父卡重新 advance，推进依赖已满足的步骤。
+    不上工作流引擎——DAG 本就持久在 task_card，只补"崩溃复位 + 重启续跑"这一环。
+
+    返回 {orchestrations, steps_reset}。任何单卡故障隔离，不连累其余。
+    """
+    from sqlalchemy import select
+
+    result = {"orchestrations": 0, "steps_reset": 0}
+    try:
+        stmt = select(TaskCard).where(
+            TaskCard.task_type == "orchestration",
+            TaskCard.status == task_flow.EXECUTING,
+            TaskCard.is_delete.is_(False),
+        )
+        parents = list((await db.execute(stmt)).scalars())
+    except Exception:  # noqa: BLE001 - 恢复扫描不阻断启动
+        logger.warning("崩溃恢复扫描查询失败", exc_info=True)
+        return result
+
+    for parent in parents:
+        try:
+            steps = await _step_cards(db, parent.id)
+            reset = 0
+            for s in steps:
+                if s.status in (task_flow.EXECUTING, task_flow.DISPATCHED):
+                    # 崩溃复位:直接改 status（绕状态机，孤儿态无干净迁移路径）
+                    s.status = task_flow.CREATED
+                    reset += 1
+            if reset:
+                await db.commit()
+                result["steps_reset"] += reset
+            await advance(db, parent.id, operator_id=None)  # 重启续跑
+            result["orchestrations"] += 1
+        except Exception:  # noqa: BLE001 - 单编排恢复失败不连累其余
+            logger.warning("编排 %s 崩溃恢复失败", parent.id, exc_info=True)
+    if result["orchestrations"]:
+        logger.info(
+            "崩溃恢复:续跑 %d 个编排，复位 %d 个孤儿步骤",
+            result["orchestrations"], result["steps_reset"],
+        )
+    return result

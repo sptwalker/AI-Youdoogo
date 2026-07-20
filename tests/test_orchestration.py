@@ -373,3 +373,57 @@ async def test_resume_if_step_non_step_returns_none(db: AsyncSession) -> None:
         db, title="普通卡", task_type="manual", creator_id=creator
     )
     assert await orch.resume_if_step(db, plain, operator_id=creator) is None
+
+
+# ── H4.1 崩溃恢复扫描 ───────────────────────────────────
+async def test_recover_resets_orphan_and_advances(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """崩溃恢复:executing 父卡下卡在 executing 的孤儿步复位 created，再 advance 跑完。"""
+    creator = await _creator(db)
+    parent = await task_service.create_task(
+        db, title="编排", task_type="orchestration", creator_id=creator
+    )
+    parent.status = task_flow.EXECUTING  # 模拟崩溃时父卡在执行中
+    cards = await orch.build_steps(db, parent.id, [
+        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+        orch.PlanStep(no=1, title="交付", skill="deliver", instruction="做", depends_on=[0]),
+    ], creator_id=creator)
+    by_no = {c.step_no: c for c in cards}
+    by_no[0].status = task_flow.EXECUTING  # 崩溃时步骤0卡在执行中（孤儿）
+    await db.commit()
+
+    ran: list[str] = []
+
+    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> Any:
+        ran.append(step.title)
+        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        return ProtocolResult()
+
+    monkeypatch.setattr(orch, "_run_step", _fake_run)
+    res = await orch.recover_incomplete(db)
+    assert res["orchestrations"] == 1 and res["steps_reset"] == 1
+    # 孤儿步复位后重跑，全链跑完
+    await db.refresh(by_no[0])
+    await db.refresh(by_no[1])
+    assert by_no[0].status == task_flow.ACCEPTED
+    assert by_no[1].status == task_flow.ACCEPTED
+    assert "取数" in ran
+
+
+async def test_recover_ignores_non_executing_parents(db: AsyncSession) -> None:
+    """已完成（非 executing）的编排不被恢复扫描碰。"""
+    creator = await _creator(db)
+    done_parent = await task_service.create_task(
+        db, title="已完成编排", task_type="orchestration", creator_id=creator
+    )
+    done_parent.status = task_flow.ACCEPTED
+    await db.commit()
+    res = await orch.recover_incomplete(db)
+    assert res["orchestrations"] == 0  # accepted 父卡不扫
+
+
+async def test_recover_no_incomplete_is_noop(db: AsyncSession) -> None:
+    """无未完成编排 → 空操作。"""
+    res = await orch.recover_incomplete(db)
+    assert res == {"orchestrations": 0, "steps_reset": 0}
