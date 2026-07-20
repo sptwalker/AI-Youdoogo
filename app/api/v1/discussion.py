@@ -81,7 +81,8 @@ async def create_channel(body: ChannelCreate, db: DB, user: CurrentUser) -> dict
     """新建讨论群（任意登录用户可建群；创建者自动入群，可带初始成员 I4）。"""
     c = await discussion_service.create_channel(
         db, name=body.name, department_id=body.department_id,
-        creator_id=user.id, default_agent_id=body.default_agent_id,
+        creator_id=user.id, creator_name=user.real_name or user.username,
+        default_agent_id=body.default_agent_id,
         members=[m.model_dump() for m in body.members],
     )
     return ok({"id": str(c.id), "name": c.name})

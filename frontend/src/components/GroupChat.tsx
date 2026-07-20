@@ -60,14 +60,20 @@ export default function GroupChat({
 
   const send = async () => {
     if ((!text.trim() && pending.length === 0) || sending) return
-    const q = text.trim() || (pending.length ? '[附件]' : '')
+    // 选中的成员：拼「@名字」前缀（真人+AI 都加）；只有 AI 的 id 触发回复
+    const sel = members.filter((m) => mentions.includes(m.member_id))
+    const prefix = sel.map((m) => `@${m.member_name || '成员'}`).join(' ')
+    const aiIds = sel.filter((m) => m.member_type === 'ai').map((m) => m.member_id)
+    const body = text.trim()
+    const q = [prefix, body].filter(Boolean).join(' ') || (pending.length ? '[附件]' : '')
     const atts = pending
     setText('')
     setPending([])
+    setMentions([])
     setSending(true)
     const streamId = '__streaming__'
     try {
-      await postMessage(channelId, q, mentions.slice(0, 3), (event, data) => {
+      await postMessage(channelId, q, aiIds.slice(0, 3), (event, data) => {
         if (event === 'message_start') {
           const d = data as unknown as { speaker_agent_id: string | null; speaker_name: string }
           setMsgs((m) => [...m, {
@@ -158,10 +164,13 @@ export default function GroupChat({
       )}
       <Space.Compact style={{ width: '100%' }}>
         <Select
-          mode="multiple" allowClear maxCount={3} style={{ minWidth: 130 }}
-          placeholder="@AI（最多3）" value={mentions} onChange={setMentions}
+          mode="multiple" allowClear style={{ minWidth: 150 }}
+          placeholder="@成员（真人/AI）" value={mentions} onChange={setMentions}
           optionFilterProp="label"
-          options={agents.filter((a) => memberIds.has(a.id)).map((a) => ({ value: a.id, label: a.name }))}
+          options={members.map((m) => ({
+            value: m.member_id,
+            label: `${m.member_type === 'ai' ? '🤖' : '👤'} ${m.member_name || '（未命名）'}`,
+          }))}
         />
         <Upload beforeUpload={onUpload} showUploadList={false} multiple>
           <Button icon={<PaperClipOutlined />} loading={uploading} title="发图片/文件" />

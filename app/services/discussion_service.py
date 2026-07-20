@@ -82,6 +82,7 @@ async def create_channel(
     name: str,
     department_id: uuid.UUID | None = None,
     creator_id: uuid.UUID | None = None,
+    creator_name: str = "",
     default_agent_id: uuid.UUID | None = None,
     members: list[dict[str, Any]] | None = None,
 ) -> DiscussionChannel:
@@ -95,7 +96,9 @@ async def create_channel(
     # 创建者自动入群（I4）+ 可选初始成员（真人+AI 混合）
     init: list[dict[str, Any]] = list(members or [])
     if creator_id is not None:
-        init.append({"member_type": MEMBER_HUMAN, "member_id": creator_id})
+        init.append({
+            "member_type": MEMBER_HUMAN, "member_id": creator_id, "member_name": creator_name,
+        })
     if init:
         await add_members(db, c.id, init)
     return c

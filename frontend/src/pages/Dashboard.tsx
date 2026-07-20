@@ -485,8 +485,14 @@ export default function Dashboard() {
         onFinish={async () => {
           if (!newGroupName.trim()) { message.warning('请输入群名'); return false }
           const mems = [
-            ...newGroupHumans.map((id) => ({ member_type: 'human' as const, member_id: id })),
-            ...newGroupAis.map((id) => ({ member_type: 'ai' as const, member_id: id })),
+            ...newGroupHumans.map((id) => {
+              const u = roster2.find((x) => x.id === id)
+              return { member_type: 'human' as const, member_id: id, member_name: u?.real_name || u?.username }
+            }),
+            ...newGroupAis.map((id) => ({
+              member_type: 'ai' as const, member_id: id,
+              member_name: allAgents.find((a) => a.id === id)?.name,
+            })),
           ]
           const c = await createChannel({ name: newGroupName.trim(), members: mems })
           message.success('讨论组已创建')
