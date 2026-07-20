@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -30,6 +31,8 @@ from app.models.discussion import (
     DiscussionMessage,
 )
 from app.services import proposal_service, realtime_service, task_service
+
+logger = logging.getLogger(__name__)
 
 MAX_FANOUT = 3  # 护栏3：单条消息最多触发 3 个 AI
 _CONTEXT_N = 20  # 拼给 AI 的近期消息条数
@@ -61,6 +64,7 @@ def _msg_dict(m: DiscussionMessage) -> dict[str, Any]:
         "content": m.content, "mentioned_agent_ids": m.mentioned_agent_ids,
         "ai_source_record_id": str(m.ai_source_record_id) if m.ai_source_record_id else None,
         "ref_type": m.ref_type, "ref_id": str(m.ref_id) if m.ref_id else None,
+        "attachments": m.attachments or [],
         "create_time": m.create_time.isoformat(),
     }
 
@@ -203,12 +207,84 @@ async def is_member(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID)
     return row is not None
 
 
+# ── 未读计数（I5，docs/18）──────────────────────────────
+async def mark_read(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """把某真人在某群的未读水位推到当前（进群/读消息时调）。"""
+    from datetime import UTC, datetime
+
+    m = (
+        await db.execute(
+            select(ChannelMember).where(
+                ChannelMember.channel_id == channel_id,
+                ChannelMember.member_type == MEMBER_HUMAN,
+                ChannelMember.member_id == user_id,
+                ChannelMember.is_delete.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if m is not None:
+        m.last_read_at = datetime.now(UTC)
+        await db.commit()
+
+
+async def my_channels_with_unread(
+    db: AsyncSession, user_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """我的群列表 + 每群未读数（I5）。未读=群内晚于 last_read_at 的消息数（不含自己发的）。"""
+    from sqlalchemy import func
+
+    stmt = select(ChannelMember, DiscussionChannel).join(
+        DiscussionChannel, DiscussionChannel.id == ChannelMember.channel_id
+    ).where(
+        ChannelMember.member_type == MEMBER_HUMAN, ChannelMember.member_id == user_id,
+        ChannelMember.is_delete.is_(False), DiscussionChannel.is_delete.is_(False),
+    ).order_by(DiscussionChannel.create_time.desc())
+    rows = (await db.execute(stmt)).all()
+    out: list[dict[str, Any]] = []
+    for member, channel in rows:
+        cond = [
+            DiscussionMessage.channel_id == channel.id,
+            DiscussionMessage.speaker_id != user_id,  # 不算自己发的
+        ]
+        if member.last_read_at is not None:
+            cond.append(DiscussionMessage.create_time > member.last_read_at)
+        unread = int((await db.execute(
+            select(func.count()).select_from(DiscussionMessage).where(*cond)
+        )).scalar_one())
+        out.append({**_channel_dict(channel), "unread": unread})
+    return out
+
+
 async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:
     c = await get_channel(db, channel_id)
     c.is_archived = True
     await db.commit()
     await db.refresh(c)
+    # 群聊内容自动入库（I7，docs/18）：归档时把聊天记录提炼进公司/部门 KB（复用 H3.2）。
+    await _archive_to_kb(db, c)
     return c
+
+
+async def _archive_to_kb(db: AsyncSession, channel: DiscussionChannel) -> None:
+    """把群聊记录提炼成结构化记忆入知识库（复用 H3.2 memory_service）。永不 raise。"""
+    try:
+        from app.knowledge.ingest import ingest_text
+        from app.services import knowledge_base_service, memory_service
+
+        if channel.creator_id is None:
+            return  # KB 需归属真人，无创建人则跳过
+        msgs = await list_messages(db, channel.id, limit=500)
+        if not msgs:
+            return
+        transcript = "\n".join(f"{m['speaker_name']}：{m['content']}" for m in msgs)
+        distilled = await memory_service.distill_conversation(db, transcript)
+        kb = await knowledge_base_service.get_default_kb(db)
+        await ingest_text(
+            db, title=f"群聊存档·{channel.name}", text=distilled or transcript,
+            uploader_id=channel.creator_id, knowledge_base_id=kb.id, category="discussion",
+        )
+    except Exception:  # noqa: BLE001 - 入库失败不阻断归档
+        logger.warning("群聊归档入库失败 channel=%s", channel.id, exc_info=True)
 
 
 async def list_messages(
@@ -233,11 +309,12 @@ async def post_message_stream(
     speaker_name: str,
     content: str,
     mentioned_agent_ids: list[uuid.UUID],
+    attachments: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[Event]:
     """真人发言；@ 的 AI 顾问逐个流式回复（成本护栏五件套不变）。
 
     SSE 事件流：message_end(真人消息) → 每个被 @ 的 AI 依次
-    message_start → delta* → message_end(落库消息)。
+    message_start → delta* → message_end(落库消息)。attachments 为消息附件（I6）。
     """
     channel = await get_channel(db, channel_id)
     if channel.is_archived:
@@ -247,6 +324,7 @@ async def post_message_stream(
         channel_id=channel_id, speaker_type=SPEAKER_HUMAN, speaker_id=speaker_id,
         speaker_name=speaker_name, content=content,
         mentioned_agent_ids=[str(a) for a in mentioned_agent_ids],
+        attachments=attachments or [],
     )
     db.add(human)
     await db.commit()

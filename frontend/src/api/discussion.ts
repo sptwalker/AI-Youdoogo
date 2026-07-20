@@ -10,6 +10,13 @@ export interface Channel {
   create_time: string
 }
 
+export interface Attachment {
+  type: 'image' | 'file'
+  name: string
+  storage_path: string
+  size: number
+}
+
 export interface Message {
   id: string
   channel_id: string
@@ -21,7 +28,35 @@ export interface Message {
   ai_source_record_id: string | null
   ref_type: string | null
   ref_id: string | null
+  attachments?: Attachment[]
   create_time: string
+}
+
+export interface ChannelWithUnread extends Channel {
+  unread: number
+}
+
+/** 我的群 + 未读数（I5，话题页签用）。 */
+export function myChannels(): Promise<ChannelWithUnread[]> {
+  return request({ method: 'GET', url: '/channels/mine' })
+}
+
+/** 某群未读清零（进群/读消息时，I5）。 */
+export function markRead(channelId: string): Promise<null> {
+  return request({ method: 'POST', url: `/channels/${channelId}/read` })
+}
+
+/** 群成员名单（I4）。 */
+export function listMembers(channelId: string): Promise<{ member_type: string; member_id: string; member_name: string }[]> {
+  return request({ method: 'GET', url: `/channels/${channelId}/members` })
+}
+
+/** 加成员（真人+AI 混合，I4）。 */
+export function addMembers(
+  channelId: string,
+  members: { member_type: 'human' | 'ai'; member_id: string; member_name?: string }[],
+): Promise<{ added: number }> {
+  return request({ method: 'POST', url: `/channels/${channelId}/members`, data: { members } })
 }
 
 export function listChannels(departmentId?: string): Promise<Channel[]> {
@@ -36,6 +71,7 @@ export function createChannel(payload: {
   name: string
   department_id?: string
   default_agent_id?: string
+  members?: { member_type: 'human' | 'ai'; member_id: string; member_name?: string }[]
 }): Promise<{ id: string; name: string }> {
   return request({ method: 'POST', url: '/channels', data: payload })
 }

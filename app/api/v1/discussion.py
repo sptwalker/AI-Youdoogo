@@ -58,6 +58,19 @@ async def realtime_stream(db: DB, user: CurrentUser) -> StreamingResponse:
     return sse_response(realtime_service.subscribe(channel_ids))
 
 
+@router.get("/mine")
+async def my_channels(db: DB, user: CurrentUser) -> dict:
+    """我的群列表 + 每群未读数（I5，话题页签用）。"""
+    return ok(await discussion_service.my_channels_with_unread(db, user.id))
+
+
+@router.post("/{channel_id}/read")
+async def mark_read(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """把某群未读清零（进群/读消息时调，I5）。"""
+    await discussion_service.mark_read(db, channel_id, user.id)
+    return ok()
+
+
 @router.get("/{channel_id}/members")
 async def list_members(channel_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
     """群成员名单（I4）。"""
@@ -108,6 +121,7 @@ async def post_message(
             db, channel_id,
             speaker_id=user.id, speaker_name=user.real_name or user.username,
             content=body.content, mentioned_agent_ids=body.mentioned_agent_ids,
+            attachments=body.attachments,
         )
     )
 

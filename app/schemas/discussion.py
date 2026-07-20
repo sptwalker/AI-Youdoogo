@@ -27,6 +27,7 @@ class MessagePost(BaseModel):
 
     content: str = Field(min_length=1, max_length=5000)
     mentioned_agent_ids: list[uuid.UUID] = Field(default_factory=list)
+    attachments: list[dict] = Field(default_factory=list)  # I6:[{type,name,storage_path,size}]
 
 
 class PromoteRequest(BaseModel):
