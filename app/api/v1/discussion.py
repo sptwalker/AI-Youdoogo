@@ -36,11 +36,12 @@ async def list_channels(
 
 
 @router.post("")
-async def create_channel(body: ChannelCreate, db: DB, manager: Manager) -> dict:
-    """新建讨论频道。"""
+async def create_channel(body: ChannelCreate, db: DB, user: CurrentUser) -> dict:
+    """新建讨论群（任意登录用户可建群；创建者自动入群，可带初始成员 I4）。"""
     c = await discussion_service.create_channel(
         db, name=body.name, department_id=body.department_id,
-        creator_id=manager.id, default_agent_id=body.default_agent_id,
+        creator_id=user.id, default_agent_id=body.default_agent_id,
+        members=[m.model_dump() for m in body.members],
     )
     return ok({"id": str(c.id), "name": c.name})
 
@@ -53,8 +54,30 @@ async def realtime_stream(db: DB, user: CurrentUser) -> StreamingResponse:
     """
     from app.services import realtime_service
 
-    channel_ids = await discussion_service.all_channel_ids(db)  # I4 收窄为该用户的群
+    channel_ids = await discussion_service.my_channel_ids(db, user.id)  # 仅订阅我所在的群
     return sse_response(realtime_service.subscribe(channel_ids))
+
+
+@router.get("/{channel_id}/members")
+async def list_members(channel_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
+    """群成员名单（I4）。"""
+    return ok(await discussion_service.list_members(db, channel_id))
+
+
+@router.post("/{channel_id}/members")
+async def add_members(channel_id: uuid.UUID, body: dict, db: DB, _: CurrentUser) -> dict:
+    """加成员（真人+AI 混合，I4）。body: {members: [{member_type, member_id, member_name}]}。"""
+    n = await discussion_service.add_members(db, channel_id, body.get("members") or [])
+    return ok({"added": n})
+
+
+@router.delete("/{channel_id}/members/{member_type}/{member_id}")
+async def remove_member(
+    channel_id: uuid.UUID, member_type: str, member_id: uuid.UUID, db: DB, _: CurrentUser
+) -> dict:
+    """移除成员（I4）。"""
+    await discussion_service.remove_member(db, channel_id, member_type, member_id)
+    return ok()
 
 
 @router.post("/{channel_id}/archive")

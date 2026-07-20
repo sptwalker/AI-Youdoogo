@@ -22,8 +22,10 @@ from app.core.exceptions import AppError
 from app.core.sse import Event
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.discussion import (
+    MEMBER_HUMAN,
     SPEAKER_AI,
     SPEAKER_HUMAN,
+    ChannelMember,
     DiscussionChannel,
     DiscussionMessage,
 )
@@ -77,6 +79,7 @@ async def create_channel(
     department_id: uuid.UUID | None = None,
     creator_id: uuid.UUID | None = None,
     default_agent_id: uuid.UUID | None = None,
+    members: list[dict[str, Any]] | None = None,
 ) -> DiscussionChannel:
     c = DiscussionChannel(
         name=name, department_id=department_id,
@@ -85,6 +88,12 @@ async def create_channel(
     db.add(c)
     await db.commit()
     await db.refresh(c)
+    # 创建者自动入群（I4）+ 可选初始成员（真人+AI 混合）
+    init: list[dict[str, Any]] = list(members or [])
+    if creator_id is not None:
+        init.append({"member_type": MEMBER_HUMAN, "member_id": creator_id})
+    if init:
+        await add_members(db, c.id, init)
     return c
 
 
@@ -99,9 +108,99 @@ async def list_channels(
 
 
 async def all_channel_ids(db: AsyncSession) -> list[str]:
-    """全部未删除频道 id（供实时订阅，I3；I4 按群成员收窄）。"""
+    """全部未删除频道 id（供实时订阅，I3；I4 起按群成员收窄用 my_channel_ids）。"""
     stmt = select(DiscussionChannel.id).where(DiscussionChannel.is_delete.is_(False))
     return [str(i) for i in (await db.execute(stmt)).scalars()]
+
+
+# ── 群成员（I4，docs/18）────────────────────────────────
+async def add_members(
+    db: AsyncSession, channel_id: uuid.UUID, members: list[dict[str, Any]]
+) -> int:
+    """批量加成员（真人+AI 混合）。members: [{member_type, member_id, member_name}]。幂等。"""
+    await get_channel(db, channel_id)  # 校验频道存在
+    added = 0
+    for m in members:
+        mtype = m.get("member_type")
+        mid = m.get("member_id")
+        if mtype not in (MEMBER_HUMAN, "ai") or not mid:
+            continue
+        mid_uuid = mid if isinstance(mid, uuid.UUID) else uuid.UUID(str(mid))
+        exists = (
+            await db.execute(
+                select(ChannelMember).where(
+                    ChannelMember.channel_id == channel_id,
+                    ChannelMember.member_type == mtype,
+                    ChannelMember.member_id == mid_uuid,
+                    ChannelMember.is_delete.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            db.add(ChannelMember(
+                channel_id=channel_id, member_type=mtype, member_id=mid_uuid,
+                member_name=(m.get("member_name") or ""),
+            ))
+            added += 1
+    await db.commit()
+    return added
+
+
+async def remove_member(
+    db: AsyncSession, channel_id: uuid.UUID, member_type: str, member_id: uuid.UUID
+) -> None:
+    """移除一个成员（软删）。"""
+    m = (
+        await db.execute(
+            select(ChannelMember).where(
+                ChannelMember.channel_id == channel_id,
+                ChannelMember.member_type == member_type,
+                ChannelMember.member_id == member_id,
+                ChannelMember.is_delete.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if m is not None:
+        m.is_delete = True
+        await db.commit()
+
+
+async def list_members(db: AsyncSession, channel_id: uuid.UUID) -> list[dict[str, Any]]:
+    """群成员名单。"""
+    stmt = select(ChannelMember).where(
+        ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
+    )
+    return [
+        {
+            "member_type": m.member_type, "member_id": str(m.member_id),
+            "member_name": m.member_name,
+        }
+        for m in (await db.execute(stmt)).scalars()
+    ]
+
+
+async def my_channel_ids(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """某真人所在的群 id（成员表 human 身份）。供实时订阅收窄 + 群列表。"""
+    stmt = select(ChannelMember.channel_id).where(
+        ChannelMember.member_type == MEMBER_HUMAN, ChannelMember.member_id == user_id,
+        ChannelMember.is_delete.is_(False),
+    )
+    return [str(i) for i in (await db.execute(stmt)).scalars()]
+
+
+async def is_member(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """某真人是否群成员（读写权限守卫）。"""
+    row = (
+        await db.execute(
+            select(ChannelMember.id).where(
+                ChannelMember.channel_id == channel_id,
+                ChannelMember.member_type == MEMBER_HUMAN,
+                ChannelMember.member_id == user_id,
+                ChannelMember.is_delete.is_(False),
+            )
+        )
+    ).first()
+    return row is not None
 
 
 async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:

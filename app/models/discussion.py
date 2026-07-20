@@ -6,9 +6,19 @@
 """
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +29,10 @@ _JSONB = JSON().with_variant(JSONB(), "postgresql")
 # 发言方类型
 SPEAKER_HUMAN = "human"
 SPEAKER_AI = "ai"
+
+# 成员类型
+MEMBER_HUMAN = "human"
+MEMBER_AI = "ai"
 
 
 class DiscussionChannel(CommonMixin, Base):
@@ -56,3 +70,25 @@ class DiscussionMessage(CommonMixin, Base):
     )  # AI 发言关联 agent_task_record
     ref_type: Mapped[str | None] = mapped_column(String(16), nullable=True)  # proposal/task
     ref_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # 升格产出溯源
+    # 消息附件（I6）：[{type:image|file, name, storage_path, size}]
+    attachments: Mapped[list[Any]] = mapped_column(_JSONB, default=list, server_default="[]")
+
+
+class ChannelMember(CommonMixin, Base):
+    """频道成员（I4，docs/18）：真人 + AI 混合群成员名单 + 未读水位。
+
+    member_id 松引用（真人 sys_user 或 AI agent_role，不加 FK，同 speaker_id）。
+    last_read_at 记该成员最后读到的时间，供 I5 未读计数。
+    """
+
+    __tablename__ = "channel_member"
+    __table_args__ = (
+        Index("uq_channel_member", "channel_id", "member_type", "member_id", unique=True),
+        Index("ix_cm_member", "member_type", "member_id"),
+    )
+
+    channel_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("discussion_channel.id"))
+    member_type: Mapped[str] = mapped_column(String(8))  # human / ai
+    member_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    member_name: Mapped[str] = mapped_column(String(64), default="")  # 冗余留痕
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

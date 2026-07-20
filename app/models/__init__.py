@@ -7,7 +7,7 @@ from app.models.base import Base
 from app.models.collab import CollabAuthorization, CollabRequest
 from app.models.deliverable import Deliverable
 from app.models.desktop import DesktopMessage
-from app.models.discussion import DiscussionChannel, DiscussionMessage
+from app.models.discussion import ChannelMember, DiscussionChannel, DiscussionMessage
 from app.models.eval_case import EvalCase
 from app.models.feedback import AgentFeedback
 from app.models.knowledge import DataSource, KnowledgeBase, KnowledgeFile, KnowledgeVector
@@ -36,6 +36,7 @@ __all__ = [
     "Base",
     "CollabAuthorization",
     "CollabRequest",
+    "ChannelMember",
     "DataSource",
     "Deliverable",
     "DesktopMessage",
