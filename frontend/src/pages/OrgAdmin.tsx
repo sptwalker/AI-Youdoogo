@@ -21,6 +21,7 @@ import {
   getTree,
   listEmployees,
   setSupervisor,
+  syncFeishu,
   TIER_LABEL,
   updateEmployee,
   updateNode,
@@ -202,7 +203,22 @@ export default function OrgAdmin() {
   }
 
   return (
-    <PageContainer title="组织架构">
+    <PageContainer
+      title="组织架构"
+      extra={[
+        <Popconfirm
+          key="sync"
+          title="从飞书通讯录同步组织架构与员工身份？（需已配置飞书应用凭证）"
+          onConfirm={async () => {
+            const r = await syncFeishu()
+            message.success(`已同步 ${r.departments} 部门，新增 ${r.users_created} 人`)
+            await refreshTree()
+          }}
+        >
+          <Button>从飞书同步</Button>
+        </Popconfirm>,
+      ]}
+    >
       <Space align="start" style={{ width: '100%' }} size="large">
         <Card
           title="部门树"

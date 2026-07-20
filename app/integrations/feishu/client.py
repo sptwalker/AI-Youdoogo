@@ -333,6 +333,63 @@ class FeishuClient:
         result: dict[str, Any] = data.get("data", {})
         return result
 
+    # ── 通讯录（contact/v3）：组织同步用（I1，docs/18）────────────────
+    async def list_departments(
+        self, parent_department_id: str = "0", page_size: int = 50
+    ) -> list[dict[str, Any]]:
+        """递归拉取部门树全量（从 parent 起，自动翻页 + 递归子部门）。
+
+        飞书 contact/v3/departments/{id}/children 返回直接子部门；根用 '0'（企业根）。
+        需权限 contact:department.base:readonly。返回每部门含 open_department_id/name/parent。
+        """
+        out: list[dict[str, Any]] = []
+
+        async def _children(dept_id: str) -> None:
+            page_token: str | None = None
+            while True:
+                params: dict[str, Any] = {
+                    "page_size": page_size, "department_id_type": "open_department_id",
+                }
+                if page_token:
+                    params["page_token"] = page_token
+                data = await self._get_authed(
+                    f"/contact/v3/departments/{dept_id}/children", params
+                )
+                items = data.get("items") or []
+                out.extend(items)
+                for it in items:  # 递归子部门
+                    child_id = it.get("open_department_id")
+                    if child_id:
+                        await _children(child_id)
+                page_token = data.get("page_token")
+                if not data.get("has_more") or not page_token:
+                    break
+
+        await _children(parent_department_id)
+        return out
+
+    async def list_users_by_department(
+        self, department_id: str, page_size: int = 50
+    ) -> list[dict[str, Any]]:
+        """拉取某部门下员工全量（自动翻页）。需权限 contact:user.base:readonly。
+
+        返回每员工含 open_id/name/en_name/mobile/department_ids/avatar/job_title 等。
+        """
+        out: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            params: dict[str, Any] = {
+                "department_id": department_id, "page_size": page_size,
+                "department_id_type": "open_department_id",
+            }
+            if page_token:
+                params["page_token"] = page_token
+            data = await self._get_authed("/contact/v3/users/find_by_department", params)
+            out.extend(data.get("items") or [])
+            page_token = data.get("page_token")
+            if not data.get("has_more") or not page_token:
+                return out
+
 
 # 全局飞书客户端实例
 feishu_client = FeishuClient()
