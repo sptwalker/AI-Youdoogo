@@ -106,13 +106,8 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     ) < deploy_script.index(
         'kubectl apply -f "$migration_manifest"'
     )
-    assert '-l "job-name=${migration_job}"' in deploy_script
-    assert "--field-selector=status.phase=Succeeded" in deploy_script
-    cleanup_index = deploy_script.index(
-        'echo "[migrate] releasing completed migration Pod capacity'
-    )
-    assert deploy_script.index('kubectl apply -f "$migration_manifest"') < cleanup_index
-    assert cleanup_index < deploy_script.index('kubectl apply -f "$workloads_manifest"')
+    assert '"delete pods"' not in deploy_script
+    assert 'kubectl delete pods' not in deploy_script
     assert 'print_rollout_diagnostics()' in deploy_script
     diagnostics = deploy_script[
         deploy_script.index("print_object_events()") : deploy_script.index(
@@ -213,6 +208,11 @@ def test_migration_job_is_once_only_and_bounded(tmp_path: Path) -> None:
 
 def test_frontend_same_origin_proxy_and_spa() -> None:
     nginx = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
+    assert (
+        "COPY docker/nginx/nginx.conf /etc/nginx/templates/default.conf.template"
+        in dockerfile
+    )
     assert "location /api/" in nginx
     assert "proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};" in nginx
     assert "location = /nginx-health" in nginx
@@ -225,6 +225,42 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
     assert "proxy_set_header X-Forwarded-Proto $upstream_forwarded_proto;" in callback
     client = (ROOT / "frontend/src/api/client.ts").read_text(encoding="utf-8")
     assert "baseURL: '/api/v1'" in client
+
+
+def test_frontend_nginx_template_renders_and_validates(tmp_path: Path) -> None:
+    template = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
+    rendered = subprocess.run(
+        ["envsubst", "${BACKEND_HOST} ${BACKEND_PORT}"],
+        input=template,
+        text=True,
+        capture_output=True,
+        check=True,
+        env=os.environ | {"BACKEND_HOST": "127.0.0.1", "BACKEND_PORT": "8000"},
+    ).stdout
+    rendered_path = tmp_path / "default.conf"
+    rendered_path.write_text(rendered, encoding="utf-8")
+    nginx_config = tmp_path / "nginx.conf"
+    nginx_config.write_text(
+        "\n".join(
+            (
+                "error_log stderr notice;",
+                f"pid {tmp_path / 'nginx.pid'};",
+                "events {}",
+                "http {",
+                "    access_log off;",
+                f"    include {rendered_path};",
+                "}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["nginx", "-t", "-p", f"{tmp_path}/", "-c", str(nginx_config)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 def test_variable_contract_and_notification_card(monkeypatch) -> None:

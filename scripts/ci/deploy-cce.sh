@@ -169,7 +169,7 @@ fi
 for check in \
   "create jobs.batch" "create services" "create deployments.apps" "create ingresses.networking.k8s.io" \
   "patch jobs.batch" "patch services" "patch deployments.apps" "patch ingresses.networking.k8s.io" \
-  "delete jobs.batch" "delete pods"; do
+  "delete jobs.batch"; do
   verb="${check%% *}"
   resource="${check#* }"
   if [[ "$(kubectl auth can-i "$verb" "$resource" -n "$KUBE_NAMESPACE")" != "yes" ]]; then
@@ -242,12 +242,6 @@ else
     exit 1
   fi
 fi
-
-echo "[migrate] releasing completed migration Pod capacity before workload rollouts"
-# Retain the successful commit-scoped Job so this migration is not rerun, but
-# remove its completed Pod before restoring both Deployments at the pod ceiling.
-kubectl delete pods -n "$KUBE_NAMESPACE" -l "job-name=${migration_job}" \
-  --field-selector=status.phase=Succeeded --wait=true --ignore-not-found=true
 
 echo "[deploy] applying project-owned Services and Deployments"
 kubectl apply -f "$workloads_manifest"

@@ -79,7 +79,7 @@ verify_delivery_contract:
     pull_policy: always
   extends: .verify_rules
   before_script:
-    - apk add --no-cache bash
+    - apk add --no-cache bash gettext nginx
     - python -m pip install --no-cache-dir pytest PyYAML
   script:
     - python -m pytest -q tests/test_cce_delivery_contract.py
