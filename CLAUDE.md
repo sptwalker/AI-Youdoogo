@@ -16,7 +16,7 @@
 | 数据库 | PostgreSQL 16（`timescale/timescaledb-ha:pg16` 镜像，内置 TimescaleDB + pgvector） |
 | 缓存/文件 | Redis / MinIO |
 | 大模型 | **卡片化多 Provider**（`ai_provider` 表 + 「AI 配置」页动态管理）：卡片分 daily/reasoning 档，对接 `agent_role.model_role`；档内 `is_primary` 主用 + 同档 active 作 failover；**必须建卡片，无卡片 AI 不可用（不回退 .env）**。网关在 `app/llm/`（langchain-core + langchain-openai） |
-| 智能体编排 | **自研状态机**（`app/services/task_flow.py` + `app/agents/scheduler.py`）；LangGraph 1.x 暂缓——2026-07-12 阶段3决策：先自研轻量状态机跑通任务卡闭环，确有编排复杂度再引入并做 POC |
+| 智能体编排 | **PostgreSQL durable runtime**（`WorkflowRun/WorkflowStep` + transactional outbox + 租约 worker）；普通单卡仍用 `task_flow.py`。LangGraph 后续只能实现 `WorkflowEngine` adapter，不得绕过持久化、幂等与真人停点 |
 | 飞书 | 自研异步 httpx 客户端 `app/integrations/feishu/`（不用 lark-oapi） |
 | 前端 | React + Ant Design Pro（**阶段2才初始化**） |
 | 质量 | Ruff + Mypy + Pytest（提交前三件套必须全绿） |

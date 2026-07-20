@@ -17,7 +17,8 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent_stream
+from app.agents.base import run_agent, run_agent_stream
+from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
@@ -60,9 +61,7 @@ async def get_or_create_assistant(db: AsyncSession, user: SysUser) -> AgentRole:
     # 先固化用到的用户字段：rollback 会 expire session 内所有对象，之后再访问 user.* 会触发
     # 同步惰性加载（MissingGreenlet），故提前取出。
     uid, dept, display = user.id, user.department_id, _display(user)
-    stmt = select(AgentRole).where(
-        AgentRole.owner_user_id == uid, AgentRole.is_delete.is_(False)
-    )
+    stmt = select(AgentRole).where(AgentRole.owner_user_id == uid, AgentRole.is_delete.is_(False))
     assistant = (await db.execute(stmt)).scalar_one_or_none()
     if assistant is None:
         # 预查重名再定名，避免 IntegrityError→rollback（rollback 会 expire 整个 session，
@@ -77,8 +76,13 @@ async def get_or_create_assistant(db: AsyncSession, user: SysUser) -> AgentRole:
         ).first()
         name = f"{base_name}-{uid.hex[:4]}" if taken else base_name
         assistant = AgentRole(
-            name=name, title="专属助理", tier=TIER_MEMBER, department_id=dept,
-            model_role="daily", owner_user_id=uid, is_seed=False,
+            name=name,
+            title="专属助理",
+            tier=TIER_MEMBER,
+            department_id=dept,
+            model_role="daily",
+            owner_user_id=uid,
+            is_seed=False,
             prompt_template=_ASSISTANT_PROMPT,
         )
         db.add(assistant)
@@ -86,7 +90,9 @@ async def get_or_create_assistant(db: AsyncSession, user: SysUser) -> AgentRole:
         await db.refresh(assistant)
     if await _personal_kb(db, assistant.id) is None:
         await knowledge_base_service.create_kb(
-            db, name=f"{display}的对话记忆", scope=SCOPE_PERSONAL,
+            db,
+            name=f"{display}的对话记忆",
+            scope=SCOPE_PERSONAL,
             owner_agent_id=assistant.id,
             description="工作桌面归档的历史对话，仅本人助理可检索。",
         )
@@ -106,9 +112,11 @@ async def _history_days(db: AsyncSession) -> int:
 
 def _msg_dict(m: DesktopMessage) -> dict[str, Any]:
     return {
-        "id": str(m.id), "speaker_type": m.speaker_type,
+        "id": str(m.id),
+        "speaker_type": m.speaker_type,
         "speaker_agent_id": str(m.speaker_agent_id) if m.speaker_agent_id else None,
-        "speaker_name": m.speaker_name, "content": m.content,
+        "speaker_name": m.speaker_name,
+        "content": m.content,
         "create_time": m.create_time.isoformat(),
     }
 
@@ -144,8 +152,12 @@ async def archive_old(db: AsyncSession, user: SysUser, days: int | None = None) 
         text, title_suffix = transcript, "存档"
     try:
         await ingest_text(
-            db, title=f"{_display(user)}对话{title_suffix} {span}", text=text,
-            uploader_id=user.id, knowledge_base_id=kb.id, category="conversation",
+            db,
+            title=f"{_display(user)}对话{title_suffix} {span}",
+            text=text,
+            uploader_id=user.id,
+            knowledge_base_id=kb.id,
+            category="conversation",
         )
     except Exception:  # noqa: BLE001 - 归档失败不删消息，下次重试
         logger.warning("对话归档入库失败 user=%s，保留消息下次重试", user.id, exc_info=True)
@@ -214,7 +226,9 @@ async def _resolve_participants(
             continue
         agent = await db.get(AgentRole, aid)
         if (
-            agent is None or agent.is_delete or not agent.is_active
+            agent is None
+            or agent.is_delete
+            or not agent.is_active
             or agent.owner_user_id is not None
         ):
             raise AppError("要加入的 AI 不存在或不可用", code=404, status_code=404)
@@ -251,8 +265,10 @@ async def send_stream(
     ]
     user_name = _display(user)
     user_msg = DesktopMessage(
-        owner_user_id=user.id, speaker_type=SPEAKER_USER,
-        speaker_name=user_name, content=message,
+        owner_user_id=user.id,
+        speaker_type=SPEAKER_USER,
+        speaker_name=user_name,
+        content=message,
     )
     db.add(user_msg)
     await db.commit()
@@ -281,9 +297,13 @@ async def send_stream(
             yield ("message_start", {"speaker_agent_id": str(agent.id), "speaker_name": agent.name})
             record: AgentTaskRecord | None = None
             async for item in run_agent_stream(
-                db, agent, task_type="desktop_chat",
+                db,
+                agent,
+                task_type="desktop_chat",
                 input_summary=f"桌面对话：{message[:40]}",
-                user_message=hint, user_id=user.id, use_knowledge=True,
+                user_message=hint,
+                user_id=user.id,
+                use_knowledge=True,
             ):
                 if isinstance(item, AgentTaskRecord):
                     record = item
@@ -293,11 +313,25 @@ async def send_stream(
             reply = record.output_content or record.error_msg or "（无回应）"
             # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库（DB 与显示一致）
             # user_intent 透传用户原句：取数解读轮据此判断是否还要交付日报（阶段A,docs/14）
-            proto = await execute_all(db, agent, reply, user_id=user.id, user_intent=message)
+            proto = await execute_all(
+                db,
+                agent,
+                reply,
+                user_id=user.id,
+                user_intent=message,
+                execution_context=ExecutionContext(
+                    user_id=user.id,
+                    user_intent=message,
+                    agent_runner=run_agent,
+                ),
+            )
             reply = fold_notes(reply, proto)
             ai_msg = DesktopMessage(
-                owner_user_id=user.id, speaker_type=SPEAKER_AI,
-                speaker_agent_id=agent.id, speaker_name=agent.name, content=reply,
+                owner_user_id=user.id,
+                speaker_type=SPEAKER_AI,
+                speaker_agent_id=agent.id,
+                speaker_name=agent.name,
+                content=reply,
             )
             db.add(ai_msg)
             await db.commit()
@@ -313,8 +347,11 @@ async def send_stream(
                 )
                 yield ("delta", {"text": answer})  # 咨询是单发非流式，整段一个 delta
                 c_msg = DesktopMessage(
-                    owner_user_id=user.id, speaker_type=SPEAKER_AI,
-                    speaker_agent_id=consulted.id, speaker_name=consulted.name, content=answer,
+                    owner_user_id=user.id,
+                    speaker_type=SPEAKER_AI,
+                    speaker_agent_id=consulted.id,
+                    speaker_name=consulted.name,
+                    content=answer,
                 )
                 db.add(c_msg)
                 await db.commit()
@@ -331,8 +368,11 @@ async def _try_orchestrate(
 
     try:
         return await orchestration_service.start(
-            db, message, creator_id=user.id,
-            assignee_agent_id=assistant.id, operator_id=user.id,
+            db,
+            message,
+            creator_id=user.id,
+            assignee_agent_id=assistant.id,
+            operator_id=user.id,
         )
     except Exception:  # noqa: BLE001 - 编排故障不阻断对话，退回圆桌
         logger.warning("桌面编排启动失败，退回普通对话", exc_info=True)
@@ -341,12 +381,28 @@ async def _try_orchestrate(
 
 def _progress_text(snap: dict[str, Any]) -> str:
     """把编排进度快照渲染成一条对话消息（折叠「任务进度」文本卡）。"""
-    icon = {"accepted": "✅", "reported": "⏸", "executing": "▶", "created": "○",
-            "dispatched": "○", "rejected": "✕", "cancelled": "✕"}
+    icon = {
+        "accepted": "✅",
+        "succeeded": "✅",
+        "reported": "⏸",
+        "waiting_human": "⏸",
+        "executing": "▶",
+        "running": "▶",
+        "created": "○",
+        "dispatched": "○",
+        "queued": "○",
+        "rejected": "✕",
+        "failed": "✕",
+        "cancelled": "✕",
+    }
     lines = [f"【任务进度】已规划 {snap['total']} 步，完成 {snap['accepted']}/{snap['total']}"]
     for s in snap["steps"]:
         mark = icon.get(s["status"], "○")
-        rl = "（红线·待您验收）" if s["red_line"] and s["status"] == "reported" else ""
+        rl = (
+            "（红线·待您验收）"
+            if s["red_line"] and s["status"] in ("reported", "waiting_human")
+            else ""
+        )
         lines.append(f"{mark} 步骤{s['step_no'] + 1}：{s['title']} [{s['skill']}]{rl}")
     if snap["awaiting_human"]:
         lines.append("\n有红线步骤已执行完，等待您在任务卡中验收后继续。")
@@ -362,8 +418,11 @@ async def _emit_orchestration(
     text = _progress_text(snap)
     yield ("orchestration", snap)  # 结构化进度，前端可渲染折叠进度卡
     msg = DesktopMessage(
-        owner_user_id=user.id, speaker_type=SPEAKER_AI,
-        speaker_agent_id=assistant.id, speaker_name=assistant.name, content=text,
+        owner_user_id=user.id,
+        speaker_type=SPEAKER_AI,
+        speaker_agent_id=assistant.id,
+        speaker_name=assistant.name,
+        content=text,
     )
     db.add(msg)
     await db.commit()

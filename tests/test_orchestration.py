@@ -341,29 +341,25 @@ async def test_start_short_message_skips_planning(db: AsyncSession) -> None:
     ) is None
 
 
-async def test_start_builds_and_advances(
+async def test_start_atomically_submits_without_running(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """复合任务 → 建父卡+步骤卡+推进（非红线自动跑，红线停）。"""
+    """复合任务 → 原子建持久化 runtime 并入 outbox，不在请求内执行步骤。"""
     async def _plan(_db: Any, req: str) -> Any:
         return [
             orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
             orch.PlanStep(no=1, title="通知", skill="notify", instruction="发", depends_on=[0]),
         ]
 
-    async def _fake_run(_db: Any, step: Any, operator_id: Any) -> Any:
-        await orch._to_reported(_db, step, operator_id, "stub", "ok")
-        return ProtocolResult()
-
     monkeypatch.setattr(orch, "plan", _plan)
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
     creator = await _creator(db)
     snap = await orch.start(
         db, "取昨天数据并通知总监", creator_id=creator,
         assignee_agent_id=None, operator_id=creator,
     )
     assert snap is not None and snap["total"] == 2
-    assert snap["done"] is False and len(snap["awaiting_human"]) == 1  # 停在红线通知步
+    assert snap["status"] == "queued" and snap["accepted"] == 0
+    assert snap["awaiting_human"] == []  # worker 尚未执行到红线停点
 
 
 async def test_resume_if_step_non_step_returns_none(db: AsyncSession) -> None:

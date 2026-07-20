@@ -23,11 +23,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent
+from app.agents.contracts import ExecutionContext, SkillResult
+from app.agents.workflow_engine import get_workflow_engine
 from app.llm import get_llm_for_role
 from app.models.agent import AgentRole
 from app.models.task import TaskCard
 from app.services import task_flow, task_service
-from app.services.collab_protocol import ProtocolResult
+
+ProtocolResult = SkillResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +41,19 @@ _MAX_STEPS = 8  # 单次编排步骤上限（防失控规划）
 _PLANNER_SYSTEM = (
     "你是任务编排规划器。判断用户请求是否是「需要多个有序步骤」的复合任务。"
     "只输出 JSON，不要任何解释或代码块标记。\n"
-    "格式:{\"multi\": bool, \"steps\": [{\"no\": int, \"title\": str, \"skill\": str, "
-    "\"instruction\": str, \"depends_on\": [int]}]}\n"
+    '格式:{"multi": bool, "steps": [{"no": int, "title": str, "skill": str, '
+    '"instruction": str, "depends_on": [int]}]}\n'
     "- multi=false 表示单一动作（普通问答/单步），此时 steps 给空数组。\n"
     "- skill 只能取:data_query(查运营数据)、deliver(生成文件/文档/表格)、"
     "collab(联系其他部门/AI)、notify(通知某真人)、other(其它)。\n"
     "- no 从 0 开始递增;depends_on 填本步依赖的前序步骤 no 列表（无依赖=空数组）。\n"
     "- instruction 用一句话说清这步要做什么。步骤按依赖排序，最多 8 步。\n"
     "示例请求「把昨天运营数据做成日报并通知运营总监」→"
-    "{\"multi\":true,\"steps\":[{\"no\":0,\"title\":\"取昨日运营数据\",\"skill\":\"data_query\","
-    "\"instruction\":\"查询昨天各产品运营指标\",\"depends_on\":[]},"
-    "{\"no\":1,\"title\":\"生成运营日报\",\"skill\":\"deliver\",\"instruction\":\"把数据做成日报文档\","
-    "\"depends_on\":[0]},{\"no\":2,\"title\":\"通知运营总监\",\"skill\":\"notify\","
-    "\"instruction\":\"把日报通知运营总监\",\"depends_on\":[1]}]}"
+    '{"multi":true,"steps":[{"no":0,"title":"取昨日运营数据","skill":"data_query",'
+    '"instruction":"查询昨天各产品运营指标","depends_on":[]},'
+    '{"no":1,"title":"生成运营日报","skill":"deliver","instruction":"把数据做成日报文档",'
+    '"depends_on":[0]},{"no":2,"title":"通知运营总监","skill":"notify",'
+    '"instruction":"把日报通知运营总监","depends_on":[1]}]}'
 )
 
 
@@ -128,8 +131,11 @@ def parse_plan(raw: str) -> list[PlanStep] | None:
         if not isinstance(deps, list) or not all(isinstance(d, int) for d in deps):
             return None
         seen_no.add(no)
-        steps.append(PlanStep(no=no, title=title, skill=skill,
-                              instruction=instruction, depends_on=list(deps)))
+        steps.append(
+            PlanStep(
+                no=no, title=title, skill=skill, instruction=instruction, depends_on=list(deps)
+            )
+        )
     # depends_on 必须引用已存在的 no，且整体无环
     valid_nos = {s.no for s in steps}
     for s in steps:
@@ -146,10 +152,12 @@ async def plan(db: AsyncSession, request: str) -> list[PlanStep] | None:
         return None
     try:
         llm = get_llm_for_role("reasoning", temperature=0.0)
-        reply = await llm.ainvoke([
-            SystemMessage(content=_PLANNER_SYSTEM),
-            HumanMessage(content=f"用户请求:{request.strip()}"),
-        ])
+        reply = await llm.ainvoke(
+            [
+                SystemMessage(content=_PLANNER_SYSTEM),
+                HumanMessage(content=f"用户请求:{request.strip()}"),
+            ]
+        )
         raw = reply.content if isinstance(reply.content, str) else str(reply.content)
         return parse_plan(raw)
     except Exception:  # noqa: BLE001 - 规划故障不阻断，退回单步原路
@@ -171,19 +179,24 @@ async def build_steps(
     # 先按 no 升序建卡，记录 no→id / no→card 映射
     for st in sorted(steps, key=lambda s: s.no):
         card = await task_service.create_task(
-            db, title=st.title, task_type=st.skill, creator_id=creator_id,
-            assignee_agent_id=assignee_agent_id, parent_id=parent_id,
+            db,
+            title=st.title,
+            task_type=st.skill,
+            creator_id=creator_id,
+            assignee_agent_id=assignee_agent_id,
+            parent_id=parent_id,
             step_no=st.no,
-            payload={"instruction": st.instruction, "skill": st.skill,
-                     "red_line": is_red_line(st.skill)},
+            payload={
+                "instruction": st.instruction,
+                "skill": st.skill,
+                "red_line": is_red_line(st.skill),
+            },
         )
         no_to_id[st.no] = card.id
         no_to_card[st.no] = card
     # 回填 depends_on（此时所有 no→id 已知，支持依赖任意 no）
     for st in steps:
-        no_to_card[st.no].depends_on = [
-            str(no_to_id[d]) for d in st.depends_on if d in no_to_id
-        ]
+        no_to_card[st.no].depends_on = [str(no_to_id[d]) for d in st.depends_on if d in no_to_id]
     await db.commit()
     cards = [no_to_card[st.no] for st in sorted(steps, key=lambda s: s.no)]
     for c in cards:
@@ -199,7 +212,7 @@ _PREVIEW_ROWS = 30  # 喂下游步骤时单数据集渲染的最大行数（控 
 async def _step_cards(db: AsyncSession, parent_id: uuid.UUID) -> list[TaskCard]:
     """取某编排父卡下的全部步骤卡（按 step_no 升序）。"""
     steps = await task_service.list_tasks(db, parent_id=parent_id, limit=_MAX_STEPS + 2)
-    return sorted(steps, key=lambda s: (s.step_no if s.step_no is not None else 0))
+    return sorted(steps, key=lambda s: s.step_no if s.step_no is not None else 0)
 
 
 def _ready_steps(steps: list[TaskCard]) -> list[TaskCard]:
@@ -265,14 +278,26 @@ async def _run_step(
         db, step.id, task_flow.EXECUTING, operator_id=operator_id, note="编排执行"
     )
     record = await run_agent(
-        db, role, task_type=step.task_type,
+        db,
+        role,
+        task_type=step.task_type,
         input_summary=f"编排步骤：{step.title[:40]}",
-        user_message=_step_message(step), user_id=operator_id, use_knowledge=True,
+        user_message=_step_message(step),
+        user_id=operator_id,
+        use_knowledge=True,
     )
     result = record.output_content or record.error_msg or "（无产出）"
     proto = await skills.execute_all(
-        db, role, result, user_id=operator_id,
+        db,
+        role,
+        result,
+        user_id=operator_id,
         user_intent=(step.payload or {}).get("instruction"),
+        execution_context=ExecutionContext(
+            user_id=operator_id,
+            user_intent=(step.payload or {}).get("instruction"),
+            agent_runner=run_agent,
+        ),
     )
     for consulted, rec in proto.consult_replies:
         result += f"\n\n---\n【{consulted.name} 答复】\n{rec.output_content or rec.error_msg or ''}"
@@ -282,22 +307,33 @@ async def _run_step(
 
 
 async def _to_reported(
-    db: AsyncSession, step: TaskCard, operator_id: uuid.UUID | None,
-    note: str, result: str | None,
+    db: AsyncSession,
+    step: TaskCard,
+    operator_id: uuid.UUID | None,
+    note: str,
+    result: str | None,
 ) -> None:
     """把步骤推到 reported（容忍已 executing/dispatched 的中间态）。"""
     if step.status in (task_flow.EXECUTING,):
         await task_service.transition(
-            db, step.id, task_flow.REPORTED, operator_id=operator_id,
-            note=note, result_content=result,
+            db,
+            step.id,
+            task_flow.REPORTED,
+            operator_id=operator_id,
+            note=note,
+            result_content=result,
         )
         return
     # 未进入 executing（如无执行者早退）：补齐流转到 reported，保证有终态可验收
     for nxt in (task_flow.DISPATCHED, task_flow.EXECUTING, task_flow.REPORTED):
         if task_flow.can_transition(step.status, nxt):
             await task_service.transition(
-                db, step.id, nxt, operator_id=operator_id,
-                note=note, result_content=result if nxt == task_flow.REPORTED else None,
+                db,
+                step.id,
+                nxt,
+                operator_id=operator_id,
+                note=note,
+                result_content=result if nxt == task_flow.REPORTED else None,
             )
 
 
@@ -342,7 +378,10 @@ async def advance(
             if (s.payload or {}).get("red_line"):
                 continue  # 红线：停在 reported 等真人 accept
             await task_service.transition(
-                db, s.id, task_flow.ACCEPTED, operator_id=operator_id,
+                db,
+                s.id,
+                task_flow.ACCEPTED,
+                operator_id=operator_id,
                 note="非红线步骤自动验收",
             )
             await _pipe_outputs(db, s, proto, steps)
@@ -378,27 +417,29 @@ async def start(
     operator_id: uuid.UUID | None,
     title: str | None = None,
 ) -> dict[str, Any] | None:
-    """复合任务入口:规划 → 建父编排卡 + DAG 步骤卡 → 拓扑推进到红线停点。
-
-    返回进度快照;若非复合任务（plan 返回 None）→ 返回 None，调用方走原路（普通单步）。
-    永不 raise（规划/建卡故障退回 None）。
-    """
+    """复合任务入口：规划后原子提交持久化工作流，HTTP 路径不执行 DAG。"""
     if not request or len(request.strip()) < _MIN_REQUEST_LEN:
         return None
     try:
         steps = await plan(db, request)
         if steps is None:
             return None
-        parent = await task_service.create_task(
-            db, title=(title or request.strip())[:200], task_type="orchestration",
-            creator_id=creator_id, assignee_agent_id=assignee_agent_id,
-            payload={"origin": "orchestration", "request": request.strip()},
+        engine = get_workflow_engine()
+        run = await engine.submit(
+            db,
+            request=request.strip(),
+            title=(title or request.strip())[:200],
+            creator_id=creator_id,
+            assignee_agent_id=assignee_agent_id,
+            steps=steps,
+            is_red_line=is_red_line,
         )
-        await build_steps(
-            db, parent.id, steps, creator_id=creator_id, assignee_agent_id=assignee_agent_id
-        )
-        return await advance(db, parent.id, operator_id=operator_id)
+        await db.commit()
+        if run.parent_task_id is None:
+            raise RuntimeError("工作流缺少父 TaskCard 镜像")
+        return await engine.progress(db, run.parent_task_id)
     except Exception:  # noqa: BLE001 - 编排启动故障不阻断，退回普通对话
+        await db.rollback()
         logger.warning("任务编排启动失败，退回普通处理", exc_info=True)
         return None
 
@@ -406,14 +447,24 @@ async def start(
 async def resume_if_step(
     db: AsyncSession, task: TaskCard, *, operator_id: uuid.UUID | None
 ) -> dict[str, Any] | None:
-    """真人验收某卡后:若它是编排步骤卡，从停点继续推进父编排。否则 None。"""
+    """真人验收步骤后只写 resume outbox；不在 HTTP 请求内递归执行下游。"""
     if task.step_no is None or task.parent_id is None:
         return None
+    engine = get_workflow_engine()
+    run = await engine.accept_human_step(db, task, operator_id=operator_id)
+    if run is not None:
+        await db.commit()
+        return await engine.progress(db, task.parent_id)
+    # 迁移期旧 TaskCard-only 编排继续使用同步兼容路径。
     return await advance(db, task.parent_id, operator_id=operator_id)
 
 
 async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
-    """编排进度快照:父卡状态 + 各步骤状态/红线标记（供前端进度卡渲染）。"""
+    """优先返回持久化 runtime 快照；旧编排回退 TaskCard 兼容视图。"""
+    from app.services import workflow_service
+
+    if await workflow_service.get_run_by_parent_task(db, parent_id) is not None:
+        return await get_workflow_engine().progress(db, parent_id)
     steps = await _step_cards(db, parent_id)
     total = len(steps)
     accepted = sum(1 for s in steps if s.status == task_flow.ACCEPTED)
@@ -426,8 +477,11 @@ async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
         "done": accepted == total and total > 0,
         "steps": [
             {
-                "id": str(s.id), "step_no": s.step_no, "title": s.title,
-                "skill": s.task_type, "status": s.status,
+                "id": str(s.id),
+                "step_no": s.step_no,
+                "title": s.title,
+                "skill": s.task_type,
+                "status": s.status,
                 "red_line": bool((s.payload or {}).get("red_line")),
             }
             for s in steps
@@ -436,6 +490,7 @@ async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
 
 
 # ── 崩溃恢复扫描（H4.1，docs/16）─────────────────────────
+
 
 async def recover_incomplete(db: AsyncSession) -> dict[str, int]:
     """启动时崩溃恢复:复位孤儿步骤 + 重新推进未完成的编排。永不 raise。
@@ -482,6 +537,7 @@ async def recover_incomplete(db: AsyncSession) -> dict[str, int]:
     if result["orchestrations"]:
         logger.info(
             "崩溃恢复:续跑 %d 个编排，复位 %d 个孤儿步骤",
-            result["orchestrations"], result["steps_reset"],
+            result["orchestrations"],
+            result["steps_reset"],
         )
     return result

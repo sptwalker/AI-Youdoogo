@@ -42,6 +42,8 @@ async def create_task(body: TaskCreate, db: DB, user: CurrentUser) -> dict:
         sla_hours=body.sla_hours,
         payload=body.payload,
     )
+    await db.commit()
+    await db.refresh(task)
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))
 
 
@@ -62,7 +64,9 @@ async def get_task(task_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
     """任务详情 + 流转日志（行级可见性守卫）。"""
     task = await task_service.get_task(db, task_id)
     permission_service.assert_can_see(
-        user, creator_id=task.creator_id, department_id=task.department_id,
+        user,
+        creator_id=task.creator_id,
+        department_id=task.department_id,
         assignee_user_id=task.assignee_user_id,
     )
     logs = await task_service.list_logs(db, task_id)
@@ -82,6 +86,9 @@ async def decompose_task(
     children = await task_service.decompose(
         db, task_id, [s.model_dump() for s in body.subtasks], creator_id=user.id
     )
+    await db.commit()
+    for child in children:
+        await db.refresh(child)
     return ok([TaskOut.model_validate(c).model_dump(mode="json") for c in children])
 
 
@@ -98,16 +105,23 @@ async def transition_task(
         note=body.note,
         result_content=body.result_content,
     )
+    resume_snapshot = None
+    # 新 runtime：TaskCard 验收、WorkflowStep 完成与 resume outbox 在同一事务提交。
+    if body.to_status == "accepted":
+        resume_snapshot = await orchestration_service.resume_if_step(db, task, operator_id=user.id)
+    if resume_snapshot is None:
+        await db.commit()
+    await db.refresh(task)
     if body.to_status in ("accepted", "rejected"):  # 红线：任务验收留痕
         await audit_service.audit(
-            db, actor_id=user.id, actor_role=user.role_code,
+            db,
+            actor_id=user.id,
+            actor_role=user.role_code,
             action=f"task.{body.to_status}",
             summary=f"任务验收 {task.title[:40]} → {body.to_status}",
-            target_type="task_card", target_id=task.id,
+            target_type="task_card",
+            target_id=task.id,
         )
-    # 编排步骤被真人验收 → 从停点继续推进父编排（docs/14 阶段B 红线 resume）
-    if body.to_status == "accepted":
-        await orchestration_service.resume_if_step(db, task, operator_id=user.id)
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))
 
 

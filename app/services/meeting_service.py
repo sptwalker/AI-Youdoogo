@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.models.system import SysUser
 
 from app.agents.base import get_agent_role, run_agent, run_agent_stream
+from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
@@ -149,7 +150,16 @@ async def ai_expert_speak_stream(
     assert record is not None  # run_agent_stream 末项必为记录
     content = record.output_content or record.error_msg or "（无产出）"
     # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库
-    proto = await execute_all(db, role, content, user_id=operator_id)
+    proto = await execute_all(
+        db,
+        role,
+        content,
+        user_id=operator_id,
+        execution_context=ExecutionContext(
+            user_id=operator_id,
+            agent_runner=run_agent,
+        ),
+    )
     content = fold_notes(content, proto)
     d = MeetingDiscuss(
         meeting_id=meeting_id, speaker_type="ai", speaker_id=role.id,

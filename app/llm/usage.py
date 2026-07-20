@@ -62,6 +62,10 @@ async def record_usage(
     user_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
+    workflow_run_id: uuid.UUID | None = None,
+    workflow_step_id: uuid.UUID | None = None,
+    attempt_no: int | None = None,
+    trace_id: uuid.UUID | None = None,
 ) -> None:
     """落一行用量记录并做日预算告警。异常吞掉（用量留痕绝不影响主链路）。"""
     try:
@@ -71,6 +75,8 @@ async def record_usage(
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=total_tokens, duration_ms=duration_ms, status=status,
                 user_id=user_id, task_id=task_id, department_id=department_id,
+                workflow_run_id=workflow_run_id, workflow_step_id=workflow_step_id,
+                attempt_no=attempt_no, trace_id=trace_id,
             )
         )
         await db.commit()

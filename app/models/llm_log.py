@@ -26,3 +26,11 @@ class LlmCallLog(CommonMixin, Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("sys_department.id"), nullable=True
     )  # F4a 部门级预算归集
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_run.id"), nullable=True
+    )
+    workflow_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_step.id"), nullable=True
+    )
+    attempt_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)

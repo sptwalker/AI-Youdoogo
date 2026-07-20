@@ -26,6 +26,8 @@ from app.llm.usage import budget_exceeded, extract_usage, record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.services import config_service
 
+from .contracts import ExecutionContext
+
 logger = logging.getLogger(__name__)
 
 # agent_role.model_role（粗粒度档位）→ app/llm/roles.py 的 LLM 角色键
@@ -175,6 +177,7 @@ async def _finalize(
     duration_ms: int,
     user_id: uuid.UUID | None,
     sources: list[dict[str, Any]] | None = None,
+    execution_context: ExecutionContext | None = None,
 ) -> AgentTaskRecord:
     """落 AgentTaskRecord 留痕 + 记 usage（run_agent / run_agent_stream 共用收尾）。"""
     record = AgentTaskRecord(
@@ -187,6 +190,10 @@ async def _finalize(
         error_msg=error_msg,
         duration_ms=duration_ms,
         sources=sources or [],  # 检索引用溯源（H2.3）
+        workflow_run_id=execution_context.workflow_run_id if execution_context else None,
+        workflow_step_id=execution_context.workflow_step_id if execution_context else None,
+        attempt_no=execution_context.attempt if execution_context else None,
+        trace_id=execution_context.trace_id if execution_context else None,
     )
     db.add(record)
     await db.commit()
@@ -196,6 +203,10 @@ async def _finalize(
         prompt_tokens=usage[0], completion_tokens=usage[1], total_tokens=usage[2],
         duration_ms=duration_ms, status=status, task_id=record.id, user_id=user_id,
         department_id=role.department_id,  # 部门级成本归因（H2.2）
+        workflow_run_id=execution_context.workflow_run_id if execution_context else None,
+        workflow_step_id=execution_context.workflow_step_id if execution_context else None,
+        attempt_no=execution_context.attempt if execution_context else None,
+        trace_id=execution_context.trace_id if execution_context else None,
     )
     return record
 
@@ -209,6 +220,7 @@ async def run_agent(
     user_message: str,
     user_id: uuid.UUID | None = None,
     use_knowledge: bool = False,
+    execution_context: ExecutionContext | None = None,
 ) -> AgentTaskRecord:
     """执行一次智能体任务并落一条留痕记录。
 
@@ -248,6 +260,7 @@ async def run_agent(
         output=output, model_used=model_used, status=status, error_msg=error_msg,
         usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
         sources=sources,
+        execution_context=execution_context,
     )
 
 
@@ -260,6 +273,7 @@ async def run_agent_stream(
     user_message: str,
     user_id: uuid.UUID | None = None,
     use_knowledge: bool = False,
+    execution_context: ExecutionContext | None = None,
 ) -> AsyncIterator[str | AgentTaskRecord]:
     """run_agent 的流式变体：先逐段 yield token 增量(str)，最后 yield 落库的留痕记录。
 
@@ -305,4 +319,5 @@ async def run_agent_stream(
         output=output, model_used=model_used, status=status, error_msg=error_msg,
         usage=usage, duration_ms=int((time.monotonic() - t0) * 1000), user_id=user_id,
         sources=sources,
+        execution_context=execution_context,
     )

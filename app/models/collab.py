@@ -44,7 +44,10 @@ class CollabRequest(CommonMixin, Base):
     """跨部门协作请求（主管复核队列一行）。目标部门主管复核 approve/reject。"""
 
     __tablename__ = "collab_request"
-    __table_args__ = (Index("ix_collab_req_target", "target_department_id", "status"),)
+    __table_args__ = (
+        Index("ix_collab_req_target", "target_department_id", "status"),
+        Index("uq_collab_req_idempotency", "idempotency_key", unique=True),
+    )
 
     source_department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("sys_department.id"), nullable=True
@@ -61,3 +64,4 @@ class CollabRequest(CommonMixin, Base):
     # 复核通过后未来接自动分发产出的任务卡（本阶段留空）
     ref_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     ref_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)

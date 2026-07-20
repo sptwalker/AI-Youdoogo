@@ -13,6 +13,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent
+from app.agents.contracts import ExecutionContext
 from app.core.exceptions import AppError
 from app.models.agent import AgentRole
 from app.models.task import TaskCard
@@ -51,6 +52,7 @@ async def run_task(
         task = await task_service.transition(
             db, task_id, task_flow.DISPATCHED, operator_id=operator_id, note="调度中枢分发"
         )
+        await db.commit()
     if task.status != task_flow.DISPATCHED:
         raise AppError(f"任务当前状态 {task.status} 不可执行（需为 created/dispatched）")
 
@@ -58,6 +60,7 @@ async def run_task(
     await task_service.transition(
         db, task_id, task_flow.EXECUTING, operator_id=operator_id, note="调度中枢开始执行"
     )
+    await db.commit()
     record = await run_agent(
         db, role,
         task_type=task.task_type,
@@ -72,14 +75,26 @@ async def run_task(
     # 协作原语（docs/13 §10）：咨询答复与执行注记折进任务结果（真人验收时一并可见）
     from app.agents import skills
 
-    proto = await skills.execute_all(db, role, result, user_id=operator_id)
+    proto = await skills.execute_all(
+        db,
+        role,
+        result,
+        user_id=operator_id,
+        execution_context=ExecutionContext(
+            user_id=operator_id,
+            agent_runner=run_agent,
+        ),
+    )
     for consulted, rec in proto.consult_replies:
         answer = rec.output_content or rec.error_msg or "（无产出）"
         result += f"\n\n---\n【{consulted.name} 答复】\n{answer}"
     result = skills.fold_notes(result, proto)
-    return await task_service.transition(
+    task = await task_service.transition(
         db, task_id, task_flow.REPORTED,
         operator_id=role.id,  # 执行者为智能体
         note=f"智能体执行 status={record.status}",
         result_content=result,
     )
+    await db.commit()
+    await db.refresh(task)
+    return task

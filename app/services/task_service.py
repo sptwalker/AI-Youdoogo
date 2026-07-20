@@ -54,7 +54,7 @@ async def create_task(
     db.add(task)
     await db.flush()  # 取 task.id
     await _log(db, task.id, None, task_flow.CREATED, creator_id, "创建任务")
-    await db.commit()
+    await db.flush()
     await db.refresh(task)
     return task
 
@@ -100,7 +100,7 @@ async def decompose(
         await db.flush()
         await _log(db, child.id, None, task_flow.CREATED, creator_id, "拆解自父任务")
         children.append(child)
-    await db.commit()
+    await db.flush()
     for c in children:
         await db.refresh(c)
     return children
@@ -127,7 +127,7 @@ async def transition(
     if result_content is not None:
         task.result_content = result_content
     await _log(db, task.id, from_status, to_status, operator_id, note)
-    await db.commit()
+    await db.flush()
     await db.refresh(task)
     return task
 

@@ -17,7 +17,10 @@ class Deliverable(CommonMixin, Base):
     """一份交付到某真人桌面的文件。"""
 
     __tablename__ = "deliverable"
-    __table_args__ = (Index("ix_deliverable_owner_time", "owner_user_id", "create_time"),)
+    __table_args__ = (
+        Index("ix_deliverable_owner_time", "owner_user_id", "create_time"),
+        Index("uq_deliverable_idempotency", "idempotency_key", unique=True),
+    )
 
     owner_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sys_user.id"))
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -28,3 +31,4 @@ class Deliverable(CommonMixin, Base):
     file_format: Mapped[str] = mapped_column(String(8))  # csv / xlsx / md / txt
     storage_path: Mapped[str] = mapped_column(String(512))  # MinIO bucket/object
     file_size: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)

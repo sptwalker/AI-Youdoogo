@@ -6,7 +6,7 @@ agent_task_record 是「所有AI操作必须留痕、数据可溯源」红线的
 import uuid
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text, Uuid, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,3 +75,11 @@ class AgentTaskRecord(CommonMixin, Base):
     status: Mapped[str] = mapped_column(String(16), default="success", server_default="success")
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_run.id"), nullable=True
+    )
+    workflow_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_step.id"), nullable=True
+    )
+    attempt_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)

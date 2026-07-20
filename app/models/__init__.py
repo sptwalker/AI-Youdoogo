@@ -26,6 +26,7 @@ from app.models.sys_config import SysConfig
 from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.td_event_alias import TdEventAlias
+from app.models.workflow import OutboxEvent, ToolExecution, WorkflowEvent, WorkflowRun, WorkflowStep
 
 __all__ = [
     "AgentFeedback",
@@ -62,4 +63,9 @@ __all__ = [
     "TaskCard",
     "TaskCardLog",
     "TdEventAlias",
+    "ToolExecution",
+    "OutboxEvent",
+    "WorkflowEvent",
+    "WorkflowRun",
+    "WorkflowStep",
 ]

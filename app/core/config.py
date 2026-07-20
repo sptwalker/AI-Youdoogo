@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     llm_failover_max_attempts: int = 3  # failover 最多尝试候选数（0=不限）
     llm_total_timeout: float = 120.0  # 整条 failover 链总墙钟预算（秒，0=不限）
 
+    # Durable workflow worker（PostgreSQL outbox + 租约）
+    workflow_worker_enabled: bool = True
+    workflow_worker_poll_seconds: float = 1.0
+    workflow_event_lease_seconds: int = 300
+    workflow_step_lease_seconds: int = 600
+    workflow_retry_delay_seconds: int = 5
+
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
     embedding_model: str = "text-embedding-v3"  # 换 bge-m3 等在此改（需 1024 维）

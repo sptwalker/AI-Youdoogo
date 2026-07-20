@@ -39,3 +39,6 @@ data/
 
 # CodeGraph 本地索引（机器生成，不入库）
 .codegraph/
+
+# Graphify 本地知识图谱（机器生成，不入库）
+graphify-out/

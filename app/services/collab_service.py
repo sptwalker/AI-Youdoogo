@@ -125,14 +125,27 @@ async def create_request(
     category: str | None = None,
     risk_level: str | None = None,
     requested_by: uuid.UUID | None = None,
+    idempotency_key: str | None = None,
 ) -> CollabRequest:
     """发起跨部门协作请求入复核队列（risk_level 省略时按 category 自动分级）。"""
+    if idempotency_key:
+        existing = (
+            await db.execute(
+                select(CollabRequest).where(
+                    CollabRequest.idempotency_key == idempotency_key,
+                    CollabRequest.is_delete.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
     r = CollabRequest(
         source_department_id=source_department_id,
         target_department_id=target_department_id,
         title=title, summary=summary, category=category,
         risk_level=risk_level or classify_risk(category),
         requested_by=requested_by,
+        idempotency_key=idempotency_key,
     )
     db.add(r)
     await db.commit()

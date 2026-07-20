@@ -23,6 +23,37 @@ uv run uvicorn app.main:app --reload
 # 自检：http://127.0.0.1:8000/api/v1/health/deps （PG/Redis/MinIO 应全为 ok）
 ```
 
+## Durable Agent Runtime
+
+复合任务由 PostgreSQL 持久化为 `WorkflowRun/WorkflowStep`，HTTP/SSE 只提交计划并立即返回
+`queued/running` 进度；应用 lifespan 中的 outbox worker 负责租约抢占、执行、重试和真人停点恢复。
+`TaskCard` 只作为 UI/验收镜像，文件交付与协作请求通过 `ToolExecution` 幂等去重。
+
+后续接入 LangGraph 时，实现 [workflow_engine.py](app/agents/workflow_engine.py) 的
+`WorkflowEngine` adapter 即可；LangGraph 不接管数据库真相源、工具副作用或人工审批。
+
+## Graphify 项目知识图谱
+
+本项目使用 [Graphify](https://github.com/Graphify-Labs/graphify) 生成本地代码与文档知识图谱，产物写入被 Git 忽略的 `graphify-out/`，不会进入版本库。
+
+```bash
+# 首次安装；已安装可跳过
+uv tool install --upgrade graphifyy
+graphify install --platform codex
+
+# 首次或完整重建（默认同时生成交互式 HTML）
+graphify .
+
+# 日常增量更新并刷新 HTML
+graphify . --update
+
+# 查询项目结构、调用关系和模块影响范围
+graphify query "知识库检索链路如何进入任务编排"
+graphify path "app/knowledge" "app/agents"
+```
+
+`graphify-out/graph.html` 是默认生成的交互式可视化，`graphify-out/graph.json` 是可复用的查询索引。代码变更后运行 `graphify . --update`，完整重建运行 `graphify .`；明确不需要 HTML 时追加 `--no-viz`。
+
 ## 质量门（提交前必须全绿）
 
 ```powershell

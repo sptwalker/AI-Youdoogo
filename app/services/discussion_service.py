@@ -16,7 +16,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent_stream
+from app.agents.base import run_agent, run_agent_stream
+from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
@@ -177,7 +178,16 @@ async def post_message_stream(
         assert record is not None  # run_agent_stream 末项必为记录
         reply = record.output_content or record.error_msg or "（无产出）"
         # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库
-        proto = await execute_all(db, role, reply, user_id=speaker_id)
+        proto = await execute_all(
+            db,
+            role,
+            reply,
+            user_id=speaker_id,
+            execution_context=ExecutionContext(
+                user_id=speaker_id,
+                agent_runner=run_agent,
+            ),
+        )
         reply = fold_notes(reply, proto)
         ai = DiscussionMessage(
             channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=role.id,

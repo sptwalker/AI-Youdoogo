@@ -14,13 +14,13 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
 
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import get_agent_role, run_agent
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.agents.contracts import AgentRunner, ExecutionContext, SkillRequest, SkillResult
+from app.models.agent import AgentRole
 from app.models.system import SysDepartment
 from app.services import collab_service, config_service
 
@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 _MAX_CONSULTS = 2  # 每回复最多咨询数（防刷屏/失控）
 _MAX_COLLABS = 2  # 每回复最多协作请求数
+
+# 仅作为直接调用旧 execute() 时的兼容注入点；生产路径由 ExecutionContext.agent_runner 提供。
+run_agent: AgentRunner | None = None
 
 # 【咨询 @AI名】问题 —— 名字不含】/换行；问题取到行尾
 _CONSULT_RE = re.compile(r"【咨询\s*@\s*([^】\n]+?)\s*】\s*([^\n]+)")
@@ -61,22 +64,24 @@ class ParsedDirectives:
     collabs: list[tuple[str, str, str]] = field(default_factory=list)  # (dept, category, content)
 
 
-@dataclass
-class ProtocolResult:
-    """指令执行结果：面向显示 + 面向下一步输入两类载荷。
+ProtocolResult = SkillResult
 
-    - notes：文本注记，折进发起者消息尾（面向人看）。
-    - consult_replies：被咨询 AI 的记录，由调用方按各自媒介渲染（面向人看）。
-    - datasets：取数产出的结构化载荷（columns/rows/sql/row_count），面向"下一步输入"，
-      供编排层把上一步数据喂给下一步（阶段A 产出管道，docs/14 §4.1）。
-    - artifacts：交付产出的引用（deliverable_id/file_name/format/storage_path），
-      面向"下一步输入"，供下游步骤或前端定位文件。
-    """
 
-    notes: list[str] = field(default_factory=list)
-    consult_replies: list[tuple[AgentRole, AgentTaskRecord]] = field(default_factory=list)
-    datasets: list[dict[str, Any]] = field(default_factory=list)
-    artifacts: list[dict[str, Any]] = field(default_factory=list)
+class ConsultArgs(BaseModel):
+    """咨询动作参数。"""
+
+    kind: str = Field(pattern="^consult$")
+    name: str = Field(min_length=1, max_length=128)
+    question: str = Field(min_length=1, max_length=4000)
+
+
+class CollabArgs(BaseModel):
+    """跨部门协作动作参数。"""
+
+    kind: str = Field(pattern="^request$")
+    department: str = Field(min_length=1, max_length=128)
+    category: str = Field(default="", max_length=64)
+    content: str = Field(min_length=1, max_length=4000)
 
 
 def parse(output: str) -> ParsedDirectives:
@@ -100,10 +105,22 @@ async def _enabled(db: AsyncSession) -> bool:
 
 
 async def _run_consult(
-    db: AsyncSession, initiator: AgentRole, name: str, question: str,
-    user_id: uuid.UUID | None, result: ProtocolResult,
+    db: AsyncSession,
+    initiator: AgentRole,
+    name: str,
+    question: str,
+    context: ExecutionContext,
+    result: ProtocolResult,
 ) -> None:
-    target = await get_agent_role(db, name)
+    target = (
+        await db.execute(
+            select(AgentRole).where(
+                AgentRole.name == name,
+                AgentRole.is_active.is_(True),
+                AgentRole.is_delete.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
     if target is None:
         result.notes.append(f"被咨询的 AI「{name}」不存在，已忽略")
         return
@@ -113,35 +130,71 @@ async def _run_consult(
     if target.owner_user_id is not None:  # 他人私人助理，隐私排除
         result.notes.append(f"「{name}」是私人助理，不可咨询，已忽略")
         return
-    record = await run_agent(
-        db, target, task_type="agent_consult",
+    runner = run_agent or context.agent_runner
+    if runner is None:
+        result.notes.append(f"咨询「{name}」缺少 AgentRunner，已忽略")
+        return
+    record = await runner(
+        db,
+        target,
+        task_type="agent_consult",
         input_summary=f"被{initiator.name}咨询：{question[:40]}",
         user_message=(
             f"同事「{initiator.name}」向你咨询：{question}\n请直接、简明作答，仅供参考。"
         ),
-        user_id=user_id, use_knowledge=True,
+        user_id=context.user_id,
+        use_knowledge=True,
+        execution_context=context,
     )
     # 深度硬限 1 跳：不再对 record.output_content 发起二次「咨询/协作」（防咨询链爆炸）。
     # 但取数/交付是只读、终态、不递归的动作——被咨询 AI 若在答复里写【取数】/【交付】，
     # 应代为执行，否则咨询链上的取数会静默断链（用户只看到"我去查一下"却无下文）。
     result.consult_replies.append((target, record))
     reply_text = record.output_content or ""
-    if reply_text:
-        from app.agents import skills
-
-        sub = await skills.execute_all(
-            db, target, reply_text, user_id=user_id,
-            user_intent=question, exclude={"collab"},
+    if reply_text and context.dispatcher is not None:
+        sub_context = context.model_copy(update={"user_intent": question})
+        sub = await context.dispatcher.dispatch_text(
+            db, target, reply_text, sub_context, exclude={"collab"}
         )
         result.notes.extend(sub.notes)
         result.consult_replies.extend(sub.consult_replies)
         result.datasets.extend(sub.datasets)
         result.artifacts.extend(sub.artifacts)
+        result.tool_execution_ids.extend(sub.tool_execution_ids)
+    elif reply_text:
+        # 旧 service 直调兼容：咨询链只放行取数/交付，仍禁止二次咨询。
+        from app.services import deliver_service, query_skill
+
+        sub_context = context.model_copy(update={"user_intent": question})
+        query_result = await query_skill.execute(
+            db,
+            target,
+            reply_text,
+            user_id=context.user_id,
+            user_intent=question,
+            exclude={"collab"},
+            execution_context=sub_context,
+        )
+        delivery_result = await deliver_service.execute(
+            db,
+            target,
+            reply_text,
+            user_id=context.user_id,
+            execution_context=sub_context,
+        )
+        result.merge(query_result)
+        result.merge(delivery_result)
 
 
 async def _run_collab(
-    db: AsyncSession, initiator: AgentRole, dept_name: str, category: str, content: str,
+    db: AsyncSession,
+    initiator: AgentRole,
+    dept_name: str,
+    category: str,
+    content: str,
     result: ProtocolResult,
+    *,
+    idempotency_key: str | None = None,
 ) -> None:
     depts = list(
         (
@@ -156,19 +209,30 @@ async def _run_collab(
         result.notes.append(f"目标部门「{dept_name}」不存在或名称有歧义，协作请求未提交")
         return
     title = f"[{initiator.name}] {content[:30]}"
-    await collab_service.create_request(
-        db, target_department_id=depts[0].id, title=title, summary=content,
-        category=category or None, source_department_id=initiator.department_id,
+    request = await collab_service.create_request(
+        db,
+        target_department_id=depts[0].id,
+        title=title,
+        summary=content,
+        category=category or None,
+        source_department_id=initiator.department_id,
         requested_by=initiator.id,
+        idempotency_key=idempotency_key,
     )
+    result.artifacts.append({"collab_request_id": str(request.id), "title": title})
     result.notes.append(f"已提交协作请求「{title}」，待{dept_name}真人主管复核")
 
 
 async def execute(
-    db: AsyncSession, initiator: AgentRole, output: str,
-    *, user_id: uuid.UUID | None = None,
+    db: AsyncSession,
+    initiator: AgentRole,
+    output: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    execution_context: ExecutionContext | None = None,
 ) -> ProtocolResult:
     """解析并执行产出中的协作指令。每条指令独立容错转 note，永不 raise。"""
+    context = execution_context or ExecutionContext(user_id=user_id, agent_runner=run_agent)
     result = ProtocolResult()
     try:
         directives = parse(output)
@@ -176,15 +240,57 @@ async def execute(
             return result  # 零指令快速路径（绝大多数回复）
         if not await _enabled(db):
             return result
-        for name, question in directives.consults:
+        for index, (name, question) in enumerate(directives.consults):
             try:
-                await _run_consult(db, initiator, name, question, user_id, result)
+                request = SkillRequest(
+                    skill_key="collab",
+                    action_index=index,
+                    arguments={"kind": "consult", "name": name, "question": question},
+                    raw_text=output,
+                )
+                if context.dispatcher is not None:
+                    part = await context.dispatcher.dispatch(db, initiator, request, context)
+                    result.merge(part)
+                else:
+                    consult_args = ConsultArgs.model_validate(request.arguments)
+                    await _run_consult(
+                        db,
+                        initiator,
+                        consult_args.name,
+                        consult_args.question,
+                        context,
+                        result,
+                    )
             except Exception:  # noqa: BLE001 - 单条指令失败不影响其余
                 logger.warning("咨询指令执行失败 target=%s", name, exc_info=True)
                 result.notes.append(f"咨询「{name}」执行失败，已忽略")
-        for dept_name, category, content in directives.collabs:
+        for collab_index, (dept_name, category, content) in enumerate(directives.collabs):
             try:
-                await _run_collab(db, initiator, dept_name, category, content, result)
+                index = len(directives.consults) + collab_index
+                request = SkillRequest(
+                    skill_key="collab",
+                    action_index=index,
+                    arguments={
+                        "kind": "request",
+                        "department": dept_name,
+                        "category": category,
+                        "content": content,
+                    },
+                    raw_text=output,
+                )
+                if context.dispatcher is not None:
+                    part = await context.dispatcher.dispatch(db, initiator, request, context)
+                    result.merge(part)
+                else:
+                    collab_args = CollabArgs.model_validate(request.arguments)
+                    await _run_collab(
+                        db,
+                        initiator,
+                        collab_args.department,
+                        collab_args.category,
+                        collab_args.content,
+                        result,
+                    )
             except Exception:  # noqa: BLE001
                 logger.warning("协作指令执行失败 dept=%s", dept_name, exc_info=True)
                 result.notes.append(f"向「{dept_name}」发起协作失败，已忽略")
@@ -198,3 +304,40 @@ def fold_notes(text: str, result: ProtocolResult) -> str:
     if not result.notes:
         return text
     return text + "\n\n" + "\n".join(f"> 系统：{n}" for n in result.notes)
+
+
+class CollabSkillExecutor:
+    """结构化 collab executor；审批/决议动作不在此注册。"""
+
+    key = "collab"
+
+    def requires_idempotency(self, request: SkillRequest) -> bool:
+        return request.arguments.get("kind") == "request"
+
+    async def execute(
+        self,
+        db: AsyncSession,
+        role: AgentRole,
+        request: SkillRequest,
+        context: ExecutionContext,
+    ) -> SkillResult:
+        kind = request.arguments.get("kind")
+        if kind == "consult":
+            consult_args = ConsultArgs.model_validate(request.arguments)
+            result = SkillResult()
+            await _run_consult(db, role, consult_args.name, consult_args.question, context, result)
+            return result
+        if kind == "request":
+            collab_args = CollabArgs.model_validate(request.arguments)
+            result = SkillResult()
+            await _run_collab(
+                db,
+                role,
+                collab_args.department,
+                collab_args.category,
+                collab_args.content,
+                result,
+                idempotency_key=context.action_key("collab", request.action_index),
+            )
+            return result
+        raise ValueError("collab.kind 仅支持 consult/request")

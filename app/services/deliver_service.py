@@ -17,20 +17,24 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import logging
 import re
 import uuid
 
 from openpyxl import Workbook
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.contracts import ExecutionContext, SkillRequest, SkillResult
 from app.knowledge import storage
 from app.models.agent import AgentRole
 from app.models.deliverable import Deliverable
 from app.services import config_service
-from app.services.collab_protocol import ProtocolResult
+
+ProtocolResult = SkillResult
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,15 @@ _CONTENT_TYPE = {
     "md": "text/markdown; charset=utf-8",
     "txt": "text/plain; charset=utf-8",
 }
+
+
+class DeliveryArgs(BaseModel):
+    """结构化文件交付参数。"""
+
+    name: str = Field(min_length=1, max_length=120)
+    format: str = Field(pattern="^(csv|xlsx|md|txt)$")
+    body: str = Field(min_length=1)
+
 
 PROMPT_SECTION = (
     "\n\n【文件交付】（系统内建，已启用）当用户要你产出可下载的表格或文档时，"
@@ -122,38 +135,79 @@ async def _enabled(db: AsyncSession) -> bool:
 
 
 async def _deliver_one(
-    db: AsyncSession, initiator: AgentRole, user_id: uuid.UUID,
-    name: str, fmt: str, body: str, result: ProtocolResult,
+    db: AsyncSession,
+    initiator: AgentRole,
+    user_id: uuid.UUID,
+    name: str,
+    fmt: str,
+    body: str,
+    result: ProtocolResult,
+    *,
+    idempotency_key: str | None = None,
 ) -> None:
     data = _build_bytes(fmt, body)
     file_name = _safe_name(name, fmt)
-    row = Deliverable(
-        owner_user_id=user_id, agent_id=initiator.id, agent_name=initiator.name,
-        file_name=file_name, file_format=fmt, storage_path="", file_size=len(data),
+    row = None
+    if idempotency_key:
+        row = (
+            await db.execute(
+                select(Deliverable).where(Deliverable.idempotency_key == idempotency_key)
+            )
+        ).scalar_one_or_none()
+    if row is None:
+        row = Deliverable(
+            owner_user_id=user_id,
+            agent_id=initiator.id,
+            agent_name=initiator.name,
+            file_name=file_name,
+            file_format=fmt,
+            storage_path="",
+            file_size=len(data),
+            idempotency_key=idempotency_key,
+        )
+        db.add(row)
+        await db.flush()
+    else:
+        row.owner_user_id = user_id
+        row.agent_id = initiator.id
+        row.agent_name = initiator.name
+        row.file_name = file_name
+        row.file_format = fmt
+        row.file_size = len(data)
+    object_name = (
+        f"deliverables/idempotent/{hashlib.sha256(idempotency_key.encode()).hexdigest()}/{file_name}"
+        if idempotency_key
+        else f"deliverables/{row.id}/{file_name}"
     )
-    db.add(row)
+    row.storage_path = object_name
     await db.commit()
     await db.refresh(row)
-    row.storage_path = await storage.put_object(
-        f"deliverables/{row.id}/{file_name}", data, _CONTENT_TYPE[fmt]
-    )
+    row.storage_path = await storage.put_object(object_name, data, _CONTENT_TYPE[fmt])
     await db.commit()
     result.notes.append(f"已交付文件「{file_name}」，见工作桌面文件交付区")
     # 结构化载荷（阶段A 产出管道，docs/14 §4.1）：交付引用供下游步骤/前端定位
     result.artifacts.append(
         {
-            "deliverable_id": str(row.id), "file_name": file_name,
-            "file_format": fmt, "storage_path": row.storage_path,
-            "file_size": len(data), "agent_name": initiator.name,
+            "deliverable_id": str(row.id),
+            "file_name": file_name,
+            "file_format": fmt,
+            "storage_path": row.storage_path,
+            "file_size": len(data),
+            "agent_name": initiator.name,
         }
     )
 
 
 async def execute(
-    db: AsyncSession, initiator: AgentRole, output: str,
-    *, user_id: uuid.UUID | None = None,
+    db: AsyncSession,
+    initiator: AgentRole,
+    output: str,
+    *,
+    user_id: uuid.UUID | None = None,
+    execution_context: ExecutionContext | None = None,
 ) -> ProtocolResult:
     """解析并执行产出中的交付指令。每条独立容错转 note，永不 raise。"""
+    context = execution_context or ExecutionContext(user_id=user_id)
     result = ProtocolResult()
     try:
         items = parse(output)
@@ -161,18 +215,63 @@ async def execute(
             return result  # 零指令快速路径（绝大多数回复）
         if not await _enabled(db):
             return result
-        if user_id is None:
+        recipient_id = context.user_id or user_id
+        if recipient_id is None:
             result.notes.append("交付需指定接收人，自动任务无桌面归属，已跳过文件交付")
             return result
-        for name, fmt, body in items:
+        for index, (name, fmt, body) in enumerate(items):
             try:
-                await _deliver_one(db, initiator, user_id, name, fmt, body, result)
+                request = SkillRequest(
+                    skill_key="deliver",
+                    action_index=index,
+                    arguments={"name": name, "format": fmt, "body": body},
+                    raw_text=output,
+                )
+                if context.dispatcher is not None:
+                    result.merge(await context.dispatcher.dispatch(db, initiator, request, context))
+                else:
+                    args = DeliveryArgs.model_validate(request.arguments)
+                    await _deliver_one(
+                        db, initiator, recipient_id, args.name, args.format, args.body, result
+                    )
             except Exception:  # noqa: BLE001 - 单条交付失败不影响其余
                 logger.warning("交付执行失败 name=%s fmt=%s", name, fmt, exc_info=True)
                 result.notes.append(f"交付「{name}」失败，已忽略")
     except Exception:  # noqa: BLE001 - 交付层故障不连累业务消息流
         logger.warning("交付协议处理失败", exc_info=True)
     return result
+
+
+class DeliverySkillExecutor:
+    """强类型文件交付执行器。"""
+
+    key = "deliver"
+
+    def requires_idempotency(self, _request: SkillRequest) -> bool:
+        return True
+
+    async def execute(
+        self,
+        db: AsyncSession,
+        role: AgentRole,
+        request: SkillRequest,
+        context: ExecutionContext,
+    ) -> SkillResult:
+        args = DeliveryArgs.model_validate(request.arguments)
+        if context.user_id is None:
+            return SkillResult(notes=["交付需指定接收人，自动任务无桌面归属，已跳过文件交付"])
+        result = SkillResult()
+        await _deliver_one(
+            db,
+            role,
+            context.user_id,
+            args.name,
+            args.format,
+            args.body,
+            result,
+            idempotency_key=context.action_key("deliver", request.action_index),
+        )
+        return result
 
 
 async def list_deliverables(
@@ -190,8 +289,11 @@ async def list_deliverables(
     )
     return [
         {
-            "id": str(d.id), "file_name": d.file_name, "file_format": d.file_format,
-            "agent_name": d.agent_name, "file_size": d.file_size,
+            "id": str(d.id),
+            "file_name": d.file_name,
+            "file_format": d.file_format,
+            "agent_name": d.agent_name,
+            "file_size": d.file_size,
             "create_time": d.create_time.isoformat(),
         }
         for d in (await db.execute(stmt)).scalars()
