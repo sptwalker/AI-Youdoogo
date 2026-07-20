@@ -2,26 +2,31 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from fastapi import Request, Response
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.api.v1.auth import EXCHANGE_COOKIE, feishu_exchange, feishu_start, feishu_status
 from app.core.database import get_db
 from app.core.oauth_query_scrub import OAuthCallbackQueryScrubMiddleware
 from app.core.security import hash_password
-from app.integrations.feishu.oauth import FeishuIdentity, FeishuOAuthConfig
+from app.integrations.feishu.oauth import FeishuIdentity, FeishuOAuthConfig, FeishuOAuthError
 from app.main import app
 from app.models import Base
 from app.models.system import SysUser
 from app.services.feishu_login import (
     FeishuLoginService,
+    InvalidOAuthCallback,
     InvalidOAuthState,
     OAuthExchangeData,
     OAuthStateData,
+    OAuthUnavailable,
     get_feishu_login_service,
 )
 
@@ -85,6 +90,7 @@ class MemoryOAuthStore:
 class FakeProvider:
     identities: dict[str, str]
     exchange_calls: int = 0
+    failure_stage: str | None = None
 
     def authorization_url(self, state: str, code_challenge: str) -> str:
         return (
@@ -94,6 +100,8 @@ class FakeProvider:
 
     async def identity_from_code(self, code: str, code_verifier: str) -> FeishuIdentity:
         self.exchange_calls += 1
+        if self.failure_stage is not None:
+            raise FeishuOAuthError(self.failure_stage)
         return FeishuIdentity(open_id=self.identities[code])
 
 
@@ -128,6 +136,73 @@ async def test_state_binding_expiry_replay_and_tampering() -> None:
     store.now += 601
     with pytest.raises(InvalidOAuthState):
         await service.consume_callback_state(expired_state, expired.browser_binding)
+
+
+async def test_authorization_code_is_opaque_but_rejects_controls() -> None:
+    provider = FakeProvider({"opaque.code+/=~": "ou_bound_123456"})
+    service, _, _ = make_service(provider=provider)
+    started = await service.start("/")
+    state = parse_qs(urlsplit(started.authorization_url).query)["state"][0]
+    transaction = await service.consume_callback_state(state, started.browser_binding)
+
+    completed = await service.exchange_code(transaction, "opaque.code+/=~")
+    assert completed.identity.open_id == "ou_bound_123456"
+
+    with pytest.raises(InvalidOAuthCallback):
+        await service.exchange_code(transaction, "line\nbreak")
+
+
+async def test_unavailable_feature_status_and_start_return_to_login() -> None:
+    def unavailable_config() -> FeishuOAuthConfig:
+        raise OAuthUnavailable
+
+    service = FeishuLoginService(MemoryOAuthStore(), config_loader=unavailable_config)
+    response = Response()
+    status = await feishu_status(response, service)
+    assert status["data"] == {"enabled": False}
+    assert response.headers["cache-control"] == "no-store"
+
+    started = await feishu_start(service)
+    assert started.status_code == 303
+    assert started.headers["location"] == "/login?feishu=unavailable"
+
+
+def exchange_request(handle: str, origin: str | None) -> Request:
+    headers = [(b"cookie", f"{EXCHANGE_COOKIE}={handle}".encode())]
+    if origin is not None:
+        headers.append((b"origin", origin.encode()))
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/v1/auth/feishu/exchange",
+            "raw_path": b"/api/v1/auth/feishu/exchange",
+            "query_string": b"",
+            "headers": headers,
+            "client": ("127.0.0.1", 1234),
+            "server": ("test", 80),
+        }
+    )
+
+
+async def test_origin_rejection_does_not_consume_or_clear_exchange() -> None:
+    service, _, _ = make_service()
+    handle, _ = await service.create_exchange(
+        access_token="app-jwt-test",
+        token_type="bearer",
+        expires_in=3600,
+        redirect_to="/tasks",
+    )
+
+    denied = await feishu_exchange(exchange_request(handle, "https://evil.example"), service)
+    assert denied.status_code == 403
+    assert "set-cookie" not in denied.headers
+
+    accepted = await feishu_exchange(exchange_request(handle, "http://test"), service)
+    assert accepted.status_code == 200
+    assert json.loads(accepted.body)["data"]["redirect_to"] == "/tasks"
 
 
 async def test_callback_query_is_removed_before_access_logging() -> None:
@@ -263,6 +338,49 @@ async def test_callback_handoff_has_no_token_in_redirect_and_is_one_time(
     assert replay.status_code == 400
 
 
+async def test_status_reports_configured_feature_without_exposing_config(
+    oauth_client: tuple[AsyncClient, FakeProvider],
+) -> None:
+    client, _ = oauth_client
+    response = await client.get("/api/v1/auth/feishu/status")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"code": 0, "msg": "ok", "data": {"enabled": True}}
+
+
+async def test_cancelled_callback_consumes_state_without_calling_provider(
+    oauth_client: tuple[AsyncClient, FakeProvider],
+) -> None:
+    client, provider = oauth_client
+    state = await begin(client)
+    response = await client.get(
+        "/api/v1/auth/feishu/callback",
+        params={"state": state, "error": "access_denied"},
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?feishu=cancelled"
+    assert provider.exchange_calls == 0
+
+    replay = await callback(client, state, "unused-code")
+    assert replay.headers["location"] == "/login?feishu=invalid_state"
+
+
+async def test_missing_code_and_provider_failure_are_safe_login_errors(
+    oauth_client: tuple[AsyncClient, FakeProvider],
+) -> None:
+    client, provider = oauth_client
+    missing_code_state = await begin(client)
+    missing = await callback(client, missing_code_state, "")
+    assert missing.headers["location"] == "/login?feishu=error"
+    assert provider.exchange_calls == 0
+
+    provider.failure_stage = "token exchange rejected"
+    provider_failure_state = await begin(client)
+    failed = await callback(client, provider_failure_state, "provider-code")
+    assert failed.headers["location"] == "/login?feishu=error"
+    assert provider.exchange_calls == 1
+
+
 @pytest.mark.parametrize(
     "open_id",
     ["ou_unknown_123456", "ou_disabled_123456", "ou_deleted_123456"],
@@ -283,7 +401,12 @@ async def test_external_return_to_rejected(
     oauth_client: tuple[AsyncClient, FakeProvider],
 ) -> None:
     client, _ = oauth_client
-    for value in ("https://evil.example/", "//evil.example/", "/%5C%5Cevil.example"):
+    for value in (
+        "https://evil.example/",
+        "//evil.example/",
+        "/%5C%5Cevil.example",
+        "http://[invalid",
+    ):
         response = await client.get(
             "/api/v1/auth/feishu/start", params={"return_to": value}
         )
@@ -312,3 +435,27 @@ async def test_cross_origin_exchange_rejected_before_consumption(
         "/api/v1/auth/feishu/exchange", headers={"Origin": "https://evil.example"}
     )
     assert denied.status_code == 403
+    assert "set-cookie" not in denied.headers
+
+    accepted = await client.post(
+        "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
+    )
+    assert accepted.status_code == 200
+
+
+async def test_exchange_requires_browser_origin_without_destroying_handoff(
+    oauth_client: tuple[AsyncClient, FakeProvider],
+) -> None:
+    client, provider = oauth_client
+    provider.identities["missing-origin-code"] = "ou_bound_123456"
+    state = await begin(client)
+    await callback(client, state, "missing-origin-code")
+
+    denied = await client.post("/api/v1/auth/feishu/exchange")
+    assert denied.status_code == 403
+    assert "set-cookie" not in denied.headers
+
+    accepted = await client.post(
+        "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
+    )
+    assert accepted.status_code == 200

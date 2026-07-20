@@ -93,3 +93,39 @@ async def test_provider_failure_is_non_leaky() -> None:
     assert "test-secret-not-real" not in rendered
     assert "authorization-code-test" not in rendered
     assert "20002" not in rendered
+
+
+@respx.mock
+async def test_invalid_user_identity_is_rejected() -> None:
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": 0, "access_token": "user-access-token-test"},
+        )
+    )
+    respx.get(USER_INFO_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": 0, "msg": "success", "data": {"open_id": "invalid"}},
+        )
+    )
+
+    with pytest.raises(FeishuOAuthError, match="user identity response"):
+        await FeishuOAuthClient(CONFIG).identity_from_code(
+            "authorization-code-test", "verifier-test-value"
+        )
+
+
+@respx.mock
+async def test_network_failure_is_wrapped_without_request_details() -> None:
+    request = httpx.Request("POST", TOKEN_URL)
+    respx.post(TOKEN_URL).mock(
+        side_effect=httpx.ConnectError("secret host detail", request=request)
+    )
+
+    with pytest.raises(FeishuOAuthError) as caught:
+        await FeishuOAuthClient(CONFIG).identity_from_code(
+            "authorization-code-test", "verifier-test-value"
+        )
+    assert caught.value.stage == "token exchange request"
+    assert "secret host detail" not in str(caught.value)

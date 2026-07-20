@@ -6,7 +6,7 @@
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,13 +64,20 @@ def _login_redirect(result: str) -> RedirectResponse:
     return response
 
 
-def _exchange_error(msg: str, status_code: int) -> JSONResponse:
+def _exchange_error(
+    msg: str, status_code: int, *, clear_cookie: bool = True
+) -> JSONResponse:
     response = JSONResponse(
         status_code=status_code,
         content={"code": status_code, "msg": msg, "data": None},
-        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "Referrer-Policy": "no-referrer",
+        },
     )
-    response.delete_cookie(EXCHANGE_COOKIE, path=EXCHANGE_COOKIE_PATH)
+    if clear_cookie:
+        response.delete_cookie(EXCHANGE_COOKIE, path=EXCHANGE_COOKIE_PATH)
     return response
 
 
@@ -82,8 +89,10 @@ async def login(body: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
 
 
 @router.get("/feishu/status")
-async def feishu_status(service: FeishuService) -> dict:
+async def feishu_status(response: Response, service: FeishuService) -> dict:
     """Public feature status only; never exposes which credential is missing."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
     return ok({"enabled": service.is_available()})
 
 
@@ -97,10 +106,8 @@ async def feishu_start(
         started = await service.start(return_to)
     except InvalidReturnTo as exc:
         raise AppError("返回地址无效", code=400, status_code=400) from exc
-    except OAuthUnavailable as exc:
-        raise AppError(
-            "飞书登录暂不可用，请联系管理员。", code=503, status_code=503
-        ) from exc
+    except OAuthUnavailable:
+        return _login_redirect("unavailable")
     response = RedirectResponse(started.authorization_url, status_code=303)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
@@ -189,8 +196,10 @@ async def feishu_exchange(request: Request, service: FeishuService) -> JSONRespo
         expected_origin = service.expected_origin()
     except OAuthUnavailable:
         return _exchange_error("飞书登录暂不可用，请联系管理员。", 503)
-    if (origin and origin.rstrip("/") != expected_origin) or fetch_site == "cross-site":
-        return _exchange_error("登录交换请求无效，请重新登录。", 403)
+    if origin != expected_origin or fetch_site.lower() == "cross-site":
+        # Do not clear the valid handoff on a request that failed origin checks.
+        # A cross-site caller must not be able to turn CSRF probing into a login DoS.
+        return _exchange_error("登录交换请求无效，请重新登录。", 403, clear_cookie=False)
     handle = request.cookies.get(EXCHANGE_COOKIE, "")
     try:
         exchange = await service.consume_exchange(handle)
@@ -207,7 +216,11 @@ async def feishu_exchange(request: Request, service: FeishuService) -> JSONRespo
     )
     response = JSONResponse(
         content=ok(payload.model_dump()),
-        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        headers={
+            "Cache-Control": "no-store",
+            "Pragma": "no-cache",
+            "Referrer-Policy": "no-referrer",
+        },
     )
     response.delete_cookie(EXCHANGE_COOKIE, path=EXCHANGE_COOKIE_PATH)
     return response

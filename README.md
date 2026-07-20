@@ -34,5 +34,5 @@ uv run pytest -q
 ## 文档
 
 - 开发规则与技术栈：[CLAUDE.md](CLAUDE.md)（唯一事实源）
-- 设计文档：[docs/](docs/)（01~11 篇）
+- 设计文档：[docs/](docs/)（01~14 篇）
 - 原始前置文档存档：[docs/archive/](docs/archive/)

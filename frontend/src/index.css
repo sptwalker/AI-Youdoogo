@@ -121,6 +121,9 @@ body { margin: 0; }
   text-align: center;
   line-height: 1.7;
 }
+.login-feedback {
+  margin-top: 18px;
+}
 
 @media (max-width: 820px) {
   .login-page { padding: 18px; }

@@ -1,4 +1,4 @@
-/** 登录页：账号密码登录。 */
+/** 登录页：保留账号密码，并完成飞书 OAuth 的状态展示与一次性交换。 */
 import {
   BarChartOutlined,
   LockOutlined,
@@ -7,20 +7,97 @@ import {
   UserOutlined,
 } from '@ant-design/icons'
 import { LoginForm, ProFormText } from '@ant-design/pro-components'
-import { Space, Tag, Typography } from 'antd'
-import { useNavigate } from 'react-router-dom'
-import { login } from '../api/auth'
+import { Alert, Button, Divider, Space, Tag, Typography } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  exchangeFeishuLogin,
+  fetchFeishuStatus,
+  login,
+  startFeishuLogin,
+} from '../api/auth'
 import { TOKEN_KEY } from '../api/client'
+import { normalizeAppPath } from '../auth/paths'
+
+const FEISHU_RETURN_TO_KEY = 'youdoo_feishu_return_to'
+
+const CALLBACK_MESSAGES: Record<string, { type: 'error' | 'info'; message: string }> = {
+  cancelled: { type: 'info', message: '已取消飞书授权，您仍可使用账号密码登录。' },
+  access_required: {
+    type: 'error',
+    message: '当前飞书账号暂无系统访问权限，请联系管理员完成账号授权或状态确认。',
+  },
+  invalid_state: { type: 'error', message: '本次飞书登录已失效，请重新发起登录。' },
+  unavailable: { type: 'error', message: '飞书登录暂不可用，请联系管理员。' },
+  error: { type: 'error', message: '飞书认证未完成，请稍后重试或使用账号密码登录。' },
+}
+
+type FeishuAvailability = 'loading' | 'enabled' | 'disabled' | 'unavailable'
+type LoginFeedback = { type: 'error' | 'info'; message: string } | null
 
 export default function Login() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const exchangeStarted = useRef(false)
+  const callbackResult = searchParams.get('feishu')
+  const storedReturnTo = callbackResult ? sessionStorage.getItem(FEISHU_RETURN_TO_KEY) : null
+  const returnTo = normalizeAppPath(searchParams.get('return_to') ?? storedReturnTo)
+  const [feishuAvailability, setFeishuAvailability] = useState<FeishuAvailability>('loading')
+  const [completingFeishu, setCompletingFeishu] = useState(callbackResult === 'success')
+  const [feedback, setFeedback] = useState<LoginFeedback>(null)
+
+  useEffect(() => {
+    fetchFeishuStatus()
+      .then(({ enabled }) => setFeishuAvailability(enabled ? 'enabled' : 'disabled'))
+      .catch(() => setFeishuAvailability('unavailable'))
+  }, [])
+
+  useEffect(() => {
+    if (!callbackResult || exchangeStarted.current) return
+    exchangeStarted.current = true
+    window.history.replaceState({}, '', '/login')
+
+    if (callbackResult !== 'success') {
+      setFeedback(CALLBACK_MESSAGES[callbackResult] ?? CALLBACK_MESSAGES.error)
+      setCompletingFeishu(false)
+      return
+    }
+
+    setFeedback({ type: 'info', message: '飞书身份已验证，正在完成系统登录…' })
+    void exchangeFeishuLogin()
+      .then((token) => {
+        localStorage.setItem(TOKEN_KEY, token.access_token)
+        sessionStorage.removeItem(FEISHU_RETURN_TO_KEY)
+        navigate(normalizeAppPath(token.redirect_to), { replace: true })
+      })
+      .catch(() => {
+        setFeedback({
+          type: 'error',
+          message: '登录凭证交换失败或已失效，请重新使用飞书登录。',
+        })
+        setCompletingFeishu(false)
+      })
+  }, [callbackResult, navigate])
 
   const onFinish = async (values: { username: string; password: string }) => {
     const token = await login(values.username, values.password)
     localStorage.setItem(TOKEN_KEY, token.access_token)
-    navigate('/', { replace: true })
+    sessionStorage.removeItem(FEISHU_RETURN_TO_KEY)
+    navigate(returnTo, { replace: true })
     return true
   }
+
+  const beginFeishuLogin = () => {
+    sessionStorage.setItem(FEISHU_RETURN_TO_KEY, returnTo)
+    startFeishuLogin(returnTo)
+  }
+
+  const feishuButtonText = {
+    loading: '正在检查飞书登录状态',
+    enabled: '飞书登录',
+    disabled: '飞书登录暂未启用',
+    unavailable: '飞书登录状态不可用',
+  }[feishuAvailability]
 
   return (
     <div className="login-page">
@@ -62,8 +139,29 @@ export default function Login() {
                 rules={[{ required: true, message: '请输入密码' }]}
               />
             </LoginForm>
+            <Divider plain>或使用企业身份</Divider>
+            <Button
+              className="feishu-login-button"
+              size="large"
+              block
+              htmlType="button"
+              loading={feishuAvailability === 'loading' || completingFeishu}
+              disabled={feishuAvailability !== 'enabled' || completingFeishu}
+              onClick={beginFeishuLogin}
+              icon={<span className="feishu-mark">飞</span>}
+            >
+              {completingFeishu ? '正在完成飞书登录' : feishuButtonText}
+            </Button>
+            {feedback && (
+              <Alert
+                className="login-feedback"
+                showIcon
+                type={feedback.type}
+                message={feedback.message}
+              />
+            )}
             <Typography.Text type="secondary" className="login-access-note">
-              使用管理员分配的账号登录。
+              飞书仅验证身份；系统角色和数据权限仍由管理员预先配置。
             </Typography.Text>
           </div>
         </section>

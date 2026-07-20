@@ -33,7 +33,7 @@ export function login(username: string, password: string): Promise<TokenData> {
 }
 
 export function fetchFeishuStatus(): Promise<{ enabled: boolean }> {
-  return request({ method: 'GET', url: '/auth/feishu/status' })
+  return request({ method: 'GET', url: '/auth/feishu/status', silent: true })
 }
 
 export function startFeishuLogin(returnTo = '/'): void {
@@ -42,7 +42,7 @@ export function startFeishuLogin(returnTo = '/'): void {
 }
 
 export function exchangeFeishuLogin(): Promise<FeishuExchangeData> {
-  return request({ method: 'POST', url: '/auth/feishu/exchange' })
+  return request({ method: 'POST', url: '/auth/feishu/exchange', silent: true })
 }
 
 export function fetchMe(): Promise<UserInfo> {

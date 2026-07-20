@@ -28,6 +28,8 @@ CALLBACK_PATH = "/api/v1/auth/feishu/callback"
 STATE_TTL_SECONDS = 600
 EXCHANGE_TTL_SECONDS = 60
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_-]+$")
+_VISIBLE_OAUTH_VALUE = re.compile(r"^[\x21-\x7e]+$")
+_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 class OAuthUnavailable(Exception):
@@ -110,7 +112,11 @@ class RedisOAuthStore:
     _CONSUME_STATE = """
 local value = redis.call('GET', KEYS[1])
 if not value then return nil end
-local payload = cjson.decode(value)
+local ok, payload = pcall(cjson.decode, value)
+if not ok or type(payload) ~= 'table' then
+  redis.call('DEL', KEYS[1])
+  return nil
+end
 if payload.binding_digest ~= ARGV[1] then return nil end
 redis.call('DEL', KEYS[1])
 return value
@@ -158,9 +164,27 @@ return value
         if not isinstance(raw, str):
             return None
         try:
-            payload: dict[str, Any] = json.loads(raw)
-            return OAuthStateData(**payload)
-        except (TypeError, ValueError):
+            payload: Any = json.loads(raw)
+            if not isinstance(payload, dict):
+                return None
+            saved_binding_digest = payload.get("binding_digest")
+            code_verifier = payload.get("code_verifier")
+            return_to = payload.get("return_to")
+            if (
+                not isinstance(saved_binding_digest, str)
+                or _HEX_DIGEST.fullmatch(saved_binding_digest) is None
+                or not isinstance(code_verifier, str)
+                or not 43 <= len(code_verifier) <= 128
+                or _SAFE_TOKEN.fullmatch(code_verifier) is None
+                or not isinstance(return_to, str)
+            ):
+                return None
+            return OAuthStateData(
+                binding_digest=saved_binding_digest,
+                code_verifier=code_verifier,
+                return_to=normalize_return_to(return_to),
+            )
+        except (InvalidReturnTo, TypeError, ValueError):
             return None
 
     async def save_exchange(
@@ -189,9 +213,30 @@ return value
         if not isinstance(raw, str):
             return None
         try:
-            payload: dict[str, Any] = json.loads(raw)
-            return OAuthExchangeData(**payload)
-        except (TypeError, ValueError):
+            payload: Any = json.loads(raw)
+            if not isinstance(payload, dict):
+                return None
+            access_token = payload.get("access_token")
+            token_type = payload.get("token_type")
+            expires_in = payload.get("expires_in")
+            redirect_to = payload.get("redirect_to")
+            if (
+                not isinstance(access_token, str)
+                or not 1 <= len(access_token) <= 8192
+                or not isinstance(token_type, str)
+                or not 1 <= len(token_type) <= 32
+                or not isinstance(expires_in, int)
+                or not 1 <= expires_in <= 31_536_000
+                or not isinstance(redirect_to, str)
+            ):
+                return None
+            return OAuthExchangeData(
+                access_token=access_token,
+                token_type=token_type,
+                expires_in=expires_in,
+                redirect_to=normalize_return_to(redirect_to),
+            )
+        except (InvalidReturnTo, TypeError, ValueError):
             return None
 
     async def close(self) -> None:
@@ -216,10 +261,18 @@ def load_oauth_config() -> FeishuOAuthConfig:
     app_id = str(runtime_config.effective("feishu_app_id", "") or "")
     app_secret = str(runtime_config.effective("feishu_app_secret", "") or "")
     redirect_url = str(runtime_config.effective("feishu_redirect_url", "") or "")
-    if not app_id or app_id != app_id.strip() or not app_secret or app_secret != app_secret.strip():
+    if (
+        not 1 <= len(app_id) <= 128
+        or _VISIBLE_OAUTH_VALUE.fullmatch(app_id) is None
+        or not 1 <= len(app_secret) <= 512
+        or _VISIBLE_OAUTH_VALUE.fullmatch(app_secret) is None
+    ):
         raise OAuthUnavailable
 
-    parsed = urlsplit(redirect_url)
+    try:
+        parsed = urlsplit(redirect_url)
+    except ValueError as exc:
+        raise OAuthUnavailable from exc
     if (
         parsed.username is not None
         or parsed.password is not None
@@ -239,6 +292,10 @@ def load_oauth_config() -> FeishuOAuthConfig:
             raise OAuthUnavailable
     if not parsed.hostname:
         raise OAuthUnavailable
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise OAuthUnavailable from exc
     return FeishuOAuthConfig(
         app_id=app_id,
         app_secret=app_secret,
@@ -256,7 +313,10 @@ def normalize_return_to(raw: str | None) -> str:
     decoded = unquote(raw)
     if any(ord(char) < 32 for char in decoded) or "\\" in decoded:
         raise InvalidReturnTo
-    parsed = urlsplit(raw)
+    try:
+        parsed = urlsplit(raw)
+    except ValueError as exc:
+        raise InvalidReturnTo from exc
     decoded_path = unquote(parsed.path)
     if (
         parsed.scheme
@@ -329,13 +389,18 @@ class FeishuLoginService:
             or _SAFE_TOKEN.fullmatch(browser_binding) is None
         ):
             raise InvalidOAuthState
-        data = await self.store.consume_state(_digest(state), _digest(browser_binding))
-        if data is None:
+        binding_digest = _digest(browser_binding)
+        data = await self.store.consume_state(_digest(state), binding_digest)
+        if data is None or not secrets.compare_digest(data.binding_digest, binding_digest):
             raise InvalidOAuthState
         return data
 
     async def exchange_code(self, transaction: OAuthStateData, code: str) -> OAuthCompletion:
-        if not code or len(code) > 512 or _SAFE_TOKEN.fullmatch(code) is None:
+        if (
+            not code
+            or len(code) > 512
+            or _VISIBLE_OAUTH_VALUE.fullmatch(code) is None
+        ):
             raise InvalidOAuthCallback
         config = self.config_loader()
         identity = await self.client_factory(config).identity_from_code(
