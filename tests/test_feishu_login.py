@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -21,12 +22,15 @@ from app.main import app
 from app.models import Base
 from app.models.system import SysUser
 from app.services.feishu_login import (
+    SUPPORT_CAPTURE_KEY,
+    SUPPORT_CAPTURE_TTL_SECONDS,
     FeishuLoginService,
     InvalidOAuthCallback,
     InvalidOAuthState,
     OAuthExchangeData,
     OAuthStateData,
     OAuthUnavailable,
+    RedisOAuthStore,
     get_feishu_login_service,
 )
 
@@ -45,6 +49,8 @@ class MemoryOAuthStore:
         self.now = 0
         self.states: dict[str, tuple[OAuthStateData, int]] = {}
         self.exchanges: dict[str, tuple[OAuthExchangeData, int]] = {}
+        self.denied_identity: tuple[str, int] | None = None
+        self.capture_unavailable = False
 
     async def save_state(self, state_digest: str, data: OAuthStateData, ttl: int) -> bool:
         if state_digest in self.states:
@@ -81,6 +87,26 @@ class MemoryOAuthStore:
             return None
         data, expires_at = saved
         return data if self.now < expires_at else None
+
+    async def save_denied_identity(self, open_id: str, ttl: int) -> bool:
+        if self.capture_unavailable:
+            raise OAuthUnavailable
+        if self.denied_identity is not None:
+            _, expires_at = self.denied_identity
+            if self.now < expires_at:
+                return False
+        self.denied_identity = (open_id, self.now + ttl)
+        return True
+
+    async def consume_denied_identity(self) -> str | None:
+        if self.capture_unavailable:
+            raise OAuthUnavailable
+        saved = self.denied_identity
+        self.denied_identity = None
+        if saved is None:
+            return None
+        open_id, expires_at = saved
+        return open_id if self.now < expires_at else None
 
     async def close(self) -> None:
         return None
@@ -136,6 +162,55 @@ async def test_state_binding_expiry_replay_and_tampering() -> None:
     store.now += 601
     with pytest.raises(InvalidOAuthState):
         await service.consume_callback_state(expired_state, expired.browser_binding)
+
+
+async def test_support_capture_is_fixed_ttl_non_overwriting_and_one_time() -> None:
+    service, store, _ = make_service()
+
+    assert await service.capture_denied_identity("ou_first_123456") is True
+    assert await service.capture_denied_identity("ou_second_123456") is False
+    assert await service.consume_captured_denied_identity() == "ou_first_123456"
+    assert await service.consume_captured_denied_identity() is None
+
+    assert await service.capture_denied_identity("ou_expiring_123456") is True
+    store.now += SUPPORT_CAPTURE_TTL_SECONDS
+    assert await service.consume_captured_denied_identity() is None
+    assert await service.capture_denied_identity("ou_after_expiry_123456") is True
+
+
+async def test_support_capture_rejects_invalid_identity() -> None:
+    service, store, _ = make_service()
+
+    assert await service.capture_denied_identity("invalid") is False
+    assert store.denied_identity is None
+
+
+async def test_redis_support_capture_uses_fixed_namespaced_key_and_atomic_consume() -> None:
+    class RecordingRedis:
+        def __init__(self) -> None:
+            self.set_call: tuple[tuple[Any, ...], dict[str, Any]] | None = None
+            self.eval_call: tuple[Any, ...] | None = None
+
+        async def set(self, *args: Any, **kwargs: Any) -> bool:
+            self.set_call = (args, kwargs)
+            return True
+
+        async def eval(self, *args: Any) -> str:
+            self.eval_call = args
+            return "ou_captured_123456"
+
+    client = RecordingRedis()
+    store = RedisOAuthStore("redis://unused")
+    store._client = cast(Any, client)
+
+    assert await store.save_denied_identity("ou_captured_123456", 600) is True
+    assert client.set_call == (
+        (SUPPORT_CAPTURE_KEY, "ou_captured_123456"),
+        {"ex": 600, "nx": True},
+    )
+    assert await store.consume_denied_identity() == "ou_captured_123456"
+    assert client.eval_call is not None
+    assert client.eval_call[1:] == (1, SUPPORT_CAPTURE_KEY)
 
 
 async def test_authorization_code_is_opaque_but_rejects_controls() -> None:
@@ -234,7 +309,9 @@ async def test_callback_query_is_removed_before_access_logging() -> None:
 
 
 @pytest.fixture
-async def oauth_client() -> AsyncGenerator[tuple[AsyncClient, FakeProvider], None]:
+async def oauth_client() -> AsyncGenerator[
+    tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore], None
+]:
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -276,13 +353,13 @@ async def oauth_client() -> AsyncGenerator[tuple[AsyncClient, FakeProvider], Non
             yield session
 
     provider = FakeProvider({})
-    service, _, _ = make_service(provider=provider)
+    service, store, _ = make_service(provider=provider)
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_feishu_login_service] = lambda: service
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", follow_redirects=False
     ) as client:
-        yield client, provider
+        yield client, provider, service, store
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -305,9 +382,9 @@ async def callback(client: AsyncClient, state: str, code: str) -> object:
 
 
 async def test_callback_handoff_has_no_token_in_redirect_and_is_one_time(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, service, _ = oauth_client
     provider.identities["good-code"] = "ou_bound_123456"
     state = await begin(client, "/tasks")
     response = await callback(client, state, "good-code")
@@ -336,12 +413,13 @@ async def test_callback_handoff_has_no_token_in_redirect_and_is_one_time(
         "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
     )
     assert replay.status_code == 400
+    assert await service.consume_captured_denied_identity() is None
 
 
 async def test_status_reports_configured_feature_without_exposing_config(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, _ = oauth_client
+    client, _, _, _ = oauth_client
     response = await client.get("/api/v1/auth/feishu/status")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
@@ -349,9 +427,9 @@ async def test_status_reports_configured_feature_without_exposing_config(
 
 
 async def test_cancelled_callback_consumes_state_without_calling_provider(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, service, _ = oauth_client
     state = await begin(client)
     response = await client.get(
         "/api/v1/auth/feishu/callback",
@@ -363,12 +441,13 @@ async def test_cancelled_callback_consumes_state_without_calling_provider(
 
     replay = await callback(client, state, "unused-code")
     assert replay.headers["location"] == "/login?feishu=invalid_state"
+    assert await service.consume_captured_denied_identity() is None
 
 
 async def test_missing_code_and_provider_failure_are_safe_login_errors(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, service, _ = oauth_client
     missing_code_state = await begin(client)
     missing = await callback(client, missing_code_state, "")
     assert missing.headers["location"] == "/login?feishu=error"
@@ -379,6 +458,7 @@ async def test_missing_code_and_provider_failure_are_safe_login_errors(
     failed = await callback(client, provider_failure_state, "provider-code")
     assert failed.headers["location"] == "/login?feishu=error"
     assert provider.exchange_calls == 1
+    assert await service.consume_captured_denied_identity() is None
 
 
 @pytest.mark.parametrize(
@@ -386,21 +466,58 @@ async def test_missing_code_and_provider_failure_are_safe_login_errors(
     ["ou_unknown_123456", "ou_disabled_123456", "ou_deleted_123456"],
 )
 async def test_unknown_unbound_disabled_and_deleted_users_share_denial(
-    oauth_client: tuple[AsyncClient, FakeProvider], open_id: str
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
+    open_id: str,
 ) -> None:
-    client, provider = oauth_client
+    client, provider, service, _ = oauth_client
     code = f"code-{open_id}"
     provider.identities[code] = open_id
     state = await begin(client)
     response = await callback(client, state, code)
     assert response.status_code == 303
     assert response.headers["location"] == "/login?feishu=access_required"
+    assert await service.consume_captured_denied_identity() == open_id
+
+
+async def test_later_denial_does_not_overwrite_live_support_capture(
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
+) -> None:
+    client, provider, service, _ = oauth_client
+    provider.identities.update(
+        {
+            "first-denied-code": "ou_first_denied_123456",
+            "second-denied-code": "ou_second_denied_123456",
+        }
+    )
+
+    first_state = await begin(client)
+    first = await callback(client, first_state, "first-denied-code")
+    second_state = await begin(client)
+    second = await callback(client, second_state, "second-denied-code")
+
+    assert first.headers["location"] == "/login?feishu=access_required"
+    assert second.headers["location"] == "/login?feishu=access_required"
+    assert await service.consume_captured_denied_identity() == "ou_first_denied_123456"
+
+
+async def test_support_capture_outage_keeps_generic_denial(
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
+) -> None:
+    client, provider, _, store = oauth_client
+    provider.identities["capture-outage-code"] = "ou_capture_outage_123456"
+    store.capture_unavailable = True
+
+    state = await begin(client)
+    response = await callback(client, state, "capture-outage-code")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?feishu=access_required"
 
 
 async def test_external_return_to_rejected(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, _ = oauth_client
+    client, _, _, _ = oauth_client
     for value in (
         "https://evil.example/",
         "//evil.example/",
@@ -414,20 +531,21 @@ async def test_external_return_to_rejected(
 
 
 async def test_invalid_state_never_calls_feishu(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, service, _ = oauth_client
     state = await begin(client)
     response = await callback(client, f"{state}tampered", "unused-code")
     assert response.status_code == 303
     assert response.headers["location"] == "/login?feishu=invalid_state"
     assert provider.exchange_calls == 0
+    assert await service.consume_captured_denied_identity() is None
 
 
 async def test_cross_origin_exchange_rejected_before_consumption(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, _, _ = oauth_client
     provider.identities["origin-code"] = "ou_bound_123456"
     state = await begin(client)
     await callback(client, state, "origin-code")
@@ -444,9 +562,9 @@ async def test_cross_origin_exchange_rejected_before_consumption(
 
 
 async def test_exchange_requires_browser_origin_without_destroying_handoff(
-    oauth_client: tuple[AsyncClient, FakeProvider],
+    oauth_client: tuple[AsyncClient, FakeProvider, FeishuLoginService, MemoryOAuthStore],
 ) -> None:
-    client, provider = oauth_client
+    client, provider, _, _ = oauth_client
     provider.identities["missing-origin-code"] = "ou_bound_123456"
     state = await begin(client)
     await callback(client, state, "missing-origin-code")

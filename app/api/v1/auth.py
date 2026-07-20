@@ -161,6 +161,11 @@ async def feishu_callback(
         user = await authenticate_feishu(db, completed.identity.open_id)
     except AppError as exc:
         if exc.status_code == 403:
+            try:
+                await service.capture_denied_identity(completed.identity.open_id)
+            except OAuthUnavailable:
+                # Support capture is best-effort and must not change the generic denial.
+                pass
             return _login_redirect("access_required")
         raise
 

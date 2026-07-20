@@ -27,9 +27,12 @@ PRODUCTION_REDIRECT_URL = "https://ai.youdoogo.com/api/v1/auth/feishu/callback"
 CALLBACK_PATH = "/api/v1/auth/feishu/callback"
 STATE_TTL_SECONDS = 600
 EXCHANGE_TTL_SECONDS = 60
+SUPPORT_CAPTURE_TTL_SECONDS = 600
+SUPPORT_CAPTURE_KEY = "youdoo:feishu:support:denied-open-id:v1"
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_-]+$")
 _VISIBLE_OAUTH_VALUE = re.compile(r"^[\x21-\x7e]+$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_FEISHU_OPEN_ID = re.compile(r"^ou[-_][A-Za-z0-9_-]+$")
 
 
 class OAuthUnavailable(Exception):
@@ -102,6 +105,10 @@ class OAuthStore(Protocol):
     ) -> bool: ...
 
     async def consume_exchange(self, handle_digest: str) -> OAuthExchangeData | None: ...
+
+    async def save_denied_identity(self, open_id: str, ttl: int) -> bool: ...
+
+    async def consume_denied_identity(self) -> str | None: ...
 
     async def close(self) -> None: ...
 
@@ -239,6 +246,31 @@ return value
         except (InvalidReturnTo, TypeError, ValueError):
             return None
 
+    async def save_denied_identity(self, open_id: str, ttl: int) -> bool:
+        try:
+            result = await self._get_client().set(
+                SUPPORT_CAPTURE_KEY,
+                open_id,
+                ex=ttl,
+                nx=True,
+            )
+        except RedisError as exc:
+            raise OAuthUnavailable from exc
+        return bool(result)
+
+    async def consume_denied_identity(self) -> str | None:
+        try:
+            raw = await self._get_client().eval(
+                self._CONSUME_VALUE,
+                1,
+                SUPPORT_CAPTURE_KEY,
+            )
+        except RedisError as exc:
+            raise OAuthUnavailable from exc
+        if not isinstance(raw, str) or not _valid_feishu_open_id(raw):
+            return None
+        return raw
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.aclose()
@@ -333,6 +365,10 @@ def normalize_return_to(raw: str | None) -> str:
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _valid_feishu_open_id(value: str) -> bool:
+    return 8 <= len(value) <= 128 and _FEISHU_OPEN_ID.fullmatch(value) is not None
 
 
 class FeishuLoginService:
@@ -435,6 +471,16 @@ class FeishuLoginService:
         if data is None:
             raise InvalidOAuthState
         return data
+
+    async def capture_denied_identity(self, open_id: str) -> bool:
+        """Capture one denied Feishu identity without replacing an active capture."""
+        if not _valid_feishu_open_id(open_id):
+            return False
+        return await self.store.save_denied_identity(open_id, SUPPORT_CAPTURE_TTL_SECONDS)
+
+    async def consume_captured_denied_identity(self) -> str | None:
+        """Atomically consume the one-time operator support capture."""
+        return await self.store.consume_denied_identity()
 
     def expected_origin(self) -> str:
         parsed = urlsplit(self.config_loader().redirect_url)
