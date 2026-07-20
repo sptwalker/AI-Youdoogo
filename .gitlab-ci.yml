@@ -57,9 +57,9 @@ verify_backend:
     - python -m pip install --no-cache-dir uv==0.11.7
     - uv sync --frozen
   script:
-    - uv run ruff check .
-    - uv run mypy app
-    - uv run pytest -q
+    - uv run --frozen ruff check .
+    - uv run --frozen mypy app
+    - uv run --frozen pytest -q -m "not delivery_contract"
 
 verify_frontend:
   stage: verify
@@ -80,9 +80,11 @@ verify_delivery_contract:
   extends: .verify_rules
   before_script:
     - apk add --no-cache bash gettext nginx
+    - command -v envsubst
+    - command -v nginx
     - python -m pip install --no-cache-dir pytest PyYAML
   script:
-    - python -m pytest -q tests/test_cce_delivery_contract.py
+    - python -m pytest -q -m delivery_contract tests/test_cce_delivery_contract.py
     - bash -n scripts/ci/deploy-cce.sh scripts/ci/bootstrap-runtime.sh scripts/ci/smoke-youdoogo.sh
     - python -m py_compile scripts/ci/render_cce.py scripts/ci/preflight_vars.py scripts/ci/notify.py
 

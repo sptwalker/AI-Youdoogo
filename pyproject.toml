@@ -59,3 +59,6 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+markers = [
+    "delivery_contract: delivery tests requiring envsubst and nginx system binaries",
+]

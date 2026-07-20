@@ -6,14 +6,26 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 FULL_SHA = "a" * 40
 IMAGE_TAG = f"ci-{FULL_SHA}"
+pytestmark = pytest.mark.delivery_contract
+
+
+def required_command(name: str) -> str:
+    """Resolve a required delivery binary without silently skipping validation."""
+    command = shutil.which(name)
+    assert command is not None, (
+        f"{name} is required by the verify_delivery_contract test environment"
+    )
+    return command
 
 
 def load_yaml(path: Path) -> dict:
@@ -80,6 +92,23 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert "node:20-alpine" in text
     assert "${SWR_REGION}@${SWR_AK}" in text
     assert "ci-${CI_COMMIT_SHA}" in text
+
+    backend_verify = pipeline["verify_backend"]
+    assert "uv sync --frozen" in backend_verify["before_script"]
+    for command in ("ruff check .", "mypy app"):
+        assert f"uv run --frozen {command}" in backend_verify["script"]
+    assert (
+        'uv run --frozen pytest -q -m "not delivery_contract"'
+        in backend_verify["script"]
+    )
+    delivery_verify = pipeline["verify_delivery_contract"]
+    assert "apk add --no-cache bash gettext nginx" in delivery_verify["before_script"]
+    assert "command -v envsubst" in delivery_verify["before_script"]
+    assert "command -v nginx" in delivery_verify["before_script"]
+    assert (
+        "python -m pytest -q -m delivery_contract tests/test_cce_delivery_contract.py"
+        in delivery_verify["script"]
+    )
 
     for config in pipeline.values():
         if isinstance(config, dict) and isinstance(config.get("image"), dict):
@@ -228,9 +257,11 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
 
 
 def test_frontend_nginx_template_renders_and_validates(tmp_path: Path) -> None:
+    envsubst = required_command("envsubst")
+    nginx = required_command("nginx")
     template = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
     rendered = subprocess.run(
-        ["envsubst", "${BACKEND_HOST} ${BACKEND_PORT}"],
+        [envsubst, "${BACKEND_HOST} ${BACKEND_PORT}"],
         input=template,
         text=True,
         capture_output=True,
@@ -256,7 +287,7 @@ def test_frontend_nginx_template_renders_and_validates(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     subprocess.run(
-        ["nginx", "-t", "-p", f"{tmp_path}/", "-c", str(nginx_config)],
+        [nginx, "-t", "-p", f"{tmp_path}/", "-c", str(nginx_config)],
         text=True,
         capture_output=True,
         check=True,
