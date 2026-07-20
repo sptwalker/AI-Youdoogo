@@ -98,10 +98,22 @@ async def run_ai_research(
         user_message=user_message,
         user_id=operator_id,
     )
+    draft = record.output_content or record.error_msg or "（无产出）"
+    # 反思回路（H4.3）：提案预研是关键产出，加一轮 critic 自查+低分重写再落库。
+    from app.services import reflection_service
+
+    refl = await reflection_service.reflect(
+        db, role, output=draft, task_context=user_message,
+        rubric="预研应准确评估提案的可行性、收益与风险，逻辑严谨、不遗漏关键点、不编造。",
+        user_id=operator_id,
+    )
+    conclusion = refl.final_output
+    if refl.revised:
+        conclusion += f"\n\n> 系统：本预研经 AI 自查修订（初评 {refl.critic_score}/5）。"
     review = ProposalReview(
         proposal_id=proposal.id,
         review_type="ai_research",
-        conclusion=record.output_content or record.error_msg or "（无产出）",
+        conclusion=conclusion,
     )
     db.add(review)
     proposal.status = REVIEWED
