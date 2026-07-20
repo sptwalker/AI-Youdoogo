@@ -37,6 +37,12 @@ class UserOut(BaseModel):
     create_time: datetime
 
 
+class AdminUserOut(UserOut):
+    """管理员可见的用户信息，含飞书身份绑定。"""
+
+    feishu_open_id: str | None
+
+
 class UserCreate(BaseModel):
     """创建用户（仅 admin）。"""
 
@@ -45,6 +51,9 @@ class UserCreate(BaseModel):
     real_name: str = Field(default="", max_length=64)
     role_code: str = Field(default="member")
     department_id: uuid.UUID | None = None
+    feishu_open_id: str | None = Field(
+        default=None, min_length=8, max_length=128, pattern=r"^ou[-_][A-Za-z0-9_-]+$"
+    )
 
 
 class UserUpdate(BaseModel):
@@ -55,3 +64,13 @@ class UserUpdate(BaseModel):
     role_code: str | None = None
     department_id: uuid.UUID | None = None
     is_active: bool | None = None
+    # 显式传 null 表示解绑；未提供则保持不变。
+    feishu_open_id: str | None = Field(
+        default=None, min_length=8, max_length=128, pattern=r"^ou[-_][A-Za-z0-9_-]+$"
+    )
+
+
+class FeishuExchangeResponse(TokenResponse):
+    """一次性交换成功后的应用令牌与经校验的站内返回路径。"""
+
+    redirect_to: str = "/"

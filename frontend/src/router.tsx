@@ -1,7 +1,6 @@
 /** 路由：/login 公开，其余经 RequireAuth 守卫（无 token 跳登录）。 */
-import type { ReactElement } from 'react'
-import { createBrowserRouter, Navigate } from 'react-router-dom'
-import { TOKEN_KEY } from './api/client'
+import { createBrowserRouter } from 'react-router-dom'
+import RequireAuth from './components/RequireAuth'
 import AppLayout from './layouts/AppLayout'
 import Agents from './pages/Agents'
 import AiProviders from './pages/AiProviders'
@@ -20,11 +19,6 @@ import SemanticTerms from './pages/SemanticTerms'
 import SystemConfig from './pages/SystemConfig'
 import Tasks from './pages/Tasks'
 import Users from './pages/Users'
-
-function RequireAuth({ children }: { children: ReactElement }) {
-  if (!localStorage.getItem(TOKEN_KEY)) return <Navigate to="/login" replace />
-  return children
-}
 
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },

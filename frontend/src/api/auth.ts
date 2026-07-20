@@ -7,6 +7,10 @@ export interface TokenData {
   expires_in: number
 }
 
+export interface FeishuExchangeData extends TokenData {
+  redirect_to: string
+}
+
 export interface UserInfo {
   id: string
   username: string
@@ -15,6 +19,7 @@ export interface UserInfo {
   department_id: string | null
   is_active: boolean
   create_time: string
+  feishu_open_id?: string | null
 }
 
 export const ROLE_LABELS: Record<UserInfo['role_code'], string> = {
@@ -25,6 +30,19 @@ export const ROLE_LABELS: Record<UserInfo['role_code'], string> = {
 
 export function login(username: string, password: string): Promise<TokenData> {
   return request({ method: 'POST', url: '/auth/login', data: { username, password } })
+}
+
+export function fetchFeishuStatus(): Promise<{ enabled: boolean }> {
+  return request({ method: 'GET', url: '/auth/feishu/status', silent: true })
+}
+
+export function startFeishuLogin(returnTo = '/'): void {
+  const query = new URLSearchParams({ return_to: returnTo })
+  window.location.assign(`/api/v1/auth/feishu/start?${query.toString()}`)
+}
+
+export function exchangeFeishuLogin(): Promise<FeishuExchangeData> {
+  return request({ method: 'POST', url: '/auth/feishu/exchange', silent: true })
 }
 
 export function fetchMe(): Promise<UserInfo> {
@@ -40,6 +58,7 @@ export interface UserCreatePayload {
   password: string
   real_name?: string
   role_code?: string
+  feishu_open_id?: string
 }
 
 export function createUser(payload: UserCreatePayload): Promise<UserInfo> {
@@ -48,7 +67,13 @@ export function createUser(payload: UserCreatePayload): Promise<UserInfo> {
 
 export function updateUser(
   id: string,
-  payload: Partial<{ is_active: boolean; role_code: string; real_name: string; password: string }>,
+  payload: Partial<{
+    is_active: boolean
+    role_code: string
+    real_name: string
+    password: string
+    feishu_open_id: string | null
+  }>,
 ): Promise<UserInfo> {
   return request({ method: 'PATCH', url: `/users/${id}`, data: payload })
 }

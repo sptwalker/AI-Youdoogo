@@ -30,6 +30,8 @@ const KEY_LABEL: Record<string, string> = {
   retrieval_hybrid_enabled: '混合检索开关（向量+关键词，true/false）',
   retrieval_rerank_enabled: 'Rerank 精排开关（需先填 Rerank 密钥，true/false）',
   feishu_app_id: '飞书 App ID', feishu_app_secret: '飞书 App Secret',
+  feishu_oauth_enabled: '飞书登录开关（true/false）',
+  feishu_redirect_url: '飞书登录回调 URL',
   feishu_notify_enabled: '飞书通知开关（true/false）', feishu_ops_chat_id: '运营群 chat_id',
   td_base_url: 'ThinkingData 地址（http://HOST:8992）', td_api_secret: 'ThinkingData 密钥',
   td_daily_metrics_sql: 'TD 每日拉取 SQL', td_field_mapping: 'TD 字段映射（JSON）',

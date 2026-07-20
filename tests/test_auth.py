@@ -204,3 +204,52 @@ async def test_overlong_password_rejected(client: AsyncClient) -> None:
     assert resp.status_code == 400
     assert resp.json()["code"] == 400
 
+
+async def test_admin_feishu_binding_is_authorized_unique_and_updatable(
+    client: AsyncClient,
+) -> None:
+    admin_token = await _login(client, "boss", "admin-pass-8")
+    member_token = await _login(client, "staff", "member-pass-8")
+
+    denied = await client.get("/api/v1/users", headers=_auth(member_token))
+    assert denied.status_code == 403
+
+    created = await client.post(
+        "/api/v1/users",
+        headers=_auth(admin_token),
+        json={
+            "username": "feishu01",
+            "password": "feishu-pass-88",
+            "feishu_open_id": "ou_admin_bound_123456",
+        },
+    )
+    assert created.status_code == 200, created.text
+    user_id = created.json()["data"]["id"]
+    assert created.json()["data"]["feishu_open_id"] == "ou_admin_bound_123456"
+
+    duplicate = await client.post(
+        "/api/v1/users",
+        headers=_auth(admin_token),
+        json={
+            "username": "feishu02",
+            "password": "feishu-pass-88",
+            "feishu_open_id": "ou_admin_bound_123456",
+        },
+    )
+    assert duplicate.status_code == 409
+
+    updated = await client.patch(
+        f"/api/v1/users/{user_id}",
+        headers=_auth(admin_token),
+        json={"feishu_open_id": "ou_admin_updated_123456"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["feishu_open_id"] == "ou_admin_updated_123456"
+
+    unbound = await client.patch(
+        f"/api/v1/users/{user_id}",
+        headers=_auth(admin_token),
+        json={"feishu_open_id": None},
+    )
+    assert unbound.status_code == 200
+    assert unbound.json()["data"]["feishu_open_id"] is None

@@ -10,7 +10,7 @@ from app.api.deps import require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.models.system import SysUser
-from app.schemas.auth import UserCreate, UserOut, UserUpdate
+from app.schemas.auth import AdminUserOut, UserCreate, UserUpdate
 from app.services import audit_service, auth_service
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -28,14 +28,14 @@ async def create_user(body: UserCreate, db: DB, admin: AdminUser) -> dict:
         summary=f"创建用户 {user.username}（{user.role_code}）",
         target_type="sys_user", target_id=user.id,
     )
-    return ok(UserOut.model_validate(user).model_dump(mode="json"))
+    return ok(AdminUserOut.model_validate(user).model_dump(mode="json"))
 
 
 @router.get("")
 async def list_users(db: DB, _: AdminUser) -> dict:
     """用户列表。"""
     users = await auth_service.list_users(db)
-    return ok([UserOut.model_validate(u).model_dump(mode="json") for u in users])
+    return ok([AdminUserOut.model_validate(u).model_dump(mode="json") for u in users])
 
 
 @router.patch("/{user_id}")
@@ -50,6 +50,10 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: Admin
         db, actor_id=admin.id, actor_role=admin.role_code, action="user.update",
         summary=f"更新用户 {user.username}",
         target_type="sys_user", target_id=user.id,
-        detail={"role_code": body.role_code, "is_active": body.is_active},
+        detail={
+            "role_code": body.role_code,
+            "is_active": body.is_active,
+            "feishu_binding_changed": "feishu_open_id" in body.model_fields_set,
+        },
     )
-    return ok(UserOut.model_validate(user).model_dump(mode="json"))
+    return ok(AdminUserOut.model_validate(user).model_dump(mode="json"))

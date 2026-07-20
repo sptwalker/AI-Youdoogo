@@ -1,9 +1,29 @@
 #!/bin/sh
-# 生产启动：先跑数据库迁移（幂等，upgrade head），再多 worker 起 Uvicorn。
-set -e
+# 无参数保持原 Compose 行为；CCE 分别使用 migrate 与 serve，避免每个副本跑迁移。
+set -eu
 
-echo "[entrypoint] alembic upgrade head ..."
-alembic upgrade head
+migrate() {
+    echo "[entrypoint] alembic upgrade head ..."
+    alembic upgrade head
+}
 
-echo "[entrypoint] starting uvicorn with ${WEB_CONCURRENCY:-2} workers ..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "${WEB_CONCURRENCY:-2}"
+serve() {
+    echo "[entrypoint] starting uvicorn with ${WEB_CONCURRENCY:-2} workers ..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "${WEB_CONCURRENCY:-2}"
+}
+
+case "${1:-}" in
+    migrate)
+        migrate
+        ;;
+    serve)
+        serve
+        ;;
+    "")
+        migrate
+        serve
+        ;;
+    *)
+        exec "$@"
+        ;;
+esac

@@ -63,7 +63,16 @@ class SysUser(CommonMixin, Base):
     """系统用户表（真人；管理/监督层，挂部门）。role_code=admin 即 CEO/最高权限。"""
 
     __tablename__ = "sys_user"
-    __table_args__ = (Index("uq_user_username", "username", unique=True, postgresql_where=_ACTIVE),)
+    __table_args__ = (
+        Index("uq_user_username", "username", unique=True, postgresql_where=_ACTIVE),
+        # open_id 是用户在当前飞书应用内的不可变身份；软删行也保留占用，避免身份被静默重绑。
+        Index(
+            "uq_user_feishu_open_id",
+            "feishu_open_id",
+            unique=True,
+            postgresql_where=text("feishu_open_id IS NOT NULL"),
+        ),
+    )
 
     username: Mapped[str] = mapped_column(String(64))
     password_hash: Mapped[str] = mapped_column(String(255))
@@ -73,3 +82,4 @@ class SysUser(CommonMixin, Base):
         Uuid, ForeignKey("sys_department.id"), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+    feishu_open_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

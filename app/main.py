@@ -34,6 +34,7 @@ from app.core.config import get_settings
 from app.core.database import engine
 from app.core.exceptions import ok, register_exception_handlers
 from app.core.logging import setup_logging
+from app.core.oauth_query_scrub import OAuthCallbackQueryScrubMiddleware
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -65,10 +66,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - 载入失败退回 .env，不阻断启动
         logger.exception("载入配置覆盖层/AI 卡片失败")
-    yield
+    try:
+        yield
+    finally:
+        from app.services.feishu_login import feishu_login_service
+
+        await feishu_login_service.close()
 
 
 app = FastAPI(title="创想悦动AI决策大脑系统", version="0.1.0", lifespan=lifespan)
+app.add_middleware(OAuthCallbackQueryScrubMiddleware)
 register_exception_handlers(app)
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
