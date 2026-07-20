@@ -1,5 +1,5 @@
 /** 协作空间 API（对应后端 app/api/v1/discussion.py）。 */
-import { request, sseRequest, sseSubscribe, type SseHandler } from './client'
+import { request, sseRequest, sseSubscribe, TOKEN_KEY, type SseHandler } from './client'
 
 export interface Channel {
   id: string
@@ -87,8 +87,30 @@ export function postMessage(
   content: string,
   mentioned_agent_ids: string[],
   onEvent: SseHandler,
+  attachments: Attachment[] = [],
 ): Promise<void> {
-  return sseRequest(`/channels/${channelId}/messages`, { content, mentioned_agent_ids }, onEvent)
+  return sseRequest(`/channels/${channelId}/messages`, { content, mentioned_agent_ids, attachments }, onEvent)
+}
+
+/** 上传群聊附件（图片/文件，I6）→ 返回附件元数据。 */
+export async function uploadAttachment(file: File): Promise<Attachment> {
+  const form = new FormData()
+  form.append('file', file)
+  return request({ method: 'POST', url: '/channels/attachments', data: form })
+}
+
+/** 群聊附件下载地址（带鉴权由前端 fetch，见 downloadAttachment）。 */
+export async function downloadAttachment(att: Attachment): Promise<void> {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const url = `/api/v1/channels/attachments/download?storage_path=${encodeURIComponent(att.storage_path)}&name=${encodeURIComponent(att.name)}`
+  const resp = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!resp.ok) throw new Error('下载失败')
+  const blob = await resp.blob()
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = att.name
+  a.click()
+  URL.revokeObjectURL(a.href)
 }
 
 /** 订阅实时消息推送（I3）。别人在群发言即时收到。返回取消函数。 */

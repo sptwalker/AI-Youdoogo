@@ -1,16 +1,20 @@
 /** 群聊窗口（工作桌面讨论组，复用 discussion I1-I7 后端）：
  *  单个群的消息流 + 发送 + 实时接收 + 进群已读清零 + 拉成员。真人+AI 混合。 */
-import { Avatar, Button, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd'
+import { Avatar, Button, Input, Modal, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
+import { PaperClipOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
 import Markdown from './Markdown'
 import { listRoles, type AgentRole } from '../api/agents'
 import { roster, type Colleague } from '../api/auth'
 import {
   addMembers,
+  downloadAttachment,
   listMembers,
   listMessages,
   markRead,
   postMessage,
+  uploadAttachment,
+  type Attachment,
   type Message,
 } from '../api/discussion'
 
@@ -32,6 +36,8 @@ export default function GroupChat({
   const [agents, setAgents] = useState<AgentRole[]>([])
   const [members, setMembers] = useState<{ member_type: string; member_id: string; member_name: string }[]>([])
   const [pickOpen, setPickOpen] = useState(false)
+  const [pending, setPending] = useState<Attachment[]>([])  // 待发送附件
+  const [uploading, setUploading] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { void listRoles().then(setAgents) }, [])
@@ -53,9 +59,11 @@ export default function GroupChat({
   }, [liveMessage, channelId])
 
   const send = async () => {
-    if (!text.trim() || sending) return
-    const q = text.trim()
+    if ((!text.trim() && pending.length === 0) || sending) return
+    const q = text.trim() || (pending.length ? '[附件]' : '')
+    const atts = pending
     setText('')
+    setPending([])
     setSending(true)
     const streamId = '__streaming__'
     try {
@@ -78,14 +86,24 @@ export default function GroupChat({
             return has ? cleared : [...cleared, msg]
           })
         }
-      })
+      }, atts)
     } catch { /* sseRequest 已提示 */ } finally { setSending(false) }
+  }
+
+  const onUpload = async (file: File): Promise<boolean> => {
+    if (file.size > 20 * 1024 * 1024) { message.error('文件过大（>20MB）'); return false }
+    setUploading(true)
+    try {
+      const att = await uploadAttachment(file)
+      setPending((p) => [...p, att])
+    } catch { message.error('上传失败') } finally { setUploading(false) }
+    return false  // 阻止 antd Upload 自己上传
   }
 
   const memberIds = new Set(members.map((m) => m.member_id))
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <Space>
           <b>{channelName}</b>
@@ -109,18 +127,45 @@ export default function GroupChat({
               <span style={{ display: 'inline-block', maxWidth: '82%', padding: '7px 11px', borderRadius: 8, background: '#fff', border: '1px solid #eee' }}>
                 {ai ? <Markdown>{m.content}</Markdown> : m.content}
               </span>
+              {(m.attachments ?? []).map((att, i) => (
+                <div key={i} style={{ marginTop: 4 }}>
+                  {att.type === 'image' ? (
+                    <img
+                      src={`/api/v1/channels/attachments/download?storage_path=${encodeURIComponent(att.storage_path)}&name=${encodeURIComponent(att.name)}`}
+                      alt={att.name} style={{ maxWidth: 180, maxHeight: 180, borderRadius: 6, cursor: 'pointer' }}
+                      onClick={() => void downloadAttachment(att)}
+                    />
+                  ) : (
+                    <a onClick={() => void downloadAttachment(att)} style={{ fontSize: 12 }}>
+                      <PaperClipOutlined /> {att.name}
+                    </a>
+                  )}
+                </div>
+              ))}
             </div>
           )
         })}
         {sending && <div style={{ textAlign: 'center', margin: 8 }}><Spin size="small" /></div>}
       </div>
+      {pending.length > 0 && (
+        <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {pending.map((att, i) => (
+            <Tag key={i} closable onClose={() => setPending((p) => p.filter((_, j) => j !== i))}>
+              <PaperClipOutlined /> {att.name}
+            </Tag>
+          ))}
+        </div>
+      )}
       <Space.Compact style={{ width: '100%' }}>
         <Select
-          mode="multiple" allowClear maxCount={3} style={{ minWidth: 150 }}
-          placeholder="@AI（可选，最多3）" value={mentions} onChange={setMentions}
+          mode="multiple" allowClear maxCount={3} style={{ minWidth: 130 }}
+          placeholder="@AI（最多3）" value={mentions} onChange={setMentions}
           optionFilterProp="label"
           options={agents.filter((a) => memberIds.has(a.id)).map((a) => ({ value: a.id, label: a.name }))}
         />
+        <Upload beforeUpload={onUpload} showUploadList={false} multiple>
+          <Button icon={<PaperClipOutlined />} loading={uploading} title="发图片/文件" />
+        </Upload>
         <Input placeholder="发消息，回车发送" value={text} onChange={(e) => setText(e.target.value)} onPressEnter={send} />
         <Button type="primary" loading={sending} onClick={send}>发送</Button>
       </Space.Compact>

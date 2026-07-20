@@ -4,17 +4,20 @@
 建/归档频道、升格 需 admin/executive。
 """
 
+import io
 import uuid
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
-from app.core.exceptions import ok
+from app.core.exceptions import AppError, ok
 from app.core.sse import sse_response
+from app.knowledge import storage
 from app.models.system import SysUser
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 from app.services import discussion_service
@@ -23,6 +26,44 @@ router = APIRouter(prefix="/channels", tags=["discussion"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
+
+_MAX_ATTACH_BYTES = 20 * 1024 * 1024  # 单附件 20MB 上限
+_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+@router.post("/attachments")
+async def upload_attachment(
+    db: DB, user: CurrentUser, file: Annotated[UploadFile, File()]
+) -> dict:
+    """上传群聊附件（图片/文件，I6）→ MinIO → 返回附件元数据供发消息带上。"""
+    content = await file.read()
+    if len(content) > _MAX_ATTACH_BYTES:
+        raise AppError(f"文件过大（>{_MAX_ATTACH_BYTES // 1024 // 1024}MB）")
+    name = file.filename or "未命名"
+    is_image = name.lower().endswith(_IMAGE_EXT)
+    object_name = f"chat/{uuid.uuid4().hex}/{name}"
+    storage_path = await storage.put_object(
+        object_name, content, file.content_type or "application/octet-stream"
+    )
+    return ok({
+        "type": "image" if is_image else "file",
+        "name": name, "storage_path": storage_path, "size": len(content),
+    })
+
+
+@router.get("/attachments/download")
+async def download_attachment(
+    storage_path: Annotated[str, Query()], name: Annotated[str, Query()], _user: CurrentUser
+) -> StreamingResponse:
+    """下载群聊附件（storage_path=bucket/object，I6）。"""
+    _, _, object_name = storage_path.partition("/")
+    if not object_name.startswith("chat/"):  # 限定只能下群聊附件，防越权读任意对象
+        raise AppError("非法附件路径", code=400, status_code=400)
+    data = await storage.get_object_bytes(object_name)
+    return StreamingResponse(
+        io.BytesIO(data), media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+    )
 
 
 @router.get("")

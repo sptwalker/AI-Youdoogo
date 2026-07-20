@@ -269,7 +269,7 @@ export default function Dashboard() {
           </Card>
 
           {!isSupervising && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, marginTop: 16 }}>
+          <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', gap: 12, marginTop: 16 }}>
             {/* 左：会话列表（我的助理 + 讨论组，带未读红点） */}
             <Card
               size="small" title="对话"
@@ -298,7 +298,7 @@ export default function Dashboard() {
               })}
             </Card>
             {/* 右：当前会话 */}
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             {activeConv.type === 'group' ? (
               <GroupChat
                 channelId={activeConv.id} channelName={activeConv.name} liveMessage={liveMsg}
