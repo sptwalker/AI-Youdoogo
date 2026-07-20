@@ -390,6 +390,30 @@ class FeishuClient:
             if not data.get("has_more") or not page_token:
                 return out
 
+    # ── SSO 扫码登录（authen/v1）：真人员工登录本系统用（I2，docs/18）──
+    def oauth_authorize_url(self, redirect_uri: str, state: str = "") -> str:
+        """构造飞书网页授权 URL（前端跳转，用户扫码/确认后回调带 code）。"""
+        from urllib.parse import urlencode
+
+        app_id, _ = self._creds()
+        q = urlencode({
+            "app_id": app_id, "redirect_uri": redirect_uri,
+            "response_type": "code", "state": state,
+        })
+        return f"https://open.feishu.cn/open-apis/authen/v1/authorize?{q}"
+
+    async def oauth_user_info(self, code: str) -> dict[str, Any]:
+        """用回调 code 换取登录用户身份（open_id/name/en_name/avatar 等）。
+
+        两步:tenant_access_token + code → authen/v1/access_token（v1 用 tenant token 换）。
+        返回含 open_id/name/en_name/avatar_url 的用户信息。
+        """
+        data = await self._post_authed(
+            "/authen/v1/access_token",
+            json_body={"grant_type": "authorization_code", "code": code},
+        )
+        return data
+
 
 # 全局飞书客户端实例
 feishu_client = FeishuClient()

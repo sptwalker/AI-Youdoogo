@@ -6,6 +6,7 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
@@ -14,7 +15,7 @@ from app.core.database import get_db
 from app.core.exceptions import ok
 from app.core.security import create_access_token
 from app.schemas.auth import LoginRequest, TokenResponse, UserOut
-from app.services.auth_service import authenticate
+from app.services.auth_service import authenticate, login_by_feishu
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -30,6 +31,27 @@ def _token_for(user_id: Any, role_code: str) -> TokenResponse:
 async def login(body: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]) -> dict:
     """用户名+密码登录，签发访问令牌。"""
     user = await authenticate(db, body.username, body.password)
+    return ok(_token_for(user.id, user.role_code).model_dump())
+
+
+@router.get("/feishu/url")
+async def feishu_login_url(redirect_uri: str, state: str = "") -> dict:
+    """获取飞书扫码登录授权 URL（前端跳转，I2）。"""
+    from app.integrations.feishu.client import feishu_client
+
+    return ok({"url": feishu_client.oauth_authorize_url(redirect_uri, state)})
+
+
+class FeishuCallback(BaseModel):
+    code: str
+
+
+@router.post("/feishu/callback")
+async def feishu_login_callback(
+    body: FeishuCallback, db: Annotated[AsyncSession, Depends(get_db)]
+) -> dict:
+    """飞书回调 code 换登录令牌（首次自动开户，I2）。"""
+    user = await login_by_feishu(db, body.code)
     return ok(_token_for(user.id, user.role_code).model_dump())
 
 

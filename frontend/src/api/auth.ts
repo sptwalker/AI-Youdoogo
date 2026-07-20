@@ -27,6 +27,16 @@ export function login(username: string, password: string): Promise<TokenData> {
   return request({ method: 'POST', url: '/auth/login', data: { username, password } })
 }
 
+/** 获取飞书扫码登录授权 URL（I2）。 */
+export function feishuLoginUrl(redirectUri: string, state = ''): Promise<{ url: string }> {
+  return request({ method: 'GET', url: '/auth/feishu/url', params: { redirect_uri: redirectUri, state } })
+}
+
+/** 飞书回调 code 换登录令牌（I2）。 */
+export function feishuCallback(code: string): Promise<TokenData> {
+  return request({ method: 'POST', url: '/auth/feishu/callback', data: { code } })
+}
+
 export function fetchMe(): Promise<UserInfo> {
   return request({ method: 'GET', url: '/auth/me' })
 }
