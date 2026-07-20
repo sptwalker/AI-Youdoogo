@@ -1,4 +1,4 @@
-"""Feishu OAuth v3 user-flow HTTP contract tests (no real network or credentials)."""
+"""Feishu server-side user OAuth HTTP contract tests (no network or credentials)."""
 
 import json
 from urllib.parse import parse_qs, urlsplit
@@ -22,6 +22,12 @@ CONFIG = FeishuOAuthConfig(
     redirect_url="https://ai.youdoogo.com/api/v1/auth/feishu/callback",
     secure_cookies=True,
 )
+
+
+def test_official_oauth_endpoints_are_pinned_independently() -> None:
+    assert AUTHORIZATION_URL == "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
+    assert TOKEN_URL == "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
+    assert USER_INFO_URL == "https://open.feishu.cn/open-apis/authen/v1/user_info"
 
 
 def test_authorization_url_uses_current_endpoint_and_pkce() -> None:
@@ -79,20 +85,29 @@ async def test_code_exchanged_for_user_token_then_open_id() -> None:
 
 @respx.mock
 async def test_provider_failure_is_non_leaky() -> None:
-    respx.post(TOKEN_URL).mock(
+    token_route = respx.post(TOKEN_URL).mock(
         return_value=httpx.Response(
             400,
             json={"code": 20002, "error_description": "test-secret-not-real rejected"},
+        )
+    )
+    user_route = respx.get(USER_INFO_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": 0, "msg": "success", "data": {"open_id": "ou_test_123456"}},
         )
     )
     with pytest.raises(FeishuOAuthError) as caught:
         await FeishuOAuthClient(CONFIG).identity_from_code(
             "authorization-code-test", "verifier-test-value"
         )
+    assert caught.value.stage == "token exchange HTTP response"
     rendered = str(caught.value)
     assert "test-secret-not-real" not in rendered
     assert "authorization-code-test" not in rendered
     assert "20002" not in rendered
+    assert token_route.called
+    assert not user_route.called
 
 
 @respx.mock

@@ -1,9 +1,8 @@
 """Feishu user OAuth integration.
 
 This module is deliberately separate from :mod:`client`, whose tenant token is
-used by notifications and data integrations.  Login uses Feishu's current
-OAuth v3 user token endpoint and never treats a tenant token as a browser
-identity.
+used by notifications and data integrations.  Login uses Feishu's server-side
+user access-token endpoint and never treats a tenant token as a browser identity.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from urllib.parse import urlencode
 import httpx
 
 AUTHORIZATION_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
-TOKEN_URL = "https://accounts.feishu.cn/oauth/v3/token"
+TOKEN_URL = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
 USER_INFO_URL = "https://open.feishu.cn/open-apis/authen/v1/user_info"
 _OPEN_ID = re.compile(r"^ou[-_][A-Za-z0-9_-]+$")
 
