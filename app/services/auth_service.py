@@ -58,6 +58,49 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> SysUser | None
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def login_by_feishu(db: AsyncSession, code: str) -> SysUser:
+    """飞书 SSO:用回调 code 换飞书身份 → 按 open_id 找/建本地用户 → 返回（供签发 JWT）。
+
+    首次登录自动开户（默认 member 最低权限，红线：角色变更仍走 admin）;已存在直接登录。
+    若该 open_id 已由 I1 组织同步预建，则复用并激活。
+
+    Raises:
+        AppError: 飞书换取身份失败 / 账号停用。
+    """
+    from app.integrations.feishu.client import FeishuAPIError, feishu_client
+
+    try:
+        info = await feishu_client.oauth_user_info(code)
+    except FeishuAPIError as exc:
+        raise AppError(f"飞书登录失败:{exc}", code=401, status_code=401) from exc
+    open_id = info.get("open_id")
+    if not open_id:
+        raise AppError("飞书未返回用户标识", code=401, status_code=401)
+
+    user = (
+        await db.execute(
+            select(SysUser).where(
+                SysUser.feishu_open_id == open_id, SysUser.is_delete.is_(False)
+            )
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        user = SysUser(
+            username=f"fs_{open_id[:24]}", password_hash="!feishu-sso",
+            feishu_open_id=open_id, role_code="member",
+            real_name=info.get("name") or "", en_name=info.get("en_name") or "",
+            avatar_url=info.get("avatar_url") or "",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        await _refresh_env(db)
+    elif not user.is_active:
+        raise AppError("账号已停用", code=403, status_code=403)
+    return user
+
+
+
 def _check_role(role_code: str) -> None:
     if role_code not in VALID_ROLES:
         raise AppError(f"非法角色：{role_code}，可选 {'/'.join(VALID_ROLES)}")

@@ -9,8 +9,8 @@ import { downloadDeliverable, getDesktopChat, sendDesktopChat, type AddableAgent
 import { confirmResolution } from '../api/meetings'
 import { reviewProposal } from '../api/proposals'
 import { getOrchestrationProgress, transitionTask, type OrchProgress } from '../api/tasks'
-import AssistantChatCard from '../components/dashboard/AssistantChatCard'
 import DashboardSidebar from '../components/dashboard/DashboardSidebar'
+import DesktopConversations from '../components/dashboard/DesktopConversations'
 import PendingCard from '../components/dashboard/PendingCard'
 import { useDashboardData } from '../hooks/useDashboardData'
 
@@ -57,8 +57,8 @@ export default function Dashboard() {
     try {
       await sendDesktopChat(query, addAgentIds, (event, payload) => {
         if (event === 'message_start') {
-          const data = payload as unknown as { speaker_agent_id: string | null; speaker_name: string }
-          setChatMessages((items) => [...items, { id: streamId, speaker_type: 'ai', speaker_agent_id: data.speaker_agent_id, speaker_name: data.speaker_name, content: '', create_time: '' }])
+          const start = payload as unknown as { speaker_agent_id: string | null; speaker_name: string }
+          setChatMessages((items) => [...items, { id: streamId, speaker_type: 'ai', speaker_agent_id: start.speaker_agent_id, speaker_name: start.speaker_name, content: '', create_time: '' }])
         } else if (event === 'delta') {
           const text = String((payload as { text?: unknown }).text ?? '')
           setChatMessages((items) => items.map((item) => item.id === streamId ? { ...item, content: item.content + text } : item))
@@ -94,7 +94,9 @@ export default function Dashboard() {
     ]
     if (pending.kind === 'proposal') return [
       <ModalForm<{ decision: 'approve' | 'reject'; conclusion: string }>
-        key="rv" title={`评审提案 ${pending.meta ?? ''}`} trigger={<a>评审</a>}
+        key="rv"
+        title={`评审提案 ${pending.meta ?? ''}`}
+        trigger={<a>评审</a>}
         modalProps={{ destroyOnHidden: true }}
         onFinish={async (value) => { await act(() => reviewProposal(pending.id, value.decision, value.conclusion), '已评审'); return true }}
       >
@@ -125,20 +127,34 @@ export default function Dashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 130px)', minHeight: 480 }}>
             <PendingCard data={data} actions={pendingActions} />
             {!isSupervising && (
-              <AssistantChatCard
-                addable={addable} addAgentIds={addAgentIds} assistant={assistant}
-                chatBoxRef={chatBoxRef} chatInput={chatInput} chatMessages={chatMessages}
-                chatSending={chatSending} orchestration={orchestration}
-                onAcceptStep={acceptStep} onSend={sendChat} setAddAgentIds={setAddAgentIds}
-                setChatInput={setChatInput} setOrchestration={setOrchestration}
+              <DesktopConversations
+                meId={me?.id}
+                assistant={{
+                  addable,
+                  addAgentIds,
+                  assistant,
+                  chatBoxRef,
+                  chatInput,
+                  chatMessages,
+                  chatSending,
+                  orchestration,
+                  onAcceptStep: acceptStep,
+                  onSend: sendChat,
+                  setAddAgentIds,
+                  setChatInput,
+                  setOrchestration,
+                }}
               />
             )}
           </div>
         </Col>
         <Col xs={24} lg={9}>
           <DashboardSidebar
-            data={data} deliverables={deliverables} isSupervising={isSupervising}
-            onDownload={downloadDeliverable} onNavigate={navigate}
+            data={data}
+            deliverables={deliverables}
+            isSupervising={isSupervising}
+            onDownload={downloadDeliverable}
+            onNavigate={navigate}
             onRefreshDeliverables={loadDeliverables}
           />
         </Col>

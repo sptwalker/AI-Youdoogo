@@ -109,3 +109,44 @@ export async function sseRequest(url: string, body: unknown, onEvent: SseHandler
     }
   }
 }
+
+/** GET 一个长连 SSE 订阅端点（实时消息推送，I3）。返回取消函数（组件卸载时调用断开）。
+ *  与 sseRequest 不同：GET、长生命周期、可 abort、忽略 ping/ready 心跳。 */
+export function sseSubscribe(url: string, onEvent: SseHandler): () => void {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const ctrl = new AbortController()
+  ;(async () => {
+    try {
+      const resp = await fetch(`/api/v1${url}`, {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: ctrl.signal,
+      })
+      if (!resp.ok || !resp.body) return
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let idx: number
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          let event = 'message'
+          let data = ''
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event: ')) event = line.slice(7)
+            else if (line.startsWith('data: ')) data = line.slice(6)
+          }
+          if (!data || event === 'ping' || event === 'ready' || event === 'done') continue
+          try {
+            onEvent(event, JSON.parse(data) as Record<string, unknown>)
+          } catch { /* 跳过无法解析的帧 */ }
+        }
+      }
+    } catch { /* abort 或网络中断：静默（组件卸载/断线，前端可重订阅） */ }
+  })()
+  return () => ctrl.abort()
+}

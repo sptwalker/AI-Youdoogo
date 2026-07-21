@@ -54,6 +54,11 @@ export function initTemplate(): Promise<{ departments: number; execs: number; di
   return request({ method: 'POST', url: '/org/init-template' })
 }
 
+/** 从飞书通讯录同步组织架构 + 员工身份（I1）。 */
+export function syncFeishu(): Promise<{ departments: number; users_created: number; users_updated: number }> {
+  return request({ method: 'POST', url: '/org/sync-feishu' })
+}
+
 export function createNode(payload: { name: string; parent_id: string; code?: string }) {
   return request({ method: 'POST', url: '/org/nodes', data: payload })
 }

@@ -40,6 +40,20 @@ async def get_tree(db: DB, _: CurrentUser) -> dict:
     return ok(await org_service.get_tree(db))
 
 
+@router.post("/sync-feishu")
+async def sync_feishu(db: DB, admin: Admin) -> dict:
+    """从飞书通讯录同步组织架构 + 员工身份（I1，docs/18）。幂等。"""
+    from app.services import org_sync_service
+
+    result = await org_sync_service.sync_from_feishu(db)
+    await audit_service.audit(
+        db, actor_id=admin.id, actor_role=admin.role_code, action="org.sync_feishu",
+        summary=f"飞书组织同步：{result['departments']}部门/"
+        f"新增{result['users_created']}人",
+    )
+    return ok(result)
+
+
 @router.post("/init-template")
 async def init_template(db: DB, admin: Admin) -> dict:
     """一键按模板初始化公司骨架（幂等）：公司根 + 8 部门 + 7 高管 + 8 总监；根主管=CEO。"""

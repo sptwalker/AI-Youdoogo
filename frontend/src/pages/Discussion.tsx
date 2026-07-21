@@ -1,15 +1,18 @@
 /** 协作空间：左栏频道列表，右栏消息流 + @Agent 触发 + 升格提案/任务。
  *  红线：AI 发言仅参考，升格产出仍走真人确认闸门。 */
 import { PageContainer } from '@ant-design/pro-components'
-import { Avatar, Button, Card, Empty, Input, List, Popconfirm, Select, Space, Tag, Typography, message } from 'antd'
+import { Avatar, Badge, Button, Card, Empty, Input, List, Popconfirm, Select, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import Markdown from '../components/Markdown'
 import { listRoles, type AgentRole } from '../api/agents'
 import {
   listChannels,
   listMessages,
+  markRead,
+  myChannels,
   postMessage,
   promoteMessage,
+  subscribeRealtime,
   type Channel,
   type Message,
 } from '../api/discussion'
@@ -22,6 +25,14 @@ export default function Discussion() {
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<string[]>([])
   const [sending, setSending] = useState(false)
+  const [unread, setUnread] = useState<Record<string, number>>({})  // channel_id → 未读数
+
+  const loadUnread = () =>
+    void myChannels().then((cs) => {
+      const map: Record<string, number> = {}
+      for (const c of cs) map[c.id] = c.unread
+      setUnread(map)
+    })
 
   useEffect(() => {
     void listChannels().then((cs) => {
@@ -29,11 +40,29 @@ export default function Discussion() {
       if (cs.length) setCurrent((c) => c ?? cs[0])
     })
     void listRoles().then(setAgents)
+    loadUnread()
   }, [])
 
   const loadMessages = (channelId: string) => void listMessages(channelId).then(setMessages)
+
+  // 实时订阅（I3）：别人在群发言即时追加当前群；非当前群则未读+1（I5）
   useEffect(() => {
-    if (current) loadMessages(current.id)
+    const cancel = subscribeRealtime((event, data) => {
+      if (event !== 'message') return
+      const msg = data as unknown as Message & { channel_id?: string }
+      if (current && msg.channel_id === current.id) {
+        setMessages((m) => (m.some((x) => x.id === msg.id) ? m : [...m, msg]))
+      } else if (msg.channel_id) {
+        setUnread((u) => ({ ...u, [msg.channel_id!]: (u[msg.channel_id!] ?? 0) + 1 }))
+      }
+    })
+    return cancel
+  }, [current])
+  // 切到某群 → 加载消息 + 未读清零（I5）
+  useEffect(() => {
+    if (!current) return
+    loadMessages(current.id)
+    void markRead(current.id).then(() => setUnread((u) => ({ ...u, [current.id]: 0 })))
   }, [current])
 
   const send = async () => {
@@ -90,10 +119,13 @@ export default function Discussion() {
                 style={{
                   cursor: 'pointer', padding: '6px 8px', borderRadius: 6,
                   background: current?.id === c.id ? '#e6f4ff' : undefined,
+                  display: 'flex', justifyContent: 'space-between',
                 }}
               >
-                # {c.name}
-                {c.is_archived && <Tag style={{ marginLeft: 4 }}>已归档</Tag>}
+                <span># {c.name}{c.is_archived && <Tag style={{ marginLeft: 4 }}>已归档</Tag>}</span>
+                {(unread[c.id] ?? 0) > 0 && current?.id !== c.id && (
+                  <Badge count={unread[c.id]} size="small" />
+                )}
               </List.Item>
             )}
           />

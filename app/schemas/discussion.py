@@ -5,12 +5,21 @@ import uuid
 from pydantic import BaseModel, Field
 
 
+class ChannelMemberIn(BaseModel):
+    """群成员（真人 human / AI ai）。"""
+
+    member_type: str = Field(pattern="^(human|ai)$")
+    member_id: uuid.UUID
+    member_name: str = Field(default="", max_length=64)
+
+
 class ChannelCreate(BaseModel):
-    """新建讨论频道。"""
+    """新建讨论频道（可带初始成员，真人+AI 混合）。"""
 
     name: str = Field(min_length=1, max_length=128)
     department_id: uuid.UUID | None = None
     default_agent_id: uuid.UUID | None = None
+    members: list[ChannelMemberIn] = Field(default_factory=list)
 
 
 class MessagePost(BaseModel):
@@ -18,6 +27,7 @@ class MessagePost(BaseModel):
 
     content: str = Field(min_length=1, max_length=5000)
     mentioned_agent_ids: list[uuid.UUID] = Field(default_factory=list)
+    attachments: list[dict] = Field(default_factory=list)  # I6:[{type,name,storage_path,size}]
 
 
 class PromoteRequest(BaseModel):

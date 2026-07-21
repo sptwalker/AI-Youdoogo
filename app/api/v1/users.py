@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_roles
+from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.models.system import SysUser
@@ -17,6 +17,20 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 AdminUser = Annotated[SysUser, Depends(require_roles("admin"))]
+
+
+@router.get("/roster")
+async def roster(db: DB, _: CurrentUser) -> dict:
+    """同事花名册（任意登录用户可读）：id + 姓名 + 部门，供群聊选人（I4）。"""
+    users = await auth_service.list_users(db)
+    return ok([
+        {
+            "id": str(u.id), "real_name": u.real_name, "en_name": u.en_name,
+            "username": u.username, "title": u.title,
+            "department_id": str(u.department_id) if u.department_id else None,
+        }
+        for u in users if u.is_active
+    ])
 
 
 @router.post("")
