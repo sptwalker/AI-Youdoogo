@@ -81,11 +81,12 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert "docker.sock" in text
     assert "docker:dind" not in text.lower()
     assert "privileged:" not in text.lower()
-    assert not any(
-        "services" in config
-        for config in pipeline.values()
-        if isinstance(config, dict) and "script" in config
-    )
+    service_jobs = {
+        name
+        for name, config in pipeline.items()
+        if isinstance(config, dict) and "script" in config and "services" in config
+    }
+    assert service_jobs == {"verify_backend"}
     assert "name: m.daocloud.io/" not in text
     assert "TRIVY_DB_REPOSITORY: m.daocloud.io/" in text
     assert "HIGH,CRITICAL" in text
@@ -94,6 +95,15 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert "ci-${CI_COMMIT_SHA}" in text
 
     backend_verify = pipeline["verify_backend"]
+    assert backend_verify["services"] == [
+        {"name": "redis:7-alpine", "alias": "redis", "pull_policy": "always"}
+    ]
+    assert backend_verify["variables"]["REDIS_URL"] == "redis://redis:6379/0"
+    assert not any(
+        config.get("variables", {}).get("REDIS_URL")
+        for name, config in pipeline.items()
+        if name != "verify_backend" and isinstance(config, dict)
+    )
     assert "uv sync --frozen" in backend_verify["before_script"]
     for command in ("ruff check .", "mypy app"):
         assert f"uv run --frozen {command}" in backend_verify["script"]

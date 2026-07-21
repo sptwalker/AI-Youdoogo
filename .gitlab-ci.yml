@@ -46,6 +46,12 @@ verify_backend:
   image:
     name: python:3.12-slim
     pull_policy: always
+  services:
+    - name: redis:7-alpine
+      alias: redis
+      pull_policy: always
+  variables:
+    REDIS_URL: redis://redis:6379/0
   extends: .verify_rules
   cache:
     key:
