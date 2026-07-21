@@ -47,7 +47,7 @@ app/
 4. **密钥禁止硬编码**：可存 `.env`（`app/core/config.py`）或 `sys_config`（系统配置页 UI 填写，`is_secret=true`）；app 经 `app/core/runtime_config.py` 覆盖层读取（sys_config 覆盖 .env）；list 接口对密钥脱敏、审计 detail 打码。**LLM 模型密钥走 `ai_provider` 卡片（「AI 配置」页填，list 只回 hint 末4位）**；embedding/飞书/TD 仍走 sys_config/.env
 5. **接口双校验**：所有接口必须有权限校验 + 参数校验；统一返回 `{code, msg, data}`
 6. **人工兜底**：权限、数据修改、核心决策代码必须人工审核；所有AI输出可编辑/驳回/终止
-7. **提交前**：`uv run ruff check .` + `uv run mypy app` + `uv run pytest` 全绿
+7. **提交前**：后端 `ruff + mypy + pytest -m "not delivery_contract"`、前端 `npm run test + lint + build` 全绿；系统级部署契约由 CI 独立环境验证
 
 ## 常用命令
 
@@ -56,8 +56,9 @@ docker compose up -d                      # PG/Redis/MinIO（三容器需 health
 uv sync                                   # 装依赖
 uv run alembic upgrade head               # 迁移
 uv run uvicorn app.main:app --reload      # 启动（/api/v1/health/deps 自检依赖）
-uv run pytest -q                          # 测试
+uv run pytest -q -m "not delivery_contract" # 后端测试（部署契约由 CI 独立验证）
 uv run ruff check . ; uv run mypy app     # 质量门
+cd frontend ; npm run test ; npm run lint ; npm run build
 ```
 
 ## Git

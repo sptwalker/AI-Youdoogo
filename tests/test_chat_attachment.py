@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.database import get_db
 from app.main import app
 from app.models import Base
+from app.models.discussion import DiscussionMessage
 from app.models.system import SysUser
+from app.services import discussion_service
 
 
 @pytest.fixture
@@ -22,7 +24,47 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient,
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as s:
         user = SysUser(id=uuid.uuid4(), username="u", password_hash="x", role_code="member")
-        s.add(user)
+        other = SysUser(id=uuid.uuid4(), username="other", password_hash="x", role_code="member")
+        s.add_all([user, other])
+        await s.commit()
+        own_channel = await discussion_service.create_channel(s, name="mine", creator_id=user.id)
+        other_channel = await discussion_service.create_channel(
+            s, name="other", creator_id=other.id
+        )
+        s.add_all(
+            [
+                DiscussionMessage(
+                    channel_id=own_channel.id,
+                    speaker_type="human",
+                    speaker_id=user.id,
+                    speaker_name="u",
+                    content="mine",
+                    attachments=[
+                        {
+                            "type": "image",
+                            "name": "photo.png",
+                            "storage_path": "youdoo/chat/abc/photo.png",
+                            "size": 10,
+                        }
+                    ],
+                ),
+                DiscussionMessage(
+                    channel_id=other_channel.id,
+                    speaker_type="human",
+                    speaker_id=other.id,
+                    speaker_name="other",
+                    content="private",
+                    attachments=[
+                        {
+                            "type": "file",
+                            "name": "private.pdf",
+                            "storage_path": "youdoo/chat/private/private.pdf",
+                            "size": 20,
+                        }
+                    ],
+                ),
+            ]
+        )
         await s.commit()
 
     async def _override() -> AsyncGenerator[AsyncSession, None]:
@@ -34,9 +76,9 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient,
 
     async def _fake_user() -> SysUser:
         async with maker() as s:
-            return (await s.execute(
-                __import__("sqlalchemy").select(SysUser)
-            )).scalars().first()
+            user = (await s.execute(__import__("sqlalchemy").select(SysUser))).scalars().first()
+            assert user is not None
+            return user
 
     app.dependency_overrides[get_db] = _override
     app.dependency_overrides[deps.get_current_user] = _fake_user
@@ -88,3 +130,24 @@ async def test_download_chat_attachment(client: AsyncClient) -> None:
         params={"storage_path": "youdoo/chat/abc/photo.png", "name": "photo.png"},
     )
     assert r.status_code == 200 and r.content == b"filecontent"
+
+
+async def test_download_rejects_unattached_chat_object(client: AsyncClient) -> None:
+    """仅有 chat/ 前缀但未挂到消息的对象不可下载。"""
+    r = await client.get(
+        "/api/v1/channels/attachments/download",
+        params={"storage_path": "youdoo/chat/orphan/file.pdf", "name": "file.pdf"},
+    )
+    assert r.status_code == 403
+
+
+async def test_download_rejects_other_channel_attachment(client: AsyncClient) -> None:
+    """附件存在于消息中，但当前用户不是该群成员时仍不可下载。"""
+    r = await client.get(
+        "/api/v1/channels/attachments/download",
+        params={
+            "storage_path": "youdoo/chat/private/private.pdf",
+            "name": "private.pdf",
+        },
+    )
+    assert r.status_code == 403

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.core.config import get_settings
@@ -47,7 +47,11 @@ async def publish(channel_id: str, event_name: str, data: dict[str, Any]) -> Non
         logger.warning("实时广播 publish 失败 channel=%s", channel_id, exc_info=True)
 
 
-async def subscribe(channel_ids: list[str]) -> AsyncIterator[Event]:
+async def subscribe(
+    channel_ids: list[str],
+    *,
+    authorize: Callable[[str], Awaitable[bool]] | None = None,
+) -> AsyncIterator[Event]:
     """订阅若干群频道，长连生成器:有消息即 yield (event_name, data)。
 
     含心跳（无消息时定期 yield ping 保活，防中间层断连）。Redis 不可用 → 立即结束
@@ -72,6 +76,24 @@ async def subscribe(channel_ids: list[str]) -> AsyncIterator[Event]:
                 continue
             raw = msg.get("data")
             if raw is None:
+                continue
+            raw_channel = msg.get("channel")
+            channel_key_value = (
+                raw_channel
+                if isinstance(raw_channel, str)
+                else raw_channel.decode("utf-8")
+                if isinstance(raw_channel, bytes)
+                else ""
+            )
+            channel_id = (
+                channel_key_value.removeprefix(_CHANNEL_PREFIX)
+                if channel_key_value.startswith(_CHANNEL_PREFIX)
+                else ""
+            )
+            if authorize is not None and (
+                not channel_id or not await authorize(channel_id)
+            ):
+                logger.info("实时消息因成员权限已撤销而丢弃 channel=%s", channel_id)
                 continue
             try:
                 parsed = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))

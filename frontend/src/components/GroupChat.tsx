@@ -25,16 +25,20 @@ export default function GroupChat({
   channelName,
   onRead,
   liveMessage,
+  realtimeConnected,
   isOwner,
   ownerId,
+  onMembershipChange,
   onDisband,
 }: {
   channelId: string
   channelName: string
   onRead: (channelId: string) => void
   liveMessage: (Message & { channel_id?: string }) | null  // 父级实时推来的消息
+  realtimeConnected: boolean
   isOwner: boolean
   ownerId: string | null
+  onMembershipChange: () => void
   onDisband: () => void
 }) {
   const [msgs, setMsgs] = useState<Message[]>([])
@@ -49,13 +53,53 @@ export default function GroupChat({
   const [uploading, setUploading] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { void listRoles().then(setAgents) }, [])
-  // 切群：加载消息 + 已读清零 + 成员
   useEffect(() => {
-    void listMessages(channelId).then(setMsgs)
-    void markRead(channelId).then(() => onRead(channelId))
-    void listMembers(channelId).then(setMembers)
-  }, [channelId, onRead])
+    let disposed = false
+    void listRoles().then((items) => { if (!disposed) setAgents(items) }).catch(() => {})
+    return () => { disposed = true }
+  }, [])
+
+  useEffect(() => { setMsgs([]) }, [channelId])
+
+  // SSE 不可用时轮询当前群；恢复连接时再补拉一次，随后停止轮询。
+  useEffect(() => {
+    const ctrl = new AbortController()
+    let timer: number | undefined
+    let disposed = false
+    const refresh = async () => {
+      try {
+        const remote = await listMessages(channelId, { signal: ctrl.signal, silent: true })
+        if (disposed) return
+        setMsgs((current) => {
+          const remoteIds = new Set(remote.map((item) => item.id))
+          const justArrived = current.filter((item) => (
+            item.channel_id === channelId && !remoteIds.has(item.id)
+          ))
+          return [...remote, ...justArrived]
+        })
+        await markRead(channelId, { signal: ctrl.signal, silent: true })
+        if (!disposed) onRead(channelId)
+      } catch { /* 静默降级，下一轮继续 */ }
+      if (!disposed && !realtimeConnected) {
+        timer = window.setTimeout(() => { void refresh() }, 5000)
+      }
+    }
+    void refresh()
+    return () => {
+      disposed = true
+      ctrl.abort()
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [channelId, onRead, realtimeConnected])
+
+  // 切群：刷新成员；signal 确保快速切换/卸载不会回写旧群数据。
+  useEffect(() => {
+    const ctrl = new AbortController()
+    void listMembers(channelId, { signal: ctrl.signal, silent: true }).then((items) => {
+      if (!ctrl.signal.aborted) setMembers(items)
+    }).catch(() => {})
+    return () => ctrl.abort()
+  }, [channelId])
   useEffect(() => {
     const el = boxRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -63,8 +107,10 @@ export default function GroupChat({
   // 父级实时推来的消息若属于本群，追加（按 id 去重）
   useEffect(() => {
     if (!liveMessage || liveMessage.channel_id !== channelId) return
+    const ctrl = new AbortController()
     setMsgs((m) => (m.some((x) => x.id === liveMessage.id) ? m : [...m, liveMessage]))
-    void markRead(channelId).then(() => onRead(channelId))
+    void markRead(channelId, { signal: ctrl.signal, silent: true }).then(() => onRead(channelId)).catch(() => {})
+    return () => ctrl.abort()
   }, [liveMessage, channelId, onRead])
 
   const send = async () => {
@@ -206,6 +252,7 @@ export default function GroupChat({
           await addMembers(channelId, mems)
           message.success('已拉入')
           setPickOpen(false)
+          onMembershipChange()
           void listMembers(channelId).then(setMembers)
         }}
       />
@@ -226,6 +273,7 @@ export default function GroupChat({
                   onConfirm={async () => {
                     await removeMember(channelId, m.member_type, m.member_id)
                     message.success('已踢出')
+                    onMembershipChange()
                     void listMembers(channelId).then(setMembers)
                   }}>
                   <a style={{ color: '#cf1322' }}>踢出</a>

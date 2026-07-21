@@ -64,10 +64,12 @@ graphify path "app/knowledge" "app/agents"
 ```powershell
 uv run ruff check .
 uv run mypy app
-uv run pytest -q
-cd frontend && npm run build
+uv run pytest -q -m "not delivery_contract"
+cd frontend && npm run test && npm run lint && npm run build
 uv run alembic heads
 ```
+
+部署契约测试依赖系统级 `envsubst` 与 `nginx`，由 CI 的独立 `verify_delivery_contract` 环境执行；本地安装这两个二进制后也可单独运行对应 marker。
 
 ## 文档
 

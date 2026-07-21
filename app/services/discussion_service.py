@@ -31,13 +31,15 @@ from app.models.discussion import (
     DiscussionChannel,
     DiscussionMessage,
 )
-from app.services import proposal_service, realtime_service, task_service
+from app.services import outbox_service, proposal_service, realtime_service, task_service
 
 logger = logging.getLogger(__name__)
 
 MAX_FANOUT = 3  # 护栏3：单条消息最多触发 3 个 AI
 _CONTEXT_N = 20  # 拼给 AI 的近期消息条数
 _PROMOTE_TARGETS = ("proposal", "task")
+DISBAND_ARCHIVE_EVENT = "discussion.channel.archive"
+_ARCHIVE_FILE_NAMESPACE = uuid.UUID("1e08b822-57c4-45ab-86f9-b0f494d5aba6")
 
 
 def _dedup(ids: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -219,38 +221,37 @@ async def is_owner(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) 
 
 
 async def disband_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
-    """解散群（群主）：立即软删频道+全部成员（秒回），归档入 KB 后台异步进行。
-
-    归档要提炼（LLM 调用，可能 10s+），不能阻塞用户点击——故先软删并 commit 返回，
-    再 fire-and-forget 用独立 session 归档（消息未删，后台仍可读）。永不因归档失败而卡。
-    """
-    c = await get_channel(db, channel_id)
-    members = await db.execute(
-        select(ChannelMember).where(
-            ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
-        )
-    )
-    for m in members.scalars():
-        m.is_delete = True
-    c.is_delete = True
-    await db.commit()
-    # 后台异步归档（独立 session，不阻塞响应）
-    import asyncio
-
-    asyncio.create_task(_archive_disbanded(channel_id))
-
-
-async def _archive_disbanded(channel_id: uuid.UUID) -> None:
-    """后台把已解散群的聊天提炼入 KB（独立 session）。永不 raise。"""
-    from app.core.database import async_session_factory
-
+    """解散群并在同一事务写入持久化归档事件，归档失败不影响解散结果。"""
     try:
-        async with async_session_factory() as db:
-            c = await db.get(DiscussionChannel, channel_id)
-            if c is not None:
-                await _archive_to_kb(db, c)  # 消息未删，可读
-    except Exception:  # noqa: BLE001 - 后台归档失败不影响已完成的解散
-        logger.warning("解散群后台归档失败 channel=%s", channel_id, exc_info=True)
+        c = await get_channel(db, channel_id)
+        members = await db.execute(
+            select(ChannelMember).where(
+                ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
+            )
+        )
+        for member in members.scalars():
+            member.is_delete = True
+        c.is_delete = True
+        await outbox_service.enqueue(
+            db,
+            aggregate_type="discussion_channel",
+            aggregate_id=channel_id,
+            event_type=DISBAND_ARCHIVE_EVENT,
+            dedupe_key=f"discussion-channel:{channel_id}:archive:v1",
+            payload={"channel_id": str(channel_id)},
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def archive_disbanded_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
+    """worker 入口：严格归档已解散群；异常交给 outbox 记录并重试。"""
+    channel = await db.get(DiscussionChannel, channel_id)
+    if channel is None:
+        return
+    await _archive_to_kb(db, channel, raise_on_error=True)
 
 
 # ── 未读计数（I5，docs/18）──────────────────────────────
@@ -311,8 +312,18 @@ async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> Discussion
     return c
 
 
-async def _archive_to_kb(db: AsyncSession, channel: DiscussionChannel) -> None:
-    """把群聊记录提炼成结构化记忆入知识库（复用 H3.2 memory_service）。永不 raise。"""
+def _archive_file_id(channel_id: uuid.UUID) -> uuid.UUID:
+    """一个频道对应一个确定性知识文件，确保 outbox 重放不会重复入库。"""
+    return uuid.uuid5(_ARCHIVE_FILE_NAMESPACE, str(channel_id))
+
+
+async def _archive_to_kb(
+    db: AsyncSession,
+    channel: DiscussionChannel,
+    *,
+    raise_on_error: bool = False,
+) -> None:
+    """把群聊提炼入知识库；worker 模式抛错重试，人工归档保持原有容错语义。"""
     try:
         from app.knowledge.ingest import ingest_text
         from app.services import knowledge_base_service, memory_service
@@ -328,9 +339,12 @@ async def _archive_to_kb(db: AsyncSession, channel: DiscussionChannel) -> None:
         await ingest_text(
             db, title=f"群聊存档·{channel.name}", text=distilled or transcript,
             uploader_id=channel.creator_id, knowledge_base_id=kb.id, category="discussion",
+            file_id=_archive_file_id(channel.id),
         )
-    except Exception:  # noqa: BLE001 - 入库失败不阻断归档
+    except Exception:  # noqa: BLE001 - 人工归档兼容容错；worker 模式交由 outbox 重试
         logger.warning("群聊归档入库失败 channel=%s", channel.id, exc_info=True)
+        if raise_on_error:
+            raise
 
 
 async def list_messages(

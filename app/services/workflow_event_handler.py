@@ -14,7 +14,12 @@ from app.models.workflow import (
     RUN_WAITING_HUMAN,
     OutboxEvent,
 )
-from app.services import outbox_service, workflow_service, workflow_step_executor
+from app.services import (
+    discussion_service,
+    outbox_service,
+    workflow_service,
+    workflow_step_executor,
+)
 
 
 async def enqueue_ready_steps(db: AsyncSession, workflow_id: uuid.UUID) -> int:
@@ -56,4 +61,10 @@ async def handle_event(
         return await workflow_step_executor.execute_step(
             db, event, worker_id=worker_id, agent_runner=agent_runner
         )
+    if event.event_type == discussion_service.DISBAND_ARCHIVE_EVENT:
+        raw_channel_id = event.payload.get("channel_id") or event.aggregate_id
+        await discussion_service.archive_disbanded_channel(
+            db, uuid.UUID(str(raw_channel_id))
+        )
+        return workflow_step_executor.StepExecutionDisposition.complete()
     raise ValueError(f"未知 outbox event_type：{event.event_type}")

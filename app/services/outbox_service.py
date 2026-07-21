@@ -121,6 +121,28 @@ async def complete(db: AsyncSession, event: OutboxEvent, *, worker_id: str) -> b
     return getattr(result, "rowcount", 0) == 1
 
 
+async def renew_lease(
+    db: AsyncSession,
+    event_id: uuid.UUID,
+    *,
+    worker_id: str,
+    lease_seconds: int,
+) -> bool:
+    """长任务执行期间续租；仅当前处理者可延长自己的 processing 事件。"""
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == event_id,
+            OutboxEvent.status == OUTBOX_PROCESSING,
+            OutboxEvent.lease_owner == worker_id,
+        )
+        .values(lease_until=utcnow() + timedelta(seconds=lease_seconds))
+        .execution_options(synchronize_session=False)
+    )
+    await db.flush()
+    return getattr(result, "rowcount", 0) == 1
+
+
 async def defer(
     db: AsyncSession,
     event: OutboxEvent,
