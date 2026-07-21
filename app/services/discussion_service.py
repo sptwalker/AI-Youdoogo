@@ -218,9 +218,12 @@ async def is_owner(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) 
 
 
 async def disband_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
-    """解散群（群主）：先归档聊天入 KB（不丢内容），再软删频道 + 全部成员。"""
+    """解散群（群主）：立即软删频道+全部成员（秒回），归档入 KB 后台异步进行。
+
+    归档要提炼（LLM 调用，可能 10s+），不能阻塞用户点击——故先软删并 commit 返回，
+    再 fire-and-forget 用独立 session 归档（消息未删，后台仍可读）。永不因归档失败而卡。
+    """
     c = await get_channel(db, channel_id)
-    await _archive_to_kb(db, c)  # 解散前把内容提炼入库
     members = await db.execute(
         select(ChannelMember).where(
             ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
@@ -230,6 +233,23 @@ async def disband_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
         m.is_delete = True
     c.is_delete = True
     await db.commit()
+    # 后台异步归档（独立 session，不阻塞响应）
+    import asyncio
+
+    asyncio.create_task(_archive_disbanded(channel_id))
+
+
+async def _archive_disbanded(channel_id: uuid.UUID) -> None:
+    """后台把已解散群的聊天提炼入 KB（独立 session）。永不 raise。"""
+    from app.core.database import async_session_factory
+
+    try:
+        async with async_session_factory() as db:
+            c = await db.get(DiscussionChannel, channel_id)
+            if c is not None:
+                await _archive_to_kb(db, c)  # 消息未删，可读
+    except Exception:  # noqa: BLE001 - 后台归档失败不影响已完成的解散
+        logger.warning("解散群后台归档失败 channel=%s", channel_id, exc_info=True)
 
 
 # ── 未读计数（I5，docs/18）──────────────────────────────
