@@ -51,6 +51,26 @@ export default function Users() {
       title: '操作',
       valueType: 'option',
       render: (_, row) => [
+        <ModalForm<{ role_code: UserInfo['role_code'] }>
+          key="role"
+          title={`调整角色 · ${row.real_name || row.username}`}
+          trigger={<a>调整角色</a>}
+          initialValues={{ role_code: row.role_code }}
+          modalProps={{ destroyOnHidden: true }}
+          onFinish={async ({ role_code }) => {
+            await updateUser(row.id, { role_code })
+            message.success('角色已更新')
+            actionRef.current?.reload()
+            return true
+          }}
+        >
+          <ProFormSelect
+            name="role_code"
+            label="系统角色"
+            rules={[{ required: true }]}
+            options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))}
+          />
+        </ModalForm>,
         <ModalForm<{ feishu_open_id?: string }>
           key="feishu"
           title={`飞书身份绑定 · ${row.real_name || row.username}`}
@@ -123,7 +143,7 @@ export default function Users() {
             <ProFormText
               name="feishu_open_id"
               label="飞书 open_id（可选）"
-              tooltip="填写当前应用内稳定的飞书 open_id；首次登录也会按该身份自动建立成员账号。"
+              tooltip="填写当前应用内稳定的飞书 open_id 完成预绑定；未绑定身份不能登录，也不会自动开户。"
               rules={[{ pattern: /^(|ou[-_][A-Za-z0-9_-]+)$/, message: '请输入以 ou_ 或 ou- 开头的 open_id' }]}
             />
             <ProFormSelect

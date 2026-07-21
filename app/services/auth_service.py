@@ -1,6 +1,5 @@
 """鉴权与用户管理业务逻辑。"""
 
-import hashlib
 import uuid
 
 from sqlalchemy import select
@@ -34,27 +33,10 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> SysUse
     return user
 
 
-def _feishu_username(open_id: str, attempt: int = 0) -> str:
-    """Return a bounded, deterministic username for a provisioned identity.
-
-    The open_id itself is never used as a profile-field lookup key or exposed in
-    the username.  A long digest keeps the value within the existing 64-character
-    username limit while making accidental collisions practically impossible.
-    ``attempt`` is only used if an unrelated pre-existing username occupies the
-    deterministic candidate.
-    """
-    digest = hashlib.sha256(open_id.encode("utf-8")).hexdigest()
-    base = f"fs_{digest}"
-    if attempt <= 0:
-        return base[:64]
-    suffix = f"-{attempt}"
-    return f"{base[:64 - len(suffix)]}{suffix}"
-
-
 def _deny_feishu_user() -> AppError:
-    """Return one non-enumerating error for disabled or deleted local users."""
+    """未绑定、停用和软删统一拒绝，避免枚举本地账号状态。"""
     return AppError(
-        "当前飞书账号不可用，请联系管理员。",
+        "当前飞书账号暂无系统访问权限，请联系管理员完成账号授权或状态确认。",
         code=403,
         status_code=403,
     )
@@ -66,84 +48,20 @@ async def _find_feishu_user(db: AsyncSession, open_id: str) -> SysUser | None:
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def resolve_or_provision_feishu_user(
-    db: AsyncSession,
-    open_id: str,
-    *,
-    real_name: str | None = None,
-    en_name: str | None = None,
-    avatar_url: str | None = None,
-) -> SysUser:
-    """Resolve an active local user or provision a least-privilege member.
+async def authenticate_feishu(db: AsyncSession, open_id: str) -> SysUser:
+    """仅按当前应用的稳定 ``open_id`` 认证已预绑定的本地账号。
 
-    The Feishu OAuth verifier is the authentication gate.  This function only
-    uses ``open_id`` for identity resolution; optional profile fields are copied
-    on first provision only when the current OAuth path actually supplied them.
-    Disabled and soft-deleted rows remain denied, including when a concurrent
-    first-login attempt races with their lookup.  A unique-constraint race is
-    rolled back and rechecked so the loser returns the winner rather than
-    producing a duplicate or a 500 response.
+    飞书只证明外部身份，不创建本地账号、不变更角色，也不按姓名、邮箱或手机号合并。
+    返回的 ``SysUser`` 是角色与权限的唯一事实源，OAuth 登录与密码登录共用后续
+    JWT、``/me`` 和权限依赖链路。
     """
     if not valid_feishu_open_id(open_id):
         raise AppError("飞书未返回用户标识", code=401, status_code=401)
 
-    existing = await _find_feishu_user(db, open_id)
-    if existing is not None:
-        if existing.is_delete or not existing.is_active:
-            raise _deny_feishu_user()
-        return existing
-
-    for attempt in range(8):
-        user = SysUser(
-            username=_feishu_username(open_id, attempt),
-            password_hash="!feishu-sso",
-            feishu_open_id=open_id,
-            role_code="member",
-        )
-        # Do not invent profile data.  These assignments are made only when
-        # this particular OAuth identity response supplied a string value.
-        if real_name is not None:
-            user.real_name = real_name
-        if en_name is not None:
-            user.en_name = en_name
-        if avatar_url is not None:
-            user.avatar_url = avatar_url
-        db.add(user)
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            raced = await _find_feishu_user(db, open_id)
-            if raced is not None:
-                if raced.is_delete or not raced.is_active:
-                    raise _deny_feishu_user() from None
-                return raced
-            # The deterministic username may have been taken by an unrelated
-            # local account.  Try the next bounded deterministic candidate.
-            continue
-        await db.refresh(user)
-        await _refresh_env(db)
-        return user
-
-    raise AppError("飞书账号开户失败，请稍后重试。", code=503, status_code=503)
-
-
-async def authenticate_feishu(
-    db: AsyncSession,
-    open_id: str,
-    *,
-    real_name: str | None = None,
-    en_name: str | None = None,
-    avatar_url: str | None = None,
-) -> SysUser:
-    """Backward-compatible name for the Feishu resolve/provision flow."""
-    return await resolve_or_provision_feishu_user(
-        db,
-        open_id,
-        real_name=real_name,
-        en_name=en_name,
-        avatar_url=avatar_url,
-    )
+    user = await _find_feishu_user(db, open_id)
+    if user is None or user.is_delete or not user.is_active:
+        raise _deny_feishu_user()
+    return user
 
 
 async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> SysUser | None:
@@ -153,13 +71,12 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> SysUser | None
 
 
 async def login_by_feishu(db: AsyncSession, code: str) -> SysUser:
-    """飞书 SSO:用回调 code 换飞书身份 → 按 open_id 找/建本地用户 → 返回（供签发 JWT）。
+    """飞书 SSO：用回调 code 换身份，再精确解析已预绑定的本地用户。
 
-    首次登录自动开户（默认 member 最低权限，红线：角色变更仍走 admin）;已存在直接登录。
-    若该 open_id 已由 I1 组织同步预建，则复用；停用或软删账号不会被重新激活。
+    该兼容端点与浏览器 PKCE 回调共享相同预绑定策略；不自动开户或授予角色。
 
     Raises:
-        AppError: 飞书换取身份失败 / 账号停用。
+        AppError: 飞书换取身份失败 / 未绑定 / 账号停用或软删。
     """
     from app.integrations.feishu.client import FeishuAPIError, feishu_client
 
@@ -168,21 +85,9 @@ async def login_by_feishu(db: AsyncSession, code: str) -> SysUser:
     except FeishuAPIError as exc:
         raise AppError(f"飞书登录失败:{exc}", code=401, status_code=401) from exc
     open_id = info.get("open_id")
-    if not open_id:
+    if not isinstance(open_id, str):
         raise AppError("飞书未返回用户标识", code=401, status_code=401)
-
-    return await resolve_or_provision_feishu_user(
-        db,
-        open_id,
-        real_name=info.get("name") if isinstance(info.get("name"), str) else None,
-        en_name=info.get("en_name") if isinstance(info.get("en_name"), str) else None,
-        avatar_url=(
-            info.get("avatar_url")
-            if isinstance(info.get("avatar_url"), str)
-            else None
-        ),
-    )
-
+    return await authenticate_feishu(db, open_id)
 
 
 def _check_role(role_code: str) -> None:

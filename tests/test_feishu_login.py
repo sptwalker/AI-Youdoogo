@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi import Request, Response
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.v1.auth import EXCHANGE_COOKIE, feishu_exchange, feishu_start, feishu_status
@@ -259,6 +259,12 @@ async def oauth_client() -> AsyncGenerator[OAuthFixture, None]:
                     feishu_open_id="ou_bound_123456",
                 ),
                 SysUser(
+                    username="bound-admin",
+                    password_hash=hash_password("admin-pass-88"),
+                    role_code="admin",
+                    feishu_open_id="ou_admin_bound_123456",
+                ),
+                SysUser(
                     username="disabled",
                     password_hash=hash_password("disabled-pass-88"),
                     role_code="member",
@@ -348,57 +354,58 @@ async def test_callback_handoff_has_no_token_in_redirect_and_is_one_time(
     assert replay.status_code == 400
 
 
-async def test_first_browser_login_provisions_member_and_reuses_same_user(
+async def test_prebound_admin_role_survives_callback_exchange_and_me(
     oauth_client: OAuthFixture,
 ) -> None:
+    client, provider, _, _, _ = oauth_client
+    provider.identities["admin-login-code"] = "ou_admin_bound_123456"
+
+    state = await begin(client, "/users")
+    completed = await callback(client, state, "admin-login-code")
+    assert completed.headers["location"] == "/login?feishu=success"
+    exchange = await client.post(
+        "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
+    )
+    assert exchange.status_code == 200
+    token_data = exchange.json()["data"]
+    assert token_data["redirect_to"] == "/users"
+
+    headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+    me = await client.get("/api/v1/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["data"]["username"] == "bound-admin"
+    assert me.json()["data"]["role_code"] == "admin"
+
+    admin_api = await client.get("/api/v1/users", headers=headers)
+    assert admin_api.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "open_id",
+    ["ou_unknown_123456", "ou_disabled_123456", "ou_deleted_123456"],
+)
+async def test_unbound_disabled_and_deleted_users_share_denial_without_provision(
+    oauth_client: OAuthFixture,
+    open_id: str,
+) -> None:
     client, provider, _, _, factory = oauth_client
-    open_id = "ou_auto_provision_123456"
-    provider.identities["first-login-code"] = open_id
-
-    first_state = await begin(client, "/tasks")
-    first_callback = await callback(client, first_state, "first-login-code")
-    assert first_callback.headers["location"] == "/login?feishu=success"
-    first_exchange = await client.post(
-        "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
-    )
-    assert first_exchange.status_code == 200
-    first_token = first_exchange.json()["data"]["access_token"]
-    first_me = await client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {first_token}"}
-    )
-    first_user = first_me.json()["data"]
-    assert first_user["role_code"] == "member"
-    assert first_user["is_active"] is True
-    assert first_user["username"].startswith("fs_")
+    code = f"code-{open_id}"
+    provider.identities[code] = open_id
+    state = await begin(client)
+    response = await callback(client, state, code)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?feishu=access_required"
 
     async with factory() as db:
-        assert (
-            await db.execute(
-                select(func.count()).select_from(SysUser).where(
-                    SysUser.feishu_open_id == open_id
-                )
-            )
-        ).scalar_one() == 1
-
-    second_state = await begin(client, "/")
-    second_callback = await callback(client, second_state, "first-login-code")
-    assert second_callback.headers["location"] == "/login?feishu=success"
-    second_exchange = await client.post(
-        "/api/v1/auth/feishu/exchange", headers={"Origin": "http://test"}
-    )
-    second_token = second_exchange.json()["data"]["access_token"]
-    second_me = await client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {second_token}"}
-    )
-    assert second_me.json()["data"]["id"] == first_user["id"]
-    async with factory() as db:
-        assert (
-            await db.execute(
-                select(func.count()).select_from(SysUser).where(
-                    SysUser.feishu_open_id == open_id
-                )
-            )
-        ).scalar_one() == 1
+        user = (
+            await db.execute(select(SysUser).where(SysUser.feishu_open_id == open_id))
+        ).scalar_one_or_none()
+        if open_id == "ou_unknown_123456":
+            assert user is None
+        elif open_id == "ou_disabled_123456":
+            assert user is not None and user.is_active is False
+        else:
+            assert user is not None and user.is_delete is True
 
 
 async def test_status_reports_configured_feature_without_exposing_config(
@@ -442,28 +449,6 @@ async def test_missing_code_and_provider_failure_are_safe_login_errors(
     failed = await callback(client, provider_failure_state, "provider-code")
     assert failed.headers["location"] == "/login?feishu=error"
     assert provider.exchange_calls == 1
-
-
-@pytest.mark.parametrize("open_id", ["ou_disabled_123456", "ou_deleted_123456"])
-async def test_disabled_and_deleted_users_are_denied_without_reactivation(
-    oauth_client: OAuthFixture,
-    open_id: str,
-) -> None:
-    client, provider, _, _, factory = oauth_client
-    code = f"code-{open_id}"
-    provider.identities[code] = open_id
-    state = await begin(client)
-    response = await callback(client, state, code)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/login?feishu=error"
-    async with factory() as db:
-        user = (
-            await db.execute(select(SysUser).where(SysUser.feishu_open_id == open_id))
-        ).scalar_one()
-        if open_id == "ou_disabled_123456":
-            assert user.is_active is False
-        else:
-            assert user.is_delete is True
 
 
 async def test_external_return_to_rejected(
