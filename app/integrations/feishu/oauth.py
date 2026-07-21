@@ -45,6 +45,11 @@ class FeishuIdentity:
     """Identity returned by Feishu's user-authorized flow."""
 
     open_id: str
+    # The user_info endpoint may include these fields, but login must not make
+    # any additional profile lookup or infer values that were not returned.
+    real_name: str | None = None
+    en_name: str | None = None
+    avatar_url: str | None = None
 
 
 def pkce_challenge(code_verifier: str) -> str:
@@ -145,4 +150,15 @@ class FeishuOAuthClient:
             or _OPEN_ID.fullmatch(open_id) is None
         ):
             raise FeishuOAuthError("user identity response")
-        return FeishuIdentity(open_id=open_id)
+        def optional_text(key: str, limit: int) -> str | None:
+            value = user_data.get(key)
+            if not isinstance(value, str) or not value or len(value) > limit:
+                return None
+            return value
+
+        return FeishuIdentity(
+            open_id=open_id,
+            real_name=optional_text("name", 64),
+            en_name=optional_text("en_name", 64),
+            avatar_url=optional_text("avatar_url", 512),
+        )

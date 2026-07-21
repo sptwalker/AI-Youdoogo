@@ -14,6 +14,8 @@ def test_login_keeps_default_password_submit_and_separate_feishu_entry() -> None
     assert source.index("</LoginForm>") < source.index('className="feishu-login-button"')
     assert "localStorage.setItem(TOKEN_KEY, token.access_token)" in source
     assert "normalizeAppPath(token.redirect_to)" in source
+    assert "首次登录默认建立成员账号" in source
+    assert "暂无系统访问权限，请联系管理员完成账号授权" not in source
 
 
 def test_auth_guard_preserves_the_intended_same_origin_path() -> None:

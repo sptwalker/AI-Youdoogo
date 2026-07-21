@@ -2,10 +2,11 @@
 
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.exceptions import AppError
@@ -38,9 +39,9 @@ async def test_feishu_login_creates_user(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """首次飞书登录 → 自动开户（member 最低权限）。"""
-    _stub_oauth(monkeypatch, {"open_id": "ou_new", "name": "王五", "en_name": "Wu Wang"})
+    _stub_oauth(monkeypatch, {"open_id": "ou_new_123456", "name": "王五", "en_name": "Wu Wang"})
     user = await auth_service.login_by_feishu(db, "code123")
-    assert user.feishu_open_id == "ou_new" and user.real_name == "王五"
+    assert user.feishu_open_id == "ou_new_123456" and user.real_name == "王五"
     assert user.role_code == "member" and user.en_name == "Wu Wang"
 
 
@@ -50,11 +51,11 @@ async def test_feishu_login_reuses_existing(
     """已存在（如 I1 同步预建）→ 复用不新建。"""
     existing = SysUser(
         id=uuid.uuid4(), username="fs_ou_x", password_hash="!feishu-sso",
-        feishu_open_id="ou_x", role_code="member", real_name="张三",
+        feishu_open_id="ou_existing_123456", role_code="member", real_name="张三",
     )
     db.add(existing)
     await db.commit()
-    _stub_oauth(monkeypatch, {"open_id": "ou_x", "name": "张三"})
+    _stub_oauth(monkeypatch, {"open_id": "ou_existing_123456", "name": "张三"})
     user = await auth_service.login_by_feishu(db, "code")
     assert user.id == existing.id
     n = (await db.execute(select(func.count()).select_from(SysUser))).scalar_one()
@@ -75,12 +76,62 @@ async def test_feishu_login_disabled_blocked(
     """停用账号 → 拒绝登录。"""
     db.add(SysUser(
         id=uuid.uuid4(), username="fs_ou_off", password_hash="x",
-        feishu_open_id="ou_off", role_code="member", is_active=False,
+        feishu_open_id="ou_offline_123456", role_code="member", is_active=False,
     ))
     await db.commit()
-    _stub_oauth(monkeypatch, {"open_id": "ou_off", "name": "停用"})
-    with pytest.raises(AppError, match="停用"):
+    _stub_oauth(monkeypatch, {"open_id": "ou_offline_123456", "name": "停用"})
+    with pytest.raises(AppError, match="不可用"):
         await auth_service.login_by_feishu(db, "code")
+
+
+async def test_feishu_first_login_unique_race_rolls_back_and_reuses_winner() -> None:
+    """并发首次开户撞唯一约束时，失败方回滚后复用已提交账号。"""
+
+    class ScalarResult:
+        def __init__(self, value: SysUser | None) -> None:
+            self.value = value
+
+        def scalar_one_or_none(self) -> SysUser | None:
+            return self.value
+
+    winner = SysUser(
+        id=uuid.uuid4(),
+        username="fs_race_winner",
+        password_hash="!feishu-sso",
+        feishu_open_id="ou_race_123456",
+        role_code="member",
+        is_active=True,
+        is_delete=False,
+    )
+
+    class RaceSession:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.rollback_calls = 0
+            self.added: SysUser | None = None
+
+        async def execute(self, _statement: object) -> ScalarResult:
+            self.execute_calls += 1
+            return ScalarResult(None if self.execute_calls == 1 else winner)
+
+        def add(self, user: SysUser) -> None:
+            self.added = user
+
+        async def commit(self) -> None:
+            raise IntegrityError("INSERT sys_user", {}, Exception("unique conflict"))
+
+        async def rollback(self) -> None:
+            self.rollback_calls += 1
+
+    race_db = RaceSession()
+    resolved = await auth_service.resolve_or_provision_feishu_user(
+        cast(AsyncSession, race_db), "ou_race_123456"
+    )
+
+    assert resolved is winner
+    assert race_db.rollback_calls == 1
+    assert race_db.added is not None
+    assert race_db.added.role_code == "member"
 
 
 def test_oauth_authorize_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -28,13 +28,10 @@ from app.services.feishu_oauth_config import (
     digest,
     load_oauth_config,
     normalize_return_to,
-    valid_feishu_open_id,
 )
 from app.services.feishu_oauth_store import (
     EXCHANGE_TTL_SECONDS,
     STATE_TTL_SECONDS,
-    SUPPORT_CAPTURE_KEY,
-    SUPPORT_CAPTURE_TTL_SECONDS,
     OAuthExchangeData,
     OAuthStateData,
     OAuthStore,
@@ -46,8 +43,6 @@ __all__ = [
     "EXCHANGE_TTL_SECONDS",
     "PRODUCTION_REDIRECT_URL",
     "STATE_TTL_SECONDS",
-    "SUPPORT_CAPTURE_KEY",
-    "SUPPORT_CAPTURE_TTL_SECONDS",
     "FeishuLoginService",
     "InvalidOAuthCallback",
     "InvalidOAuthState",
@@ -182,16 +177,6 @@ class FeishuLoginService:
         if data is None:
             raise InvalidOAuthState
         return data
-
-    async def capture_denied_identity(self, open_id: str) -> bool:
-        if not valid_feishu_open_id(open_id):
-            return False
-        return await self.store.save_denied_identity(
-            open_id, SUPPORT_CAPTURE_TTL_SECONDS
-        )
-
-    async def consume_captured_denied_identity(self) -> str | None:
-        return await self.store.consume_denied_identity()
 
     def expected_origin(self) -> str:
         parsed = urlsplit(self.config_loader().redirect_url)

@@ -15,13 +15,10 @@ from app.services.feishu_oauth_config import (
     InvalidReturnTo,
     OAuthUnavailable,
     normalize_return_to,
-    valid_feishu_open_id,
 )
 
 STATE_TTL_SECONDS = 600
 EXCHANGE_TTL_SECONDS = 60
-SUPPORT_CAPTURE_TTL_SECONDS = 600
-SUPPORT_CAPTURE_KEY = "youdoo:feishu:support:denied-open-id:v1"
 
 
 @dataclass(frozen=True)
@@ -51,10 +48,6 @@ class OAuthStore(Protocol):
     ) -> bool: ...
 
     async def consume_exchange(self, handle_digest: str) -> OAuthExchangeData | None: ...
-
-    async def save_denied_identity(self, open_id: str, ttl: int) -> bool: ...
-
-    async def consume_denied_identity(self) -> str | None: ...
 
     async def close(self) -> None: ...
 
@@ -191,31 +184,6 @@ return value
             )
         except (InvalidReturnTo, TypeError, ValueError):
             return None
-
-    async def save_denied_identity(self, open_id: str, ttl: int) -> bool:
-        try:
-            result = await self._get_client().set(
-                SUPPORT_CAPTURE_KEY,
-                open_id,
-                ex=ttl,
-                nx=True,
-            )
-        except RedisError as exc:
-            raise OAuthUnavailable from exc
-        return bool(result)
-
-    async def consume_denied_identity(self) -> str | None:
-        try:
-            raw = await self._get_client().eval(
-                self._CONSUME_VALUE,
-                1,
-                SUPPORT_CAPTURE_KEY,
-            )
-        except RedisError as exc:
-            raise OAuthUnavailable from exc
-        if not isinstance(raw, str) or not valid_feishu_open_id(raw):
-            return None
-        return raw
 
     async def close(self) -> None:
         if self._client is not None:

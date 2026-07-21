@@ -62,7 +62,16 @@ async def test_code_exchanged_for_user_token_then_open_id() -> None:
     user_route = respx.get(USER_INFO_URL).mock(
         return_value=httpx.Response(
             200,
-            json={"code": 0, "msg": "success", "data": {"open_id": "ou_test_123456"}},
+            json={
+                "code": 0,
+                "msg": "success",
+                "data": {
+                    "open_id": "ou_test_123456",
+                    "name": "测试用户",
+                    "en_name": "Test User",
+                    "avatar_url": "https://example.test/avatar.png",
+                },
+            },
         )
     )
 
@@ -70,6 +79,9 @@ async def test_code_exchanged_for_user_token_then_open_id() -> None:
         "authorization-code-test", "verifier-test-value"
     )
     assert identity.open_id == "ou_test_123456"
+    assert identity.real_name == "测试用户"
+    assert identity.en_name == "Test User"
+    assert identity.avatar_url == "https://example.test/avatar.png"
     token_body = json.loads(token_route.calls.last.request.content)
     assert token_body == {
         "grant_type": "authorization_code",

@@ -18,7 +18,11 @@ from app.core.exceptions import AppError, ok
 from app.core.security import create_access_token
 from app.integrations.feishu.oauth import FeishuOAuthError
 from app.schemas.auth import FeishuExchangeResponse, LoginRequest, TokenResponse, UserOut
-from app.services.auth_service import authenticate, authenticate_feishu, login_by_feishu
+from app.services.auth_service import (
+    authenticate,
+    login_by_feishu,
+    resolve_or_provision_feishu_user,
+)
 from app.services.feishu_login import (
     EXCHANGE_TTL_SECONDS,
     STATE_TTL_SECONDS,
@@ -40,7 +44,6 @@ EXCHANGE_COOKIE_PATH = "/api/v1/auth/feishu/exchange"
 LOGIN_RESULT_PATHS = {
     "success": "/login?feishu=success",
     "cancelled": "/login?feishu=cancelled",
-    "access_required": "/login?feishu=access_required",
     "invalid_state": "/login?feishu=invalid_state",
     "error": "/login?feishu=error",
     "unavailable": "/login?feishu=unavailable",
@@ -159,15 +162,18 @@ async def feishu_callback(
         return _login_redirect("error")
 
     try:
-        user = await authenticate_feishu(db, completed.identity.open_id)
+        user = await resolve_or_provision_feishu_user(
+            db,
+            completed.identity.open_id,
+            real_name=completed.identity.real_name,
+            en_name=completed.identity.en_name,
+            avatar_url=completed.identity.avatar_url,
+        )
     except AppError as exc:
         if exc.status_code == 403:
-            try:
-                await service.capture_denied_identity(completed.identity.open_id)
-            except OAuthUnavailable:
-                # Support capture is best-effort and must not change the generic denial.
-                pass
-            return _login_redirect("access_required")
+            # Disabled/deleted local users remain denied.  Do not expose whether
+            # the identity matched a particular local account.
+            return _login_redirect("error")
         raise
 
     token = _token_for(user.id, user.role_code)

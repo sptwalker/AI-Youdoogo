@@ -123,7 +123,7 @@ export default function Users() {
             <ProFormText
               name="feishu_open_id"
               label="飞书 open_id（可选）"
-              tooltip="只绑定管理员核验过的飞书 open_id；系统不会在首次登录时自动创建用户。"
+              tooltip="填写当前应用内稳定的飞书 open_id；首次登录也会按该身份自动建立成员账号。"
               rules={[{ pattern: /^(|ou[-_][A-Za-z0-9_-]+)$/, message: '请输入以 ou_ 或 ou- 开头的 open_id' }]}
             />
             <ProFormSelect
