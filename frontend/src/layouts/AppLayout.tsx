@@ -1,8 +1,8 @@
 /** 应用主布局：ProLayout + 菜单 + 当前用户/退出。 */
 import { LogoutOutlined } from '@ant-design/icons'
 import { ProLayout } from '@ant-design/pro-components'
-import { Dropdown } from 'antd'
-import { useEffect, useState } from 'react'
+import { Button, Dropdown, Result, Spin } from 'antd'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { fetchMe, ROLE_LABELS, type UserInfo } from '../api/auth'
 import { TOKEN_KEY } from '../api/client'
@@ -44,14 +44,47 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [me, setMe] = useState<UserInfo | null>(null)
+  const [meLoading, setMeLoading] = useState(true)
+  const [meError, setMeError] = useState(false)
+
+  const loadMe = useCallback(async () => {
+    setMeLoading(true)
+    setMeError(false)
+    try {
+      setMe(await fetchMe())
+    } catch {
+      setMe(null)
+      setMeError(true)
+    } finally {
+      setMeLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetchMe().then(setMe).catch(() => {})
-  }, [])
+    void loadMe()
+  }, [loadMe])
 
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY)
     navigate('/login', { replace: true })
+  }
+
+  if (meLoading) {
+    return <Spin fullscreen tip="正在加载当前用户与权限…" />
+  }
+
+  if (meError || !me) {
+    return (
+      <Result
+        status="error"
+        title="无法加载当前用户权限"
+        subTitle="系统没有把权限查询失败降级为普通用户。请重试；若仍失败，请退出后重新登录。"
+        extra={[
+          <Button key="retry" type="primary" onClick={() => void loadMe()}>重试</Button>,
+          <Button key="logout" onClick={logout}>退出登录</Button>,
+        ]}
+      />
+    )
   }
 
   return (
@@ -59,13 +92,13 @@ export default function AppLayout() {
       title="创想悦动AI决策大脑"
       layout="side"
       menu={{ defaultOpenAll: true }}
-      route={buildMenu(me?.role_code === 'admin')}
+      route={buildMenu(me.role_code === 'admin')}
       location={{ pathname: location.pathname }}
       menuItemRender={(item, dom) => (
         <a onClick={() => item.path && navigate(item.path)}>{dom}</a>
       )}
       avatarProps={{
-        title: me ? `${me.real_name || me.username}（${ROLE_LABELS[me.role_code]}）` : '…',
+        title: `${me.real_name || me.username}（${ROLE_LABELS[me.role_code]}）`,
         size: 'small',
         render: (_, dom) => (
           <Dropdown

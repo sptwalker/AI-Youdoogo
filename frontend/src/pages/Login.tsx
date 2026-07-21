@@ -18,6 +18,10 @@ const FEISHU_RETURN_TO_KEY = 'youdoo_feishu_return_to'
 
 const CALLBACK_MESSAGES: Record<string, { type: 'error' | 'info'; message: string }> = {
   cancelled: { type: 'info', message: '已取消飞书授权，您仍可使用账号密码登录。' },
+  access_required: {
+    type: 'error',
+    message: '当前飞书账号暂无系统访问权限，请联系管理员完成账号预绑定或状态确认。',
+  },
   invalid_state: { type: 'error', message: '本次飞书登录已失效，请重新发起登录。' },
   unavailable: { type: 'error', message: '飞书登录暂不可用，请联系管理员。' },
   error: { type: 'error', message: '飞书认证未完成，请稍后重试或使用账号密码登录。' },
@@ -142,7 +146,7 @@ export default function Login() {
             </Button>
             {feedback && <Alert className="login-feedback" showIcon type={feedback.type} message={feedback.message} />}
             <Typography.Text type="secondary" className="login-access-note">
-              飞书仅验证身份；首次登录默认建立成员账号，已有账号沿用系统角色与资源权限。
+              飞书仅验证身份；管理员预绑定本地账号后，登录会沿用该账号的系统角色与资源权限。
             </Typography.Text>
           </div>
         </section>
