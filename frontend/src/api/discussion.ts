@@ -6,6 +6,7 @@ export interface Channel {
   name: string
   department_id: string | null
   default_agent_id: string | null
+  creator_id: string | null
   is_archived: boolean
   create_time: string
 }
@@ -57,6 +58,16 @@ export function addMembers(
   members: { member_type: 'human' | 'ai'; member_id: string; member_name?: string }[],
 ): Promise<{ added: number }> {
   return request({ method: 'POST', url: `/channels/${channelId}/members`, data: { members } })
+}
+
+/** 踢出成员（仅群主）。 */
+export function removeMember(channelId: string, memberType: string, memberId: string): Promise<null> {
+  return request({ method: 'DELETE', url: `/channels/${channelId}/members/${memberType}/${memberId}` })
+}
+
+/** 解散讨论群（仅群主）。 */
+export function disbandChannel(channelId: string): Promise<null> {
+  return request({ method: 'DELETE', url: `/channels/${channelId}` })
 }
 
 export function listChannels(departmentId?: string): Promise<Channel[]> {

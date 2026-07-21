@@ -300,10 +300,18 @@ export default function Dashboard() {
             {/* 右：当前会话 */}
             <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             {activeConv.type === 'group' ? (
-              <GroupChat
-                channelId={activeConv.id} channelName={activeConv.name} liveMessage={liveMsg}
-                onRead={(cid) => setChannels((cs) => cs.map((c) => (c.id === cid ? { ...c, unread: 0 } : c)))}
-              />
+              (() => {
+                const ch = channels.find((c) => c.id === activeConv.id)
+                return (
+                  <GroupChat
+                    channelId={activeConv.id} channelName={activeConv.name} liveMessage={liveMsg}
+                    onRead={(cid) => setChannels((cs) => cs.map((c) => (c.id === cid ? { ...c, unread: 0 } : c)))}
+                    isOwner={!!ch && ch.creator_id === me?.id}
+                    ownerId={ch?.creator_id ?? null}
+                    onDisband={() => { setActiveConv({ type: 'assistant' }); loadChannels() }}
+                  />
+                )
+              })()
             ) : (
             <Card
               title={assistant ? `与${assistant.name}对话` : '我的助理'}

@@ -53,6 +53,7 @@ def _channel_dict(c: DiscussionChannel) -> dict[str, Any]:
         "id": str(c.id), "name": c.name,
         "department_id": str(c.department_id) if c.department_id else None,
         "default_agent_id": str(c.default_agent_id) if c.default_agent_id else None,
+        "creator_id": str(c.creator_id) if c.creator_id else None,
         "is_archived": c.is_archived, "create_time": c.create_time.isoformat(),
     }
 
@@ -208,6 +209,27 @@ async def is_member(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID)
         )
     ).first()
     return row is not None
+
+
+async def is_owner(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """某真人是否群主（= 创建者）。群主可解散群/踢人。"""
+    c = await get_channel(db, channel_id)
+    return c.creator_id is not None and c.creator_id == user_id
+
+
+async def disband_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
+    """解散群（群主）：先归档聊天入 KB（不丢内容），再软删频道 + 全部成员。"""
+    c = await get_channel(db, channel_id)
+    await _archive_to_kb(db, c)  # 解散前把内容提炼入库
+    members = await db.execute(
+        select(ChannelMember).where(
+            ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
+        )
+    )
+    for m in members.scalars():
+        m.is_delete = True
+    c.is_delete = True
+    await db.commit()
 
 
 # ── 未读计数（I5，docs/18）──────────────────────────────

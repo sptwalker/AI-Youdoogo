@@ -76,6 +76,46 @@ async def test_non_member_not_in_my_channels(db: AsyncSession) -> None:
     assert await discussion_service.is_member(db, c.id, outsider) is False
 
 
+# ── 群主：解散 + 踢人 ───────────────────────────────────
+async def test_creator_is_owner(db: AsyncSession) -> None:
+    creator, other = uuid.uuid4(), uuid.uuid4()
+    c = await discussion_service.create_channel(db, name="g", creator_id=creator)
+    assert await discussion_service.is_owner(db, c.id, creator) is True
+    assert await discussion_service.is_owner(db, c.id, other) is False
+
+
+async def test_disband_soft_deletes_channel_and_members(db: AsyncSession) -> None:
+    from app.models.discussion import ChannelMember, DiscussionChannel
+
+    creator, h2 = uuid.uuid4(), uuid.uuid4()
+    c = await discussion_service.create_channel(
+        db, name="g", creator_id=creator,
+        members=[{"member_type": "human", "member_id": h2}],
+    )
+    await discussion_service.disband_channel(db, c.id)
+    # 频道软删
+    ch = await db.get(DiscussionChannel, c.id)
+    assert ch is not None and ch.is_delete is True
+    # 成员软删
+    from sqlalchemy import func, select
+    live = (await db.execute(
+        select(func.count()).select_from(ChannelMember).where(
+            ChannelMember.channel_id == c.id, ChannelMember.is_delete.is_(False)
+        )
+    )).scalar_one()
+    assert live == 0
+    # 不再出现在任何人的"我的群"
+    assert str(c.id) not in await discussion_service.my_channel_ids(db, creator)
+
+
+async def test_channel_dict_has_creator(db: AsyncSession) -> None:
+    """频道字典含 creator_id（前端据此判群主）。"""
+    creator = uuid.uuid4()
+    await discussion_service.create_channel(db, name="g", creator_id=creator)
+    chans = await discussion_service.my_channels_with_unread(db, creator)
+    assert chans and chans[0]["creator_id"] == str(creator)
+
+
 # ── I5 未读计数 ─────────────────────────────────────────
 async def test_unread_count(db: AsyncSession) -> None:
     """群内他人发言 → 未读+；mark_read 清零。"""

@@ -128,10 +128,23 @@ async def add_members(channel_id: uuid.UUID, body: dict, db: DB, _: CurrentUser)
 
 @router.delete("/{channel_id}/members/{member_type}/{member_id}")
 async def remove_member(
-    channel_id: uuid.UUID, member_type: str, member_id: uuid.UUID, db: DB, _: CurrentUser
+    channel_id: uuid.UUID, member_type: str, member_id: uuid.UUID, db: DB, user: CurrentUser
 ) -> dict:
-    """移除成员（I4）。"""
+    """踢出成员（仅群主）。不能踢群主自己。"""
+    if not await discussion_service.is_owner(db, channel_id, user.id):
+        raise AppError("仅群主可踢出成员", code=403, status_code=403)
+    if member_type == "human" and await discussion_service.is_owner(db, channel_id, member_id):
+        raise AppError("不能踢出群主", code=400, status_code=400)
     await discussion_service.remove_member(db, channel_id, member_type, member_id)
+    return ok()
+
+
+@router.delete("/{channel_id}")
+async def disband_channel(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """解散讨论群（仅群主）：归档入 KB 后软删频道 + 全部成员。"""
+    if not await discussion_service.is_owner(db, channel_id, user.id):
+        raise AppError("仅群主可解散讨论群", code=403, status_code=403)
+    await discussion_service.disband_channel(db, channel_id)
     return ok()
 
 

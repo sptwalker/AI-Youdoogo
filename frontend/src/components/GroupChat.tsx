@@ -1,6 +1,6 @@
 /** 群聊窗口（工作桌面讨论组，复用 discussion I1-I7 后端）：
  *  单个群的消息流 + 发送 + 实时接收 + 进群已读清零 + 拉成员。真人+AI 混合。 */
-import { Avatar, Button, Input, Modal, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
+import { Avatar, Button, Input, Modal, Popconfirm, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
 import { PaperClipOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
 import Markdown from './Markdown'
@@ -8,11 +8,13 @@ import { listRoles, type AgentRole } from '../api/agents'
 import { roster, type Colleague } from '../api/auth'
 import {
   addMembers,
+  disbandChannel,
   downloadAttachment,
   listMembers,
   listMessages,
   markRead,
   postMessage,
+  removeMember,
   uploadAttachment,
   type Attachment,
   type Message,
@@ -23,11 +25,17 @@ export default function GroupChat({
   channelName,
   onRead,
   liveMessage,
+  isOwner,
+  ownerId,
+  onDisband,
 }: {
   channelId: string
   channelName: string
   onRead: (channelId: string) => void
   liveMessage: (Message & { channel_id?: string }) | null  // 父级实时推来的消息
+  isOwner: boolean
+  ownerId: string | null
+  onDisband: () => void
 }) {
   const [msgs, setMsgs] = useState<Message[]>([])
   const [text, setText] = useState('')
@@ -36,6 +44,7 @@ export default function GroupChat({
   const [agents, setAgents] = useState<AgentRole[]>([])
   const [members, setMembers] = useState<{ member_type: string; member_id: string; member_name: string }[]>([])
   const [pickOpen, setPickOpen] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
   const [pending, setPending] = useState<Attachment[]>([])  // 待发送附件
   const [uploading, setUploading] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -113,9 +122,18 @@ export default function GroupChat({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <Space>
           <b>{channelName}</b>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{members.length} 成员</Typography.Text>
+          <a style={{ fontSize: 12 }} onClick={() => setMembersOpen(true)}>{members.length} 成员</a>
+          {isOwner && <Tag color="gold">群主</Tag>}
         </Space>
-        <Button size="small" onClick={() => setPickOpen(true)}>+ 拉人/AI</Button>
+        <Space>
+          <Button size="small" onClick={() => setPickOpen(true)}>+ 拉人/AI</Button>
+          {isOwner && (
+            <Popconfirm title="解散该讨论群？聊天记录会存入知识库。" okText="解散" okButtonProps={{ danger: true }}
+              onConfirm={async () => { await disbandChannel(channelId); message.success('已解散'); onDisband() }}>
+              <Button size="small" danger>解散群</Button>
+            </Popconfirm>
+          )}
+        </Space>
       </div>
       <div ref={boxRef} style={{ flex: 1, minHeight: 160, overflowY: 'auto', padding: '4px 2px', background: '#fafafa', borderRadius: 6, marginBottom: 10, fontSize: 12 }}>
         {msgs.length === 0 && (
@@ -191,6 +209,32 @@ export default function GroupChat({
           void listMembers(channelId).then(setMembers)
         }}
       />
+
+      {/* 成员名单：群主可踢人 */}
+      <Modal open={membersOpen} onCancel={() => setMembersOpen(false)} footer={null} title="群成员">
+        {members.map((m) => {
+          const isTheOwner = m.member_type === 'human' && m.member_id === ownerId
+          return (
+            <div key={`${m.member_type}-${m.member_id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderTop: '1px solid #f0f0f0' }}>
+              <Space>
+                <span>{m.member_type === 'ai' ? '🤖' : '👤'}</span>
+                <span>{m.member_name || '（未命名）'}</span>
+                {isTheOwner && <Tag color="gold">群主</Tag>}
+              </Space>
+              {isOwner && !isTheOwner && (
+                <Popconfirm title={`把「${m.member_name || '该成员'}」踢出群？`}
+                  onConfirm={async () => {
+                    await removeMember(channelId, m.member_type, m.member_id)
+                    message.success('已踢出')
+                    void listMembers(channelId).then(setMembers)
+                  }}>
+                  <a style={{ color: '#cf1322' }}>踢出</a>
+                </Popconfirm>
+              )}
+            </div>
+          )
+        })}
+      </Modal>
     </div>
   )
 }
