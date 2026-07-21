@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
@@ -18,6 +19,12 @@ from app.core.database import get_db
 from app.core.exceptions import AppError, ok
 from app.core.sse import sse_response
 from app.knowledge import storage
+from app.models.discussion import (
+    MEMBER_HUMAN,
+    ChannelMember,
+    DiscussionChannel,
+    DiscussionMessage,
+)
 from app.models.system import SysUser
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 from app.services import discussion_service
@@ -29,6 +36,40 @@ Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
 
 _MAX_ATTACH_BYTES = 20 * 1024 * 1024  # 单附件 20MB 上限
 _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+_MANAGER_ROLES = {"admin", "executive"}
+
+
+async def _require_channel_member(
+    db: AsyncSession, channel_id: uuid.UUID, user: SysUser
+) -> None:
+    """校验频道存在且当前真人是有效成员。"""
+    await discussion_service.get_channel(db, channel_id)
+    if not await discussion_service.is_member(db, channel_id, user.id):
+        raise AppError("仅群成员可访问", code=403, status_code=403)
+
+
+async def _can_download_attachment(
+    db: AsyncSession, storage_path: str, user_id: uuid.UUID
+) -> bool:
+    """附件必须已挂在当前用户可访问群的一条有效消息上。"""
+    stmt = (
+        select(DiscussionMessage.attachments)
+        .join(DiscussionChannel, DiscussionChannel.id == DiscussionMessage.channel_id)
+        .join(ChannelMember, ChannelMember.channel_id == DiscussionMessage.channel_id)
+        .where(
+            DiscussionMessage.is_delete.is_(False),
+            DiscussionChannel.is_delete.is_(False),
+            ChannelMember.member_type == MEMBER_HUMAN,
+            ChannelMember.member_id == user_id,
+            ChannelMember.is_delete.is_(False),
+        )
+    )
+    attachment_groups = (await db.execute(stmt)).scalars()
+    return any(
+        isinstance(attachment, dict) and attachment.get("storage_path") == storage_path
+        for attachments in attachment_groups
+        for attachment in (attachments or [])
+    )
 
 
 @router.post("/attachments")
@@ -53,12 +94,17 @@ async def upload_attachment(
 
 @router.get("/attachments/download")
 async def download_attachment(
-    storage_path: Annotated[str, Query()], name: Annotated[str, Query()], _user: CurrentUser
+    storage_path: Annotated[str, Query()],
+    name: Annotated[str, Query()],
+    db: DB,
+    user: CurrentUser,
 ) -> StreamingResponse:
     """下载群聊附件（storage_path=bucket/object，I6）。"""
     _, _, object_name = storage_path.partition("/")
     if not object_name.startswith("chat/"):  # 限定只能下群聊附件，防越权读任意对象
         raise AppError("非法附件路径", code=400, status_code=400)
+    if not await _can_download_attachment(db, storage_path, user.id):
+        raise AppError("无权访问该附件", code=403, status_code=403)
     data = await storage.get_object_bytes(object_name)
     return StreamingResponse(
         io.BytesIO(data), media_type="application/octet-stream",
@@ -69,11 +115,15 @@ async def download_attachment(
 @router.get("")
 async def list_channels(
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     department_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> dict:
-    """频道列表（可按部门过滤）。"""
-    return ok(await discussion_service.list_channels(db, department_id=department_id))
+    """频道列表（普通用户仅本人群，管理角色可做全局管理）。"""
+    channels = await discussion_service.list_channels(db, department_id=department_id)
+    if user.role_code in _MANAGER_ROLES:
+        return ok(channels)
+    member_channel_ids = set(await discussion_service.my_channel_ids(db, user.id))
+    return ok([channel for channel in channels if channel["id"] in member_channel_ids])
 
 
 @router.post("")
@@ -94,10 +144,24 @@ async def realtime_stream(db: DB, user: CurrentUser) -> StreamingResponse:
 
     这是"服务端主动推送"——A 发言 B/C 不刷新即收到（Redis pub/sub 跨 worker 广播）。
     """
+    from app.core.database import async_session_factory
     from app.services import realtime_service
 
     channel_ids = await discussion_service.my_channel_ids(db, user.id)  # 仅订阅我所在的群
-    return sse_response(realtime_service.subscribe(channel_ids))
+
+    async def _still_member(channel_id: str) -> bool:
+        try:
+            parsed_channel_id = uuid.UUID(channel_id)
+        except ValueError:
+            return False
+        async with async_session_factory() as membership_db:
+            return await discussion_service.is_member(
+                membership_db, parsed_channel_id, user.id
+            )
+
+    return sse_response(
+        realtime_service.subscribe(channel_ids, authorize=_still_member)
+    )
 
 
 @router.get("/mine")
@@ -109,19 +173,23 @@ async def my_channels(db: DB, user: CurrentUser) -> dict:
 @router.post("/{channel_id}/read")
 async def mark_read(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
     """把某群未读清零（进群/读消息时调，I5）。"""
+    await _require_channel_member(db, channel_id, user)
     await discussion_service.mark_read(db, channel_id, user.id)
     return ok()
 
 
 @router.get("/{channel_id}/members")
-async def list_members(channel_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
+async def list_members(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
     """群成员名单（I4）。"""
+    await _require_channel_member(db, channel_id, user)
     return ok(await discussion_service.list_members(db, channel_id))
 
 
 @router.post("/{channel_id}/members")
-async def add_members(channel_id: uuid.UUID, body: dict, db: DB, _: CurrentUser) -> dict:
-    """加成员（真人+AI 混合，I4）。body: {members: [{member_type, member_id, member_name}]}。"""
+async def add_members(channel_id: uuid.UUID, body: dict, db: DB, user: CurrentUser) -> dict:
+    """群主加成员。body: {members: [{member_type, member_id, member_name}]}。"""
+    if not await discussion_service.is_owner(db, channel_id, user.id):
+        raise AppError("仅群主可添加成员", code=403, status_code=403)
     n = await discussion_service.add_members(db, channel_id, body.get("members") or [])
     return ok({"added": n})
 
@@ -159,10 +227,11 @@ async def archive_channel(channel_id: uuid.UUID, db: DB, _: Manager) -> dict:
 async def list_messages(
     channel_id: uuid.UUID,
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
     """频道消息流。"""
+    await _require_channel_member(db, channel_id, user)
     return ok(await discussion_service.list_messages(db, channel_id, limit=limit))
 
 
@@ -171,6 +240,7 @@ async def post_message(
     channel_id: uuid.UUID, body: MessagePost, db: DB, user: CurrentUser
 ) -> StreamingResponse:
     """发言（@ 的 AI 顾问逐个逐字流式回复，SSE）。"""
+    await _require_channel_member(db, channel_id, user)
     return sse_response(
         discussion_service.post_message_stream(
             db, channel_id,

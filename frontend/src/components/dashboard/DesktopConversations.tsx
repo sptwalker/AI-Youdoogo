@@ -1,6 +1,6 @@
 /** 工作桌面对话区：统一承载我的助理、讨论组、未读数和实时消息订阅。 */
 import { Badge, Card, Input, Modal, Select, message } from 'antd'
-import { useCallback, useEffect, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
 import { roster, type Colleague } from '../../api/auth'
 import { listRoles, type AgentRole } from '../../api/agents'
 import {
@@ -32,23 +32,43 @@ export default function DesktopConversations({
   const [agents, setAgents] = useState<AgentRole[]>([])
   const [users, setUsers] = useState<Colleague[]>([])
   const [creating, setCreating] = useState(false)
+  const [realtimeConnected, setRealtimeConnected] = useState(false)
+  const activeChannelIdRef = useRef<string | null>(null)
+  const channelSignatureRef = useRef<string | null>(null)
+  const subscriptionRef = useRef<ReturnType<typeof subscribeRealtime> | null>(null)
 
-  const loadChannels = useCallback(() => {
-    void myChannels().then(setChannels).catch(() => {})
+  activeChannelIdRef.current = active.type === 'group' ? active.id : null
+
+  const loadChannels = useCallback(async (signal?: AbortSignal, forceResubscribe = false) => {
+    const items = await myChannels({ signal, silent: true })
+    if (signal?.aborted) return
+    const signature = items.map((item) => item.id).sort().join(',')
+    const previousSignature = channelSignatureRef.current
+    channelSignatureRef.current = signature
+    setChannels(items)
+    setActive((current) => (
+      current.type === 'group' && !items.some((item) => item.id === current.id)
+        ? { type: 'assistant' }
+        : current
+    ))
+    if (forceResubscribe || (previousSignature !== null && previousSignature !== signature)) {
+      subscriptionRef.current?.restart()
+    }
   }, [])
 
   useEffect(() => {
-    loadChannels()
-    void listRoles().then(setAgents).catch(() => {})
-    void roster().then(setUsers).catch(() => {})
-  }, [loadChannels])
+    let disposed = false
+    void listRoles().then((items) => { if (!disposed) setAgents(items) }).catch(() => {})
+    void roster().then((items) => { if (!disposed) setUsers(items) }).catch(() => {})
+    return () => { disposed = true }
+  }, [])
 
   useEffect(() => {
-    const cancel = subscribeRealtime((event, data) => {
+    const subscription = subscribeRealtime((event, data) => {
       if (event !== 'message') return
       const incoming = data as unknown as ChanMessage & { channel_id?: string }
       setLiveMessage(incoming)
-      const activeId = active.type === 'group' ? active.id : null
+      const activeId = activeChannelIdRef.current
       if (incoming.channel_id && incoming.channel_id !== activeId) {
         setChannels((items) => items.map((channel) => (
           channel.id === incoming.channel_id
@@ -56,9 +76,35 @@ export default function DesktopConversations({
             : channel
         )))
       }
+    }, (state) => {
+      setRealtimeConnected(state === 'connected')
     })
-    return cancel
-  }, [active])
+    subscriptionRef.current = subscription
+    return () => {
+      if (subscriptionRef.current === subscription) subscriptionRef.current = null
+      subscription()
+    }
+  }, [])
+
+  // Redis/SSE 故障时高频轮询；健康时保留低频群列表刷新，以发现“被拉入新群”。
+  useEffect(() => {
+    const ctrl = new AbortController()
+    const intervalMs = realtimeConnected ? 60000 : 5000
+    let timer: number | undefined
+    let disposed = false
+    const poll = async () => {
+      try {
+        await loadChannels(ctrl.signal)
+      } catch { /* 静默降级，下一轮继续 */ }
+      if (!disposed) timer = window.setTimeout(() => { void poll() }, intervalMs)
+    }
+    void poll()
+    return () => {
+      disposed = true
+      ctrl.abort()
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [loadChannels, realtimeConnected])
 
   const createDiscussion = async () => {
     const name = newGroupName.trim()
@@ -85,8 +131,13 @@ export default function DesktopConversations({
       setNewGroupHumans([])
       setNewGroupAis([])
       setNewGroupOpen(false)
-      loadChannels()
       setActive({ type: 'group', id: channel.id, name: channel.name })
+      try {
+        await loadChannels(undefined, true)
+      } catch {
+        // 群已创建但列表刷新暂时失败时，也要立刻让服务端重取订阅集合。
+        subscriptionRef.current?.restart()
+      }
     } finally {
       setCreating(false)
     }
@@ -134,9 +185,14 @@ export default function DesktopConversations({
             channelName={active.name}
             liveMessage={liveMessage}
             onRead={handleRead}
+            realtimeConnected={realtimeConnected}
             isOwner={activeChannel?.creator_id === meId}
             ownerId={activeChannel?.creator_id ?? null}
-            onDisband={() => { setActive({ type: 'assistant' }); loadChannels() }}
+            onMembershipChange={() => { void loadChannels(undefined, true).catch(() => {}) }}
+            onDisband={() => {
+              setActive({ type: 'assistant' })
+              void loadChannels(undefined, true).catch(() => {})
+            }}
           />
         ) : (
           <AssistantChatCard {...assistant} />

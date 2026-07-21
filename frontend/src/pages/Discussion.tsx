@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react'
 import Markdown from '../components/Markdown'
 import { listRoles, type AgentRole } from '../api/agents'
 import {
-  listChannels,
   listMessages,
   markRead,
   myChannels,
@@ -27,20 +26,15 @@ export default function Discussion() {
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState<Record<string, number>>({})  // channel_id → 未读数
 
-  const loadUnread = () =>
+  useEffect(() => {
     void myChannels().then((cs) => {
+      setChannels(cs)
       const map: Record<string, number> = {}
       for (const c of cs) map[c.id] = c.unread
       setUnread(map)
-    })
-
-  useEffect(() => {
-    void listChannels().then((cs) => {
-      setChannels(cs)
       if (cs.length) setCurrent((c) => c ?? cs[0])
     })
     void listRoles().then(setAgents)
-    loadUnread()
   }, [])
 
   const loadMessages = (channelId: string) => void listMessages(channelId).then(setMessages)

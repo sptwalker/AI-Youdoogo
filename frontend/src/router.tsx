@@ -2,26 +2,9 @@
 import { createBrowserRouter } from 'react-router-dom'
 import RequireAuth from './components/RequireAuth'
 import AppLayout from './layouts/AppLayout'
-import Agents from './pages/Agents'
-import AiProviders from './pages/AiProviders'
-import AuditLog from './pages/AuditLog'
-import Dashboard from './pages/Dashboard'
-import DataSources from './pages/DataSources'
-import Discussion from './pages/Discussion'
-import Knowledge from './pages/Knowledge'
-import KnowledgeBases from './pages/KnowledgeBases'
-import Login from './pages/Login'
-import Meetings from './pages/Meetings'
-import OpsBoard from './pages/OpsBoard'
-import OrgAdmin from './pages/OrgAdmin'
-import Proposals from './pages/Proposals'
-import SemanticTerms from './pages/SemanticTerms'
-import SystemConfig from './pages/SystemConfig'
-import Tasks from './pages/Tasks'
-import Users from './pages/Users'
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <Login /> },
+  { path: '/login', lazy: async () => ({ Component: (await import('./pages/Login')).default }) },
   {
     path: '/',
     element: (
@@ -30,22 +13,22 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: 'knowledge', element: <Knowledge /> },
-      { path: 'ops-board', element: <OpsBoard /> },
-      { path: 'agents', element: <Agents /> },
-      { path: 'tasks', element: <Tasks /> },
-      { path: 'proposals', element: <Proposals /> },
-      { path: 'meetings', element: <Meetings /> },
-      { path: 'discussion', element: <Discussion /> },
-      { path: 'org', element: <OrgAdmin /> },
-      { path: 'users', element: <Users /> },
-      { path: 'knowledge-bases', element: <KnowledgeBases /> },
-      { path: 'data-sources', element: <DataSources /> },
-      { path: 'semantic-terms', element: <SemanticTerms /> },
-      { path: 'ai-providers', element: <AiProviders /> },
-      { path: 'system-config', element: <SystemConfig /> },
-      { path: 'audit-log', element: <AuditLog /> },
+      { index: true, lazy: async () => ({ Component: (await import('./pages/Dashboard')).default }) },
+      { path: 'knowledge', lazy: async () => ({ Component: (await import('./pages/Knowledge')).default }) },
+      { path: 'ops-board', lazy: async () => ({ Component: (await import('./pages/OpsBoard')).default }) },
+      { path: 'agents', lazy: async () => ({ Component: (await import('./pages/Agents')).default }) },
+      { path: 'tasks', lazy: async () => ({ Component: (await import('./pages/Tasks')).default }) },
+      { path: 'proposals', lazy: async () => ({ Component: (await import('./pages/Proposals')).default }) },
+      { path: 'meetings', lazy: async () => ({ Component: (await import('./pages/Meetings')).default }) },
+      { path: 'discussion', lazy: async () => ({ Component: (await import('./pages/Discussion')).default }) },
+      { path: 'org', lazy: async () => ({ Component: (await import('./pages/OrgAdmin')).default }) },
+      { path: 'users', lazy: async () => ({ Component: (await import('./pages/Users')).default }) },
+      { path: 'knowledge-bases', lazy: async () => ({ Component: (await import('./pages/KnowledgeBases')).default }) },
+      { path: 'data-sources', lazy: async () => ({ Component: (await import('./pages/DataSources')).default }) },
+      { path: 'semantic-terms', lazy: async () => ({ Component: (await import('./pages/SemanticTerms')).default }) },
+      { path: 'ai-providers', lazy: async () => ({ Component: (await import('./pages/AiProviders')).default }) },
+      { path: 'system-config', lazy: async () => ({ Component: (await import('./pages/SystemConfig')).default }) },
+      { path: 'audit-log', lazy: async () => ({ Component: (await import('./pages/AuditLog')).default }) },
     ],
   },
 ])

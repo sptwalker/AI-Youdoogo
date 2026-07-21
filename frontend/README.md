@@ -1,4 +1,17 @@
-# React + TypeScript + Vite
+# YOUDOOGO 前端
+
+React + TypeScript + Vite 管理端，覆盖工作桌面、知识库、任务、提案、会议、组织、群聊与系统配置。
+
+```bash
+npm ci
+npm run dev
+npm run lint
+npm run build
+```
+
+开发服务器通过 Vite 代理访问后端 `/api/v1`；生产镜像由 `frontend/Dockerfile` 构建，Nginx 托管 SPA 并反向代理 API。
+
+## 脚手架说明
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

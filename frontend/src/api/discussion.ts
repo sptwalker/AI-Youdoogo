@@ -1,5 +1,18 @@
 /** 协作空间 API（对应后端 app/api/v1/discussion.py）。 */
-import { request, sseRequest, sseSubscribe, TOKEN_KEY, type SseHandler } from './client'
+import {
+  request,
+  sseRequest,
+  sseSubscribe,
+  TOKEN_KEY,
+  type SseConnectionState,
+  type SseHandler,
+  type SseSubscription,
+} from './client'
+
+export interface DiscussionRequestOptions {
+  signal?: AbortSignal
+  silent?: boolean
+}
 
 export interface Channel {
   id: string
@@ -38,18 +51,21 @@ export interface ChannelWithUnread extends Channel {
 }
 
 /** 我的群 + 未读数（I5，话题页签用）。 */
-export function myChannels(): Promise<ChannelWithUnread[]> {
-  return request({ method: 'GET', url: '/channels/mine' })
+export function myChannels(options: DiscussionRequestOptions = {}): Promise<ChannelWithUnread[]> {
+  return request({ method: 'GET', url: '/channels/mine', ...options })
 }
 
 /** 某群未读清零（进群/读消息时，I5）。 */
-export function markRead(channelId: string): Promise<null> {
-  return request({ method: 'POST', url: `/channels/${channelId}/read` })
+export function markRead(channelId: string, options: DiscussionRequestOptions = {}): Promise<null> {
+  return request({ method: 'POST', url: `/channels/${channelId}/read`, ...options })
 }
 
 /** 群成员名单（I4）。 */
-export function listMembers(channelId: string): Promise<{ member_type: string; member_id: string; member_name: string }[]> {
-  return request({ method: 'GET', url: `/channels/${channelId}/members` })
+export function listMembers(
+  channelId: string,
+  options: DiscussionRequestOptions = {},
+): Promise<{ member_type: string; member_id: string; member_name: string }[]> {
+  return request({ method: 'GET', url: `/channels/${channelId}/members`, ...options })
 }
 
 /** 加成员（真人+AI 混合，I4）。 */
@@ -87,8 +103,8 @@ export function createChannel(payload: {
   return request({ method: 'POST', url: '/channels', data: payload })
 }
 
-export function listMessages(channelId: string): Promise<Message[]> {
-  return request({ method: 'GET', url: `/channels/${channelId}/messages` })
+export function listMessages(channelId: string, options: DiscussionRequestOptions = {}): Promise<Message[]> {
+  return request({ method: 'GET', url: `/channels/${channelId}/messages`, ...options })
 }
 
 /** 发言，SSE 逐字流式回调：message_end(真人消息) → 每个 @AI 依次
@@ -124,9 +140,12 @@ export async function downloadAttachment(att: Attachment): Promise<void> {
   URL.revokeObjectURL(a.href)
 }
 
-/** 订阅实时消息推送（I3）。别人在群发言即时收到。返回取消函数。 */
-export function subscribeRealtime(onEvent: SseHandler): () => void {
-  return sseSubscribe('/channels/realtime/stream', onEvent)
+/** 订阅实时消息推送（I3）。别人在群发言即时收到，并暴露连接状态供轮询降级。 */
+export function subscribeRealtime(
+  onEvent: SseHandler,
+  onStateChange?: (state: SseConnectionState) => void,
+): SseSubscription {
+  return sseSubscribe('/channels/realtime/stream', onEvent, { onStateChange })
 }
 
 export function promoteMessage(

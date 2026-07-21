@@ -43,6 +43,39 @@ async def handle_event(
     )
 
 
+async def outbox_lease_heartbeat(
+    stop: asyncio.Event,
+    *,
+    event_id: uuid.UUID,
+    worker_id: str,
+    lease_seconds: int,
+) -> None:
+    """LLM、向量化等长任务运行时用独立会话续租 OutboxEvent。"""
+    interval = max(1.0, lease_seconds / 3)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            pass
+        try:
+            async with async_session_factory() as heartbeat_db:
+                renewed = await outbox_service.renew_lease(
+                    heartbeat_db,
+                    event_id,
+                    worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                )
+                if not renewed:
+                    await heartbeat_db.rollback()
+                    return
+                await heartbeat_db.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("outbox lease 续租失败 event=%s", event_id, exc_info=True)
+
+
 async def process_one(
     db: AsyncSession,
     *,
@@ -60,6 +93,16 @@ async def process_one(
         await db.rollback()
         return False
     await db.commit()
+    heartbeat_stop = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        outbox_lease_heartbeat(
+            heartbeat_stop,
+            event_id=event.id,
+            worker_id=worker_id,
+            lease_seconds=settings.workflow_event_lease_seconds,
+        ),
+        name=f"outbox-heartbeat-{event.id}",
+    )
     try:
         disposition = await handle_event(
             db, event, worker_id=worker_id, agent_runner=agent_runner
@@ -90,10 +133,20 @@ async def process_one(
                 error=str(exc),
                 retry_delay_seconds=settings.workflow_retry_delay_seconds,
             )
-            if terminal:
+            if terminal and current.aggregate_type in {"workflow", "workflow_step"}:
                 await workflow_service.fail_from_outbox(db, current, error=str(exc))
+            elif terminal:
+                logger.error(
+                    "非 workflow outbox 重试耗尽 event=%s type=%s error=%s",
+                    current.id,
+                    current.event_type,
+                    str(exc),
+                )
             await db.commit()
         raise
+    finally:
+        heartbeat_stop.set()
+        await asyncio.gather(heartbeat, return_exceptions=True)
     return True
 
 
