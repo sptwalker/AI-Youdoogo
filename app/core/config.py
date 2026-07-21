@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     workflow_event_lease_seconds: int = 300
     workflow_step_lease_seconds: int = 600
     workflow_retry_delay_seconds: int = 5
+    workflow_recovery_scan_seconds: float = 30.0
+    workflow_recovery_batch_size: int = 100
 
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义

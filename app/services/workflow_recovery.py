@@ -1,0 +1,73 @@
+"""Recovery scan for expired workflow step leases."""
+
+from __future__ import annotations
+
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.workflow import OUTBOX_FAILED, STEP_RUNNING, OutboxEvent, WorkflowStep
+from app.services import outbox_service, workflow_repository
+
+logger = logging.getLogger(__name__)
+
+
+async def requeue_expired_steps(db: AsyncSession, *, batch_size: int = 100) -> int:
+    """为租约过期步骤补发确定性执行事件，返回新建事件数。"""
+    now = outbox_service.utcnow()
+    steps = list(
+        (
+            await db.execute(
+                select(WorkflowStep)
+                .where(
+                    WorkflowStep.is_delete.is_(False),
+                    WorkflowStep.status == STEP_RUNNING,
+                    WorkflowStep.lease_until.is_not(None),
+                    WorkflowStep.lease_until < now,
+                )
+                .order_by(WorkflowStep.lease_until)
+                .limit(max(1, batch_size))
+            )
+        ).scalars()
+    )
+    created = 0
+    for step in steps:
+        dedupe_key = f"workflow-step:{step.id}:recover:v{step.version}"
+        existing = (
+            await db.execute(select(OutboxEvent).where(OutboxEvent.dedupe_key == dedupe_key))
+        ).scalar_one_or_none()
+        if existing is not None and existing.status != OUTBOX_FAILED:
+            continue
+        run = await workflow_repository.get_run(db, step.workflow_run_id)
+        # A terminal failed recovery event already propagates failure; do not silently replace it.
+        if existing is not None:
+            logger.error(
+                "expired step recovery event already failed step=%s event=%s",
+                step.id,
+                existing.id,
+            )
+            continue
+        await outbox_service.enqueue(
+            db,
+            aggregate_type="workflow_step",
+            aggregate_id=step.id,
+            event_type="workflow.step.execute",
+            dedupe_key=dedupe_key,
+            payload={
+                "workflow_run_id": str(run.id),
+                "workflow_step_id": str(step.id),
+                "trace_id": str(run.trace_id),
+                "recovery": True,
+            },
+        )
+        await workflow_repository.append_event(
+            db,
+            run,
+            "step.recovery_enqueued",
+            step=step,
+            attempt=step.attempt,
+            payload={"expired_lease_owner": step.lease_owner, "step_version": step.version},
+        )
+        created += 1
+    return created

@@ -18,16 +18,19 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent, run_agent_stream
-from app.agents.contracts import ExecutionContext
-from app.agents.skills import execute_all, fold_notes
 from app.core.exceptions import AppError
 from app.core.sse import Event
 from app.knowledge.ingest import ingest_text
-from app.models.agent import TIER_MEMBER, AgentRole, AgentTaskRecord
-from app.models.desktop import SPEAKER_AI, SPEAKER_USER, DesktopMessage
+from app.models.agent import TIER_MEMBER, AgentRole
+from app.models.desktop import DesktopMessage
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.models.system import SysUser
-from app.services import config_service, knowledge_base_service
+from app.services import (
+    config_service,
+    desktop_chat_repository,
+    desktop_chat_streaming,
+    knowledge_base_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +114,7 @@ async def _history_days(db: AsyncSession) -> int:
 
 
 def _msg_dict(m: DesktopMessage) -> dict[str, Any]:
-    return {
-        "id": str(m.id),
-        "speaker_type": m.speaker_type,
-        "speaker_agent_id": str(m.speaker_agent_id) if m.speaker_agent_id else None,
-        "speaker_name": m.speaker_name,
-        "content": m.content,
-        "create_time": m.create_time.isoformat(),
-    }
+    return desktop_chat_repository.message_dict(m)
 
 
 async def archive_old(db: AsyncSession, user: SysUser, days: int | None = None) -> int:
@@ -200,21 +196,6 @@ async def list_addable_agents(db: AsyncSession, user: SysUser) -> list[dict[str,
     ]
 
 
-async def _recent_window(db: AsyncSession, user: SysUser) -> list[DesktopMessage]:
-    """折进提示词的最近若干条消息（升序）。"""
-    stmt = (
-        select(DesktopMessage)
-        .where(DesktopMessage.owner_user_id == user.id)
-        .order_by(DesktopMessage.create_time.desc())
-        .limit(_RECENT_CONTEXT)
-    )
-    return list(reversed(list((await db.execute(stmt)).scalars())))
-
-
-def _transcript(convo: list[tuple[str, str]]) -> str:
-    return "\n".join(f"{name}：{content}" for name, content in convo)
-
-
 async def _resolve_participants(
     db: AsyncSession, assistant: AgentRole, add_agent_ids: list[uuid.UUID]
 ) -> list[AgentRole]:
@@ -240,191 +221,27 @@ async def _resolve_participants(
 async def send_stream(
     db: AsyncSession, user: SysUser, message: str, add_agent_ids: list[uuid.UUID]
 ) -> AsyncIterator[Event]:
-    """发一条消息 → 圆桌多AI依次多轮流式发言。
-
-    SSE 事件流：message_end(用户消息回显) → 每个 AI 依次
-    message_start → delta* → message_end(落库消息)。落库逻辑与非流式版一致。
-    """
-    if len(set(add_agent_ids)) > _MAX_ADD:
-        raise AppError(f"最多再加入 {_MAX_ADD} 个 AI")
-    assistant = await get_or_create_assistant(db, user)
-    participants = await _resolve_participants(db, assistant, add_agent_ids)
-
-    rounds = _DEFAULT_ROUNDS
-    try:
-        rounds = int(await config_service.resolve(db, "desktop_roundtable_rounds", _DEFAULT_ROUNDS))
-    except (TypeError, ValueError):
-        pass
-    rounds = max(1, min(rounds, _MAX_ROUNDS))
-    if len(participants) == 1:  # 只有助理，无人可讨论
-        rounds = 1
-
-    # 折叠上下文：最近窗口 + 本轮逐步追加
-    convo: list[tuple[str, str]] = [
-        (m.speaker_name, m.content) for m in await _recent_window(db, user)
-    ]
-    user_name = _display(user)
-    user_msg = DesktopMessage(
-        owner_user_id=user.id,
-        speaker_type=SPEAKER_USER,
-        speaker_name=user_name,
-        content=message,
+    runtime = desktop_chat_streaming.DesktopChatRuntime(
+        get_assistant=get_or_create_assistant,
+        resolve_participants=_resolve_participants,
+        display_user=_display,
+        agent_stream=run_agent_stream,
+        agent_runner=run_agent,
     )
-    db.add(user_msg)
-    await db.commit()
-    await db.refresh(user_msg)
-    convo.append((user_name, message))
-    yield ("message_end", _msg_dict(user_msg))
-
-    # 复合任务编排（docs/14 阶段B）：仅单助理时试规划多步任务；命中则起编排、
-    # 发进度卡消息并跳过圆桌（多 AI 圆桌是讨论，不是任务执行）。故障退回圆桌。
-    if len(participants) == 1:
-        snap = await _try_orchestrate(db, user, assistant, message)
-        if snap is not None:
-            async for ev in _emit_orchestration(db, user, assistant, snap):
-                yield ev
-            return
-
-    for _round in range(rounds):
-        for agent in participants:
-            others = "、".join(p.name for p in participants if p.id != agent.id)
-            hint = (
-                f"以下是圆桌对话记录：\n{_transcript(convo)}\n\n"
-                f"请以「{agent.name}」的身份，结合以上讨论"
-                + (f"（在座还有{others}）" if others else "")
-                + "简明发表你的看法，不要重复他人已说过的内容。"
-            )
-            yield ("message_start", {"speaker_agent_id": str(agent.id), "speaker_name": agent.name})
-            record: AgentTaskRecord | None = None
-            async for item in run_agent_stream(
-                db,
-                agent,
-                task_type="desktop_chat",
-                input_summary=f"桌面对话：{message[:40]}",
-                user_message=hint,
-                user_id=user.id,
-                use_knowledge=True,
-            ):
-                if isinstance(item, AgentTaskRecord):
-                    record = item
-                else:
-                    yield ("delta", {"text": item})
-            assert record is not None  # run_agent_stream 末项必为记录
-            reply = record.output_content or record.error_msg or "（无回应）"
-            # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库（DB 与显示一致）
-            # user_intent 透传用户原句：取数解读轮据此判断是否还要交付日报（阶段A,docs/14）
-            proto = await execute_all(
-                db,
-                agent,
-                reply,
-                user_id=user.id,
-                user_intent=message,
-                execution_context=ExecutionContext(
-                    user_id=user.id,
-                    user_intent=message,
-                    agent_runner=run_agent,
-                ),
-            )
-            reply = fold_notes(reply, proto)
-            ai_msg = DesktopMessage(
-                owner_user_id=user.id,
-                speaker_type=SPEAKER_AI,
-                speaker_agent_id=agent.id,
-                speaker_name=agent.name,
-                content=reply,
-            )
-            db.add(ai_msg)
-            await db.commit()
-            await db.refresh(ai_msg)
-            convo.append((agent.name, reply))
-            yield ("message_end", _msg_dict(ai_msg))
-            # 被咨询 AI 的答复作为独立消息追加（下一轮圆桌经 convo 可见，无需追问轮）
-            for consulted, rec in proto.consult_replies:
-                answer = rec.output_content or rec.error_msg or "（无回应）"
-                yield (
-                    "message_start",
-                    {"speaker_agent_id": str(consulted.id), "speaker_name": consulted.name},
-                )
-                yield ("delta", {"text": answer})  # 咨询是单发非流式，整段一个 delta
-                c_msg = DesktopMessage(
-                    owner_user_id=user.id,
-                    speaker_type=SPEAKER_AI,
-                    speaker_agent_id=consulted.id,
-                    speaker_name=consulted.name,
-                    content=answer,
-                )
-                db.add(c_msg)
-                await db.commit()
-                await db.refresh(c_msg)
-                convo.append((consulted.name, answer))
-                yield ("message_end", _msg_dict(c_msg))
+    async for event in desktop_chat_streaming.send_stream(
+        db,
+        user,
+        message,
+        add_agent_ids,
+        runtime=runtime,
+        default_rounds=_DEFAULT_ROUNDS,
+        max_add=_MAX_ADD,
+        max_rounds=_MAX_ROUNDS,
+        recent_context=_RECENT_CONTEXT,
+    ):
+        yield event
 
 
-async def _try_orchestrate(
-    db: AsyncSession, user: SysUser, assistant: AgentRole, message: str
-) -> dict[str, Any] | None:
-    """试把用户消息当复合任务规划编排。非复合/故障 → None（调用方走圆桌）。永不 raise。"""
-    from app.services import orchestration_service
-
-    try:
-        return await orchestration_service.start(
-            db,
-            message,
-            creator_id=user.id,
-            assignee_agent_id=assistant.id,
-            operator_id=user.id,
-        )
-    except Exception:  # noqa: BLE001 - 编排故障不阻断对话，退回圆桌
-        logger.warning("桌面编排启动失败，退回普通对话", exc_info=True)
-        return None
-
-
-def _progress_text(snap: dict[str, Any]) -> str:
-    """把编排进度快照渲染成一条对话消息（折叠「任务进度」文本卡）。"""
-    icon = {
-        "accepted": "✅",
-        "succeeded": "✅",
-        "reported": "⏸",
-        "waiting_human": "⏸",
-        "executing": "▶",
-        "running": "▶",
-        "created": "○",
-        "dispatched": "○",
-        "queued": "○",
-        "rejected": "✕",
-        "failed": "✕",
-        "cancelled": "✕",
-    }
-    lines = [f"【任务进度】已规划 {snap['total']} 步，完成 {snap['accepted']}/{snap['total']}"]
-    for s in snap["steps"]:
-        mark = icon.get(s["status"], "○")
-        rl = (
-            "（红线·待您验收）"
-            if s["red_line"] and s["status"] in ("reported", "waiting_human")
-            else ""
-        )
-        lines.append(f"{mark} 步骤{s['step_no'] + 1}：{s['title']} [{s['skill']}]{rl}")
-    if snap["awaiting_human"]:
-        lines.append("\n有红线步骤已执行完，等待您在任务卡中验收后继续。")
-    elif snap["done"]:
-        lines.append("\n全部步骤已完成。")
-    return "\n".join(lines)
-
-
-async def _emit_orchestration(
-    db: AsyncSession, user: SysUser, assistant: AgentRole, snap: dict[str, Any]
-) -> AsyncIterator[Event]:
-    """把编排进度作为助理的一条消息发出（含 orchestration 事件供前端渲染进度卡）。"""
-    text = _progress_text(snap)
-    yield ("orchestration", snap)  # 结构化进度，前端可渲染折叠进度卡
-    msg = DesktopMessage(
-        owner_user_id=user.id,
-        speaker_type=SPEAKER_AI,
-        speaker_agent_id=assistant.id,
-        speaker_name=assistant.name,
-        content=text,
-    )
-    db.add(msg)
-    await db.commit()
-    await db.refresh(msg)
-    yield ("message_end", _msg_dict(msg))
+_try_orchestrate = desktop_chat_streaming.try_orchestrate
+_progress_text = desktop_chat_streaming.progress_text
+_emit_orchestration = desktop_chat_streaming.emit_orchestration

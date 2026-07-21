@@ -121,6 +121,39 @@ async def complete(db: AsyncSession, event: OutboxEvent, *, worker_id: str) -> b
     return getattr(result, "rowcount", 0) == 1
 
 
+async def defer(
+    db: AsyncSession,
+    event: OutboxEvent,
+    *,
+    worker_id: str,
+    available_at: datetime,
+    reason: str | None = None,
+) -> bool:
+    """释放当前事件租约并延迟重试；busy defer 不消耗失败重试次数。"""
+    now = utcnow()
+    if available_at.tzinfo is None:
+        available_at = available_at.replace(tzinfo=UTC)
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(
+            OutboxEvent.id == event.id,
+            OutboxEvent.status == OUTBOX_PROCESSING,
+            OutboxEvent.lease_owner == worker_id,
+        )
+        .values(
+            status=OUTBOX_PENDING,
+            attempts=OutboxEvent.attempts - 1,
+            available_at=max(available_at, now),
+            lease_owner=None,
+            lease_until=None,
+            last_error=reason[:2000] if reason else None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await db.flush()
+    return getattr(result, "rowcount", 0) == 1
+
+
 async def fail(
     db: AsyncSession,
     event: OutboxEvent,

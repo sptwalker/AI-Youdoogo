@@ -29,6 +29,11 @@ uv run uvicorn app.main:app --reload
 `queued/running` 进度；应用 lifespan 中的 outbox worker 负责租约抢占、执行、重试和真人停点恢复。
 `TaskCard` 只作为 UI/验收镜像，文件交付与协作请求通过 `ToolExecution` 幂等去重。
 
+运行时已按职责拆为 repository、state、projection、recovery、event handler 和 step executor；
+旧 `workflow_service`/`workflow_worker`/`orchestration_service`/`app.agents.skills` 路径保留为兼容 facade。
+步骤事件遇到仍有效的执行租约会 defer 到租约结束，不会被提前完成；周期恢复扫描还会确定性补发
+过期 `running` 步骤，关闭 Worker 崩溃后步骤永久悬挂的缺口。
+
 后续接入 LangGraph 时，实现 [workflow_engine.py](app/agents/workflow_engine.py) 的
 `WorkflowEngine` adapter 即可；LangGraph 不接管数据库真相源、工具副作用或人工审批。
 
@@ -60,6 +65,8 @@ graphify path "app/knowledge" "app/agents"
 uv run ruff check .
 uv run mypy app
 uv run pytest -q
+cd frontend && npm run build
+uv run alembic heads
 ```
 
 ## 文档

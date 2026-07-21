@@ -29,7 +29,14 @@ from app.models.workflow import (
     WorkflowRun,
     WorkflowStep,
 )
-from app.services import outbox_service, task_flow, task_service, workflow_service, workflow_worker
+from app.services import (
+    outbox_service,
+    task_flow,
+    task_service,
+    workflow_recovery,
+    workflow_service,
+    workflow_worker,
+)
 from app.services.orchestration_service import PlanStep, is_red_line
 
 
@@ -209,6 +216,39 @@ async def test_expired_lease_is_reclaimed_as_new_attempt(
         assert len(events) == 1 and events[0].attempt == 2
 
 
+async def test_claim_result_distinguishes_busy_and_terminal(
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with maker() as db:
+        user, _ = await _seed(db)
+        run = await _create_run(db, user)
+        step = (await workflow_service.list_steps(db, run.id))[0]
+        claimed = await workflow_service.claim_step_result(
+            db, step.id, worker_id="worker-a", lease_seconds=60
+        )
+        assert claimed.status == "claimed" and claimed.step is not None
+        await db.commit()
+
+        busy = await workflow_service.claim_step_result(
+            db, step.id, worker_id="worker-b", lease_seconds=60
+        )
+        assert busy.status == "busy" and busy.retry_at is not None
+
+        assert await workflow_service.complete_step(
+            db,
+            claimed.step,
+            worker_id="worker-a",
+            output_data={},
+            result_content="ok",
+            succeeded=True,
+        )
+        await db.commit()
+        terminal = await workflow_service.claim_step_result(
+            db, step.id, worker_id="worker-b", lease_seconds=60
+        )
+        assert terminal.status == "terminal"
+
+
 async def test_human_accept_enqueues_resume_without_running_downstream(
     maker: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -286,6 +326,105 @@ async def test_outbox_claim_retry_and_complete(
         await db.commit()
         await db.refresh(claimed_again)
         assert claimed_again.status == OUTBOX_DONE
+
+
+async def test_busy_step_event_is_deferred_until_lease_expiry(
+    maker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with maker() as db:
+        user, role = await _seed(db, with_agent=True)
+        assert role is not None
+        run = await _create_run(db, user, role=role)
+        # workflow.advance -> workflow.step.execute
+        assert await workflow_worker.process_one(db, worker_id="scheduler")
+        step = (await workflow_service.list_steps(db, run.id))[0]
+        claimed = await workflow_service.claim_step(
+            db, step.id, worker_id="crashed-worker", lease_seconds=60
+        )
+        assert claimed is not None
+        await db.commit()
+
+        event = (
+            await db.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "workflow.step.execute",
+                    OutboxEvent.status == OUTBOX_PENDING,
+                )
+            )
+        ).scalar_one()
+        assert await workflow_worker.process_one(db, worker_id="replay-worker")
+        await db.refresh(event)
+        assert event.status == OUTBOX_PENDING
+        assert event.attempts == 0
+        assert event.available_at >= claimed.lease_until  # type: ignore[operator]
+
+        async def _fake_run_agent(
+            _db: AsyncSession, target: AgentRole, **kwargs: object
+        ) -> AgentTaskRecord:
+            return AgentTaskRecord(
+                id=uuid.uuid4(),
+                agent_role_id=target.id,
+                task_type=str(kwargs.get("task_type", "test")),
+                output_content="恢复完成",
+                status="success",
+            )
+
+        monkeypatch.setattr(workflow_worker, "run_agent", _fake_run_agent)
+        claimed.lease_until = outbox_service.utcnow() - timedelta(seconds=1)
+        event.available_at = outbox_service.utcnow() - timedelta(seconds=1)
+        await db.commit()
+        assert await workflow_worker.process_one(db, worker_id="recovery-worker")
+        await db.refresh(step)
+        assert step.attempt == 2 and step.status == STEP_SUCCEEDED
+
+
+async def test_recovery_scan_requeues_expired_step_without_original_event(
+    maker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with maker() as db:
+        user, role = await _seed(db, with_agent=True)
+        assert role is not None
+        run = await _create_run(db, user, role=role)
+        step = (await workflow_service.list_steps(db, run.id))[0]
+        claimed = await workflow_service.claim_step(
+            db, step.id, worker_id="lost-worker", lease_seconds=60
+        )
+        assert claimed is not None
+        claimed.lease_until = outbox_service.utcnow() - timedelta(seconds=1)
+        for event in (await db.execute(select(OutboxEvent))).scalars():
+            event.status = OUTBOX_DONE
+        await db.commit()
+
+        assert await workflow_recovery.requeue_expired_steps(db, batch_size=10) == 1
+        assert await workflow_recovery.requeue_expired_steps(db, batch_size=10) == 0
+        await db.commit()
+
+        async def _fake_run_agent(
+            _db: AsyncSession, target: AgentRole, **kwargs: object
+        ) -> AgentTaskRecord:
+            return AgentTaskRecord(
+                id=uuid.uuid4(),
+                agent_role_id=target.id,
+                task_type=str(kwargs.get("task_type", "test")),
+                output_content="补发恢复完成",
+                status="success",
+            )
+
+        monkeypatch.setattr(workflow_worker, "run_agent", _fake_run_agent)
+        assert await workflow_worker.process_one(db, worker_id="recovery-worker")
+        await db.refresh(step)
+        assert step.attempt == 2 and step.status == STEP_SUCCEEDED
+        recovery_events = list(
+            (
+                await db.execute(
+                    select(WorkflowEvent).where(
+                        WorkflowEvent.workflow_step_id == step.id,
+                        WorkflowEvent.event_type == "step.recovery_enqueued",
+                    )
+                )
+            ).scalars()
+        )
+        assert len(recovery_events) == 1
 
 
 async def test_worker_drives_full_dag(
