@@ -8,7 +8,10 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base
-from app.core.exceptions import AppError
+from app.contexts.business.proposal_management import (
+    ProposalNotApproved,
+    ProposalReviewNotAllowed,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.proposal import APPROVED, REJECTED, REVIEWED
@@ -79,7 +82,7 @@ async def test_reject_blocks_convert(
         session, p.id, reviewer_id=uid, conclusion="暂缓", decision="reject"
     )
     assert rejected.status == REJECTED
-    with pytest.raises(AppError, match="已通过"):
+    with pytest.raises(ProposalNotApproved, match="已通过"):
         await proposal_service.convert_to_task(session, p.id, creator_id=uid)
 
 
@@ -87,7 +90,7 @@ async def test_cannot_review_before_research(ctx: tuple[AsyncSession, uuid.UUID]
     """红线：未完成预研（仍 draft）不能直接评审通过。"""
     session, uid = ctx
     p = await _new_proposal(session, uid)
-    with pytest.raises(AppError, match="不可评审"):
+    with pytest.raises(ProposalReviewNotAllowed, match="不可评审"):
         await proposal_service.human_review(
             session, p.id, reviewer_id=uid, conclusion="x", decision="approve"
         )
@@ -96,5 +99,5 @@ async def test_cannot_review_before_research(ctx: tuple[AsyncSession, uuid.UUID]
 async def test_convert_requires_approved(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     session, uid = ctx
     p = await _new_proposal(session, uid)
-    with pytest.raises(AppError, match="已通过"):
+    with pytest.raises(ProposalNotApproved, match="已通过"):
         await proposal_service.convert_to_task(session, p.id, creator_id=uid)

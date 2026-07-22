@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
 from app.models.agent import TIER_DIRECTOR, TIER_EXEC, TIER_MEMBER, AgentRole
 
 VALID_MODEL_ROLES = ("daily", "reasoning")
@@ -22,12 +22,12 @@ VALID_TIERS = (TIER_EXEC, TIER_DIRECTOR, TIER_MEMBER)
 
 def _check_model_role(model_role: str) -> None:
     if model_role not in VALID_MODEL_ROLES:
-        raise AppError(f"model_role 仅支持 {'/'.join(VALID_MODEL_ROLES)}")
+        raise RuleViolation(f"model_role 仅支持 {'/'.join(VALID_MODEL_ROLES)}")
 
 
 def _check_tier(tier: str) -> None:
     if tier not in VALID_TIERS:
-        raise AppError(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
+        raise RuleViolation(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
 
 
 async def _refresh_env(db: AsyncSession) -> None:
@@ -64,7 +64,7 @@ async def create_agent_role(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise AppError("角色名或编码已存在", code=409, status_code=409) from exc
+        raise ConflictDetected("角色名或编码已存在") from exc
     await db.refresh(role)
     await _refresh_env(db)
     return role
@@ -89,7 +89,7 @@ async def update_agent_role(
     """更新智能体员工：仅更新提供的字段（含姓名，真人主管可自定义下属 AI 名称）。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体员工不存在", code=404, status_code=404)
+        raise ResourceNotFound("智能体员工不存在")
     if model_role is not None:
         _check_model_role(model_role)
         role.model_role = model_role
@@ -118,7 +118,7 @@ async def update_agent_role(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise AppError("角色名已被占用", code=409, status_code=409) from exc
+        raise ConflictDetected("角色名已被占用") from exc
     await db.refresh(role)
     await _refresh_env(db)
     return role
@@ -129,7 +129,7 @@ async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
     一键初始化可按需补回；删除权交给管理员，保持全体一致可删可调。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体员工不存在", code=404, status_code=404)
+        raise ResourceNotFound("智能体员工不存在")
     role.is_delete = True
     await db.commit()
     await _refresh_env(db)

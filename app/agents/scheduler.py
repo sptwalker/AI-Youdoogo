@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent
 from app.agents.contracts import ExecutionContext
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import RuleViolation
 from app.models.agent import AgentRole
 from app.models.task import TaskCard
 from app.services import task_flow, task_service
@@ -35,17 +35,17 @@ async def run_task(
     """驱动一个已分配智能体的任务卡执行到「已汇报」。
 
     Raises:
-        AppError: 任务未分配智能体 / 智能体角色不存在 / 当前状态不可执行。
+        ApplicationError: 任务未分配智能体 / 智能体角色不存在 / 当前状态不可执行。
     """
     task = await task_service.get_task(db, task_id)
     if task.assignee_type == "user":
         # 派给真人的任务不进自动执行链，交由真人在工作台受理（docs/13 §7）
-        raise AppError("该任务派给真人受理，不由调度中枢自动执行")
+        raise RuleViolation("该任务派给真人受理，不由调度中枢自动执行")
     if task.assignee_agent_id is None:
-        raise AppError("任务未分配智能体，无法自动执行")
+        raise RuleViolation("任务未分配智能体，无法自动执行")
     role = await db.get(AgentRole, task.assignee_agent_id)
     if role is None or not role.is_active:
-        raise AppError("指派的智能体角色不存在或已停用")
+        raise RuleViolation("指派的智能体角色不存在或已停用")
 
     # created → dispatched（若尚未分发）
     if task.status == task_flow.CREATED:
@@ -54,7 +54,7 @@ async def run_task(
         )
         await db.commit()
     if task.status != task_flow.DISPATCHED:
-        raise AppError(f"任务当前状态 {task.status} 不可执行（需为 created/dispatched）")
+        raise RuleViolation(f"任务当前状态 {task.status} 不可执行（需为 created/dispatched）")
 
     # dispatched → executing
     await task_service.transition(

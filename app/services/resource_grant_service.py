@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.knowledge.scope import ancestor_dept_ids
 from app.models.resource_grant import (
     GRANTEE_DEPARTMENT,
@@ -36,7 +36,7 @@ def _naive(dt: datetime) -> datetime:
 async def get_grant(db: AsyncSession, grant_id: uuid.UUID) -> ResourceGrant:
     g = await db.get(ResourceGrant, grant_id)
     if g is None or g.is_delete:
-        raise AppError("授权记录不存在", code=404, status_code=404)
+        raise ResourceNotFound("授权记录不存在")
     return g
 
 
@@ -52,9 +52,9 @@ async def create_grant(
     expires_at: datetime | None = None,
 ) -> ResourceGrant:
     if grantee_type not in _VALID_GRANTEE:
-        raise AppError(f"grantee_type 仅支持 {'/'.join(_VALID_GRANTEE)}")
+        raise RuleViolation(f"grantee_type 仅支持 {'/'.join(_VALID_GRANTEE)}")
     if perm not in _VALID_PERM:
-        raise AppError(f"perm 仅支持 {'/'.join(_VALID_PERM)}")
+        raise RuleViolation(f"perm 仅支持 {'/'.join(_VALID_PERM)}")
     g = ResourceGrant(
         resource_type=resource_type, resource_id=resource_id,
         grantee_type=grantee_type, grantee_id=grantee_id,

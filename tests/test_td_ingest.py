@@ -89,9 +89,9 @@ async def test_td_ingest_no_sql_config_rejected(
 ) -> None:
     """未配置 SQL → 明确报错，不静默。"""
     monkeypatch.setattr("app.integrations.thinkingdata.client.ThinkingDataClient", _FakeTD)
-    from app.core.exceptions import AppError
+    from app.contexts.shared_kernel import ApplicationError
 
-    with pytest.raises(AppError, match="td_daily_metrics_sql"):
+    with pytest.raises(ApplicationError, match="td_daily_metrics_sql"):
         await ops_data.ingest_from_thinkingdata(db, date(2026, 7, 14))
 
 

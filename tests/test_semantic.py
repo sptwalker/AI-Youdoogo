@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.semantic_term import SemanticTerm
 from app.services import semantic_service
@@ -104,12 +104,12 @@ async def test_create_and_list(db: AsyncSession) -> None:
 
 async def test_create_duplicate_rejected(db: AsyncSession) -> None:
     await semantic_service.create_term(db, {"canonical_name": "日活"})
-    with pytest.raises(AppError, match="已存在"):
+    with pytest.raises(ApplicationError, match="已存在"):
         await semantic_service.create_term(db, {"canonical_name": "日活"})
 
 
 async def test_create_requires_name(db: AsyncSession) -> None:
-    with pytest.raises(AppError, match="必填"):
+    with pytest.raises(ApplicationError, match="必填"):
         await semantic_service.create_term(db, {"canonical_name": "  "})
 
 
@@ -124,7 +124,7 @@ async def test_update_term(db: AsyncSession) -> None:
 async def test_update_name_clash_rejected(db: AsyncSession) -> None:
     await semantic_service.create_term(db, {"canonical_name": "日活"})
     r2 = await semantic_service.create_term(db, {"canonical_name": "月活"})
-    with pytest.raises(AppError, match="已存在"):
+    with pytest.raises(ApplicationError, match="已存在"):
         await semantic_service.update_term(db, uuid.UUID(r2["id"]), {"canonical_name": "日活"})
 
 
@@ -132,5 +132,5 @@ async def test_delete_term(db: AsyncSession) -> None:
     r = await semantic_service.create_term(db, {"canonical_name": "日活"})
     await semantic_service.delete_term(db, uuid.UUID(r["id"]))
     assert await semantic_service.list_terms(db) == []
-    with pytest.raises(AppError, match="不存在"):
+    with pytest.raises(ApplicationError, match="不存在"):
         await semantic_service.delete_term(db, uuid.UUID(r["id"]))

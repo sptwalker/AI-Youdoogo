@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.models.task import TaskCard, TaskCardLog
 from app.services import task_flow
 
@@ -63,7 +63,7 @@ async def get_task(db: AsyncSession, task_id: uuid.UUID) -> TaskCard:
     """取任务卡，不存在抛 404。"""
     task = await db.get(TaskCard, task_id)
     if task is None or task.is_delete:
-        raise AppError("任务不存在", code=404, status_code=404)
+        raise ResourceNotFound("任务不存在")
     return task
 
 
@@ -77,16 +77,16 @@ async def decompose(
     """把一个任务拆解为若干子任务（子任务 parent_id 指向父任务）。
 
     Raises:
-        AppError: 父任务不存在或子任务列表为空。
+        ApplicationError: 父任务不存在或子任务列表为空。
     """
     if not subtasks:
-        raise AppError("子任务列表为空")
+        raise RuleViolation("子任务列表为空")
     parent = await get_task(db, parent_id)
     children: list[TaskCard] = []
     for sub in subtasks:
         title = sub.get("title")
         if not title:
-            raise AppError("子任务缺少 title")
+            raise RuleViolation("子任务缺少 title")
         child = TaskCard(
             title=title,
             task_type=sub.get("task_type", parent.task_type),
@@ -118,7 +118,7 @@ async def transition(
     """执行状态流转（经状态机校验），写流转日志。汇报时可附结果内容。
 
     Raises:
-        AppError: 任务不存在或非法状态流转。
+        ApplicationError: 任务不存在或非法状态流转。
     """
     task = await get_task(db, task_id)
     task_flow.assert_transition(task.status, to_status)

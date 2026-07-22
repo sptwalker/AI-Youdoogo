@@ -23,21 +23,35 @@
 
 ## 目录规则
 
-```
+```text
 app/
-├── api/v1/          # 接口层（薄，只做路由+校验+调service）
-├── core/            # config/logging/database/exceptions
-├── models/          # ORM（base.py 通用字段Mixin：id/create_time/update_time/is_delete）
-├── schemas/         # Pydantic 请求响应模型
-├── services/        # 业务逻辑层
-├── agents/          # 智能体核心逻辑（阶段2起）
-├── knowledge/       # 知识库模块（阶段1起）
-├── llm/             # 多模型网关（factory/fallback/health/validate/roles）
-├── integrations/    # 外部平台（feishu/ ...）
-└── utils/           # 通用工具
+├── bootstrap/       # 唯一组合根：app/lifecycle/wiring、route/handler/worker 装配
+├── contexts/        # 限界上下文；按 foundations 与 business 分组，叶子 Context 才拥有模型
+│   ├── shared_kernel/ # 极小跨 Context 契约；当前仅稳定、与传输无关的应用错误语义
+│   ├── foundations/ # Wiki/Expert/Capability/Workflow/Identity 等复用业务能力
+│   └── business/    # Proposal/Meeting/Operational Analytics 等业务场景
+├── platform/        # 无业务语义的技术机制：database/outbox/http/llm/cache/realtime 等
+├── api/             # 迁移期 HTTP 兼容入口；新入口逐步进入各 Context/entrypoints
+├── core/            # 迁移期配置、安全等兼容入口；旧异常 facade 已删除
+├── models/          # 迁移期 ORM 兼容入口
+├── schemas/         # 迁移期 HTTP DTO 兼容入口
+├── services/        # 迁移期业务 facade；禁止继续新增新业务实现
+├── agents/          # 迁移期 Agent runtime 兼容入口
+├── knowledge/       # 迁移期知识能力兼容入口
+├── llm/             # 迁移期 LLM gateway 兼容入口
+└── integrations/    # 迁移期供应商 client 兼容入口
 ```
 
-**目录/表/服务只在当前阶段用到时创建，禁止为未来阶段预建空壳。** 新增一级目录须先修订 docs/05。
+复杂 Context 内按需使用 `contracts/domain/application/entrypoints/infrastructure`；简单 Context 可保持少量文件，
+但依赖方向必须是 Entrypoints → Application → Domain、Infrastructure → Application Ports/Domain。
+
+**目录/表/服务只在当前阶段用到时创建，禁止预建空壳。** 旧路径仅作为兼容 facade；新代码禁止反向依赖
+`app/services`、`app/models` 等旧横向实现。完整 Context Map、数据所有权和迁移顺序以 docs/20 为准。
+
+当前已落地 Bootstrap、Database、Outbox、HTTP Runtime、Governed Data Query、Proposal Management
+和 Shared Kernel 应用错误分类。应用错误不携带 HTTP 元数据；HTTP status/code 只允许在
+Bootstrap 或 Context entrypoint/HTTP adapter 中映射。旧 `AppError` 调用和 `app.core.exceptions`
+兼容层已全部移除。
 
 ## 开发铁律
 
@@ -88,3 +102,4 @@ cd frontend ; npm run test ; npm run lint ; npm run build
 | 16-架构评审与改进路线图 | 系统级评审(B+)+生产硬化路线H1~H4：密钥加密/行级隔离/注入防护/状态迁Redis(P0)→可靠性→评估驱动→智能深化 |
 | 18-多人AI即时通讯群组设计 | 多人真人+多AI即时群聊：飞书组织同步/SSO登录/SSE广播+Redis pub/sub实时/群成员/未读/文件/入库（分期I1~I7） |
 | 19-飞书登录配置与运维 | 应用本地飞书 OAuth、身份绑定、上线前置与回滚 |
+| 20-DDD领域边界与分层架构规范 | Wiki/Expert/Tool/API/Workflow 等基础底座域、业务域、Platform、Context内分层及渐进迁移规则（已生效） |

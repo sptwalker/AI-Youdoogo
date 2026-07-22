@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
 from app.models.semantic_term import SemanticTerm
 
 _MAX_PROMPT_TERMS = 60  # 注入提示词的术语上限（控 prompt 体积）
@@ -103,9 +103,9 @@ async def create_term(db: AsyncSession, data: dict[str, Any]) -> dict[str, Any]:
     """新建术语。规范名必填且唯一（重名 → 409）。"""
     name = (data.get("canonical_name") or "").strip()
     if not name:
-        raise AppError("规范名必填")
+        raise RuleViolation("规范名必填")
     if await _by_canonical(db, name) is not None:
-        raise AppError("规范名已存在", code=409, status_code=409)
+        raise ConflictDetected("规范名已存在")
     term = SemanticTerm(
         canonical_name=name,
         aliases=[a.strip() for a in (data.get("aliases") or []) if a.strip()],
@@ -126,14 +126,14 @@ async def update_term(db: AsyncSession, term_id: uuid.UUID, data: dict[str, Any]
     """改术语（仅传字段）。改规范名撞他人 → 409。"""
     term = await db.get(SemanticTerm, term_id)
     if term is None or term.is_delete:
-        raise AppError("术语不存在", code=404, status_code=404)
+        raise ResourceNotFound("术语不存在")
     if "canonical_name" in data:
         new_name = (data.get("canonical_name") or "").strip()
         if not new_name:
-            raise AppError("规范名不能为空")
+            raise RuleViolation("规范名不能为空")
         clash = await _by_canonical(db, new_name)
         if clash is not None and clash.id != term.id:
-            raise AppError("规范名已存在", code=409, status_code=409)
+            raise ConflictDetected("规范名已存在")
         term.canonical_name = new_name
     if "aliases" in data:
         term.aliases = [a.strip() for a in (data.get("aliases") or []) if a.strip()]
@@ -151,6 +151,6 @@ async def delete_term(db: AsyncSession, term_id: uuid.UUID) -> None:
     """软删术语。"""
     term = await db.get(SemanticTerm, term_id)
     if term is None or term.is_delete:
-        raise AppError("术语不存在", code=404, status_code=404)
+        raise ResourceNotFound("术语不存在")
     term.is_delete = True
     await db.commit()

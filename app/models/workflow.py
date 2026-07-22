@@ -23,6 +23,21 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CommonMixin
+from app.platform.outbox.model import (
+    OUTBOX_DONE as OUTBOX_DONE,
+)
+from app.platform.outbox.model import (
+    OUTBOX_FAILED as OUTBOX_FAILED,
+)
+from app.platform.outbox.model import (
+    OUTBOX_PENDING as OUTBOX_PENDING,
+)
+from app.platform.outbox.model import (
+    OUTBOX_PROCESSING as OUTBOX_PROCESSING,
+)
+from app.platform.outbox.model import (
+    OutboxEvent as OutboxEvent,
+)
 
 _JSONB = JSON().with_variant(JSONB(), "postgresql")
 
@@ -39,11 +54,6 @@ STEP_WAITING_HUMAN = "waiting_human"
 STEP_SUCCEEDED = "succeeded"
 STEP_FAILED = "failed"
 STEP_CANCELLED = "cancelled"
-
-OUTBOX_PENDING = "pending"
-OUTBOX_PROCESSING = "processing"
-OUTBOX_DONE = "done"
-OUTBOX_FAILED = "failed"
 
 TOOL_PENDING = "pending"
 TOOL_RUNNING = "running"
@@ -129,31 +139,6 @@ class WorkflowEvent(CommonMixin, Base):
     attempt: Mapped[int | None] = mapped_column(Integer, nullable=True)
     trace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     payload: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict, server_default="{}")
-
-
-class OutboxEvent(CommonMixin, Base):
-    """事务性 outbox；由一个 worker 租约处理，失败可延迟重试。"""
-
-    __tablename__ = "outbox_event"
-    __table_args__ = (
-        Index("uq_outbox_dedupe", "dedupe_key", unique=True),
-        Index("ix_outbox_poll", "status", "available_at", "lease_until"),
-    )
-
-    aggregate_type: Mapped[str] = mapped_column(String(32))
-    aggregate_id: Mapped[uuid.UUID] = mapped_column(Uuid)
-    event_type: Mapped[str] = mapped_column(String(64))
-    dedupe_key: Mapped[str] = mapped_column(String(255))
-    payload: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict, server_default="{}")
-    status: Mapped[str] = mapped_column(
-        String(16), default=OUTBOX_PENDING, server_default=OUTBOX_PENDING
-    )
-    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    max_attempts: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
-    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ToolExecution(CommonMixin, Base):

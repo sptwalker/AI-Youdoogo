@@ -12,11 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import RuleViolation
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.knowledge import ingest, retrieval
 from app.models.knowledge import KnowledgeFile
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.schemas.knowledge import (
     AskRequest,
     AskResponse,
@@ -52,10 +53,14 @@ async def upload_file(
 ) -> dict:
     """上传文件入库（支持 txt/md/docx/pdf，单文件 ≤20MB）。缺省入公司公共库。"""
     if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
-        raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
+        raise RuleViolation(
+            f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传"
+        )
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:  # Content-Length 缺失/不实时兜底
-        raise AppError(f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传")
+        raise RuleViolation(
+            f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传"
+        )
     kb_id = await _resolve_kb_id(db, knowledge_base_id)
     kf = await ingest.ingest_file(
         db,

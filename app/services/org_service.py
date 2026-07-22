@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
 from app.models.agent import AgentRole
 from app.models.discussion import DiscussionChannel
 from app.models.system import COMPANY, DEPT_L1, DEPT_L2, SysDepartment, SysUser
@@ -23,7 +23,7 @@ _NODE_TYPE_BY_LEVEL = {0: COMPANY, 1: DEPT_L1, 2: DEPT_L2}
 async def get_node(db: AsyncSession, dept_id: uuid.UUID) -> SysDepartment:
     dept = await db.get(SysDepartment, dept_id)
     if dept is None or dept.is_delete:
-        raise AppError("部门不存在", code=404, status_code=404)
+        raise ResourceNotFound("部门不存在")
     return dept
 
 
@@ -84,7 +84,7 @@ async def create_node(
     parent = await get_node(db, parent_id)
     level = parent.level + 1
     if level > 2:
-        raise AppError("部门层级最多两级（一级/二级），不能再往下建")
+        raise RuleViolation("部门层级最多两级（一级/二级），不能再往下建")
     node = SysDepartment(
         name=name,
         code=code or f"dept_{uuid.uuid4().hex[:8]}",
@@ -101,7 +101,7 @@ async def create_node(
         await db.commit()
     except IntegrityError as exc:  # 同父下重名（部分唯一索引）→ 409 而非 500
         await db.rollback()
-        raise AppError("同级下已有同名部门", code=409, status_code=409) from exc
+        raise ConflictDetected("同级下已有同名部门") from exc
     await db.refresh(node)
     await _refresh_env(db)
     return node
@@ -112,7 +112,7 @@ async def update_node(
 ) -> SysDepartment:
     node = await get_node(db, dept_id)
     if node.node_type == COMPANY and name is not None:
-        raise AppError("公司根节点名称不可改（如需改公司名走系统配置）")
+        raise RuleViolation("公司根节点名称不可改（如需改公司名走系统配置）")
     if name is not None:
         node.name = name
     if sort_order is not None:
@@ -127,7 +127,7 @@ async def delete_node(db: AsyncSession, dept_id: uuid.UUID) -> None:
     """软删部门。有子部门或在职员工时拒绝（先清空再删）。"""
     node = await get_node(db, dept_id)
     if node.node_type == COMPANY:
-        raise AppError("公司根节点不可删除")
+        raise RuleViolation("公司根节点不可删除")
     children = (
         await db.execute(
             select(SysDepartment.id).where(
@@ -136,7 +136,7 @@ async def delete_node(db: AsyncSession, dept_id: uuid.UUID) -> None:
         )
     ).first()
     if children:
-        raise AppError("该部门下还有子部门，请先移除子部门")
+        raise RuleViolation("该部门下还有子部门，请先移除子部门")
     emps = (
         await db.execute(
             select(AgentRole.id).where(
@@ -145,7 +145,7 @@ async def delete_node(db: AsyncSession, dept_id: uuid.UUID) -> None:
         )
     ).first()
     if emps:
-        raise AppError("该部门下还有智能体员工，请先移除或转移")
+        raise RuleViolation("该部门下还有智能体员工，请先移除或转移")
     node.is_delete = True
     await db.commit()
     await _refresh_env(db)
@@ -159,7 +159,7 @@ async def set_supervisor(
     if supervisor_user_id is not None:
         user = await db.get(SysUser, supervisor_user_id)
         if user is None or user.is_delete:
-            raise AppError("指定的主管用户不存在")
+            raise RuleViolation("指定的主管用户不存在")
     node.supervisor_user_id = supervisor_user_id
     await db.commit()
     await db.refresh(node)

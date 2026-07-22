@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.eval_case import EvalCase
@@ -90,7 +90,7 @@ async def test_run_eval_aggregates(db: AsyncSession, monkeypatch: pytest.MonkeyP
 
 async def test_run_eval_no_cases_raises(db: AsyncSession) -> None:
     role = await _role(db)
-    with pytest.raises(AppError, match="评估用例"):
+    with pytest.raises(ApplicationError, match="评估用例"):
         await eval_service.run_eval(db, role.id)
 
 
@@ -131,7 +131,7 @@ async def test_create_and_list_case(db: AsyncSession) -> None:
 
 
 async def test_create_case_requires_input(db: AsyncSession) -> None:
-    with pytest.raises(AppError, match="必填"):
+    with pytest.raises(ApplicationError, match="必填"):
         await eval_service.create_case(db, {"name": "x", "input_text": "  "})
 
 

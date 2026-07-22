@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, ops
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.services.anomaly import detect_anomalies
@@ -78,5 +78,5 @@ async def test_generate_anomaly_alert(db: AsyncSession, monkeypatch: pytest.Monk
 
 
 async def test_empty_alerts_rejected(db: AsyncSession) -> None:
-    with pytest.raises(AppError, match="无异常"):
+    with pytest.raises(ApplicationError, match="无异常"):
         await ops.generate_anomaly_alert(db, stat_date="2026-07-11", alerts=[])

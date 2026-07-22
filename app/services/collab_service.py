@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.models.collab import (
     REQ_APPROVED,
     REQ_PENDING,
@@ -60,7 +60,7 @@ async def authorize(
 async def revoke_authorization(db: AsyncSession, auth_id: uuid.UUID) -> None:
     a = await db.get(CollabAuthorization, auth_id)
     if a is None or a.is_delete:
-        raise AppError("授权不存在", code=404, status_code=404)
+        raise ResourceNotFound("授权不存在")
     a.is_delete = True
     await db.commit()
 
@@ -176,12 +176,12 @@ async def review_request(
 ) -> CollabRequest:
     """主管复核：approve/reject（红线：只是分发闸门，产出生效仍走真人验收）。"""
     if decision not in ("approve", "reject"):
-        raise AppError("decision 仅支持 approve/reject")
+        raise RuleViolation("decision 仅支持 approve/reject")
     r = await db.get(CollabRequest, request_id)
     if r is None or r.is_delete:
-        raise AppError("协作请求不存在", code=404, status_code=404)
+        raise ResourceNotFound("协作请求不存在")
     if r.status != REQ_PENDING:
-        raise AppError(f"请求当前状态 {r.status}，不可复核")
+        raise RuleViolation(f"请求当前状态 {r.status}，不可复核")
     r.status = REQ_APPROVED if decision == "approve" else REQ_REJECTED
     r.reviewed_by = reviewer_id
     r.review_note = note

@@ -14,12 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.core.sse import sse_response
 from app.knowledge import storage
 from app.models.deliverable import Deliverable
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.services import auth_service, deliver_service, desktop_chat_service, desktop_service
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])
@@ -72,7 +73,7 @@ async def list_deliverables(
     owner_id = user.id
     if user_id is not None and user_id != user.id:
         if user.role_code != "admin":
-            raise AppError("仅管理员可查看他人交付区", code=403, status_code=403)
+            raise PermissionDenied("仅管理员可查看他人交付区")
         owner_id = user_id
     return ok(await deliver_service.list_deliverables(db, owner_id))
 
@@ -84,9 +85,9 @@ async def download_deliverable(
     """下载一份交付物（仅本人或 admin）。storage_path 去桶前缀取 object key 回读。"""
     row = await db.get(Deliverable, deliverable_id)
     if row is None or row.is_delete:
-        raise AppError("交付物不存在", code=404, status_code=404)
+        raise ResourceNotFound("交付物不存在")
     if row.owner_user_id != user.id and user.role_code != "admin":
-        raise AppError("无权下载该交付物", code=403, status_code=403)
+        raise PermissionDenied("无权下载该交付物")
     _, _, object_name = row.storage_path.partition("/")  # "bucket/object" → "object"
     data = await storage.get_object_bytes(object_name)
     disposition = f"attachment; filename*=UTF-8''{quote(row.file_name)}"
@@ -102,5 +103,5 @@ async def get_user_desktop(user_id: uuid.UUID, db: DB, _: Admin) -> dict:
     """监督：查看某真人员工的桌面（仅 admin）。不含私人对话。"""
     target = await auth_service.get_user_by_id(db, user_id)
     if target is None or target.is_delete:
-        raise AppError("用户不存在", code=404, status_code=404)
+        raise ResourceNotFound("用户不存在")
     return ok(await desktop_service.get_desktop(db, target))

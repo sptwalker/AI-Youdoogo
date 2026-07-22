@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import DependencyUnavailable, RuleViolation
 from app.models.system import COMPANY, SysDepartment, SysUser
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ async def _company_root(db: AsyncSession) -> SysDepartment:
         await db.execute(select(SysDepartment).where(SysDepartment.node_type == COMPANY))
     ).scalar_one_or_none()
     if root is None:
-        raise AppError("未初始化公司根节点，无法同步组织")
+        raise RuleViolation("未初始化公司根节点，无法同步组织")
     return root
 
 
@@ -140,7 +140,7 @@ async def sync_from_feishu(db: AsyncSession) -> dict[str, int]:
     Returns:
         {departments, users_created, users_updated}。
     Raises:
-        AppError: 未配飞书凭证 / 未初始化公司根 / 飞书接口错误。
+        ApplicationError: 未配飞书凭证 / 未初始化公司根 / 飞书接口错误。
     """
     from app.integrations.feishu.client import FeishuAPIError, feishu_client
 
@@ -148,7 +148,7 @@ async def sync_from_feishu(db: AsyncSession) -> dict[str, int]:
     try:
         raw_depts = await feishu_client.list_departments()
     except FeishuAPIError as exc:
-        raise AppError(f"拉取飞书部门失败:{exc}", code=502, status_code=502) from exc
+        raise DependencyUnavailable(f"拉取飞书部门失败:{exc}") from exc
 
     fid_to_local: dict[str, SysDepartment] = {}
     for fd in _sort_by_hierarchy(raw_depts):

@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import get_agent_role_by_code, run_agent
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import RuleViolation
 from app.models.agent import AgentTaskRecord
 from app.services.anomaly import Alert
 
@@ -46,13 +46,13 @@ async def generate_daily_report(
     """生成指定日期的运营日报，落一条留痕记录。
 
     Raises:
-        AppError: 未配置运营智能体角色（迁移种子未执行）或数据为空。
+        ApplicationError: 未配置运营智能体角色（迁移种子未执行）或数据为空。
     """
     if not rows:
-        raise AppError("运营数据为空，无法生成日报")
+        raise RuleViolation("运营数据为空，无法生成日报")
     role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
+        raise RuleViolation("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     user_message = (
         f"以下是 {stat_date} 的平台运营数据，请据此生成当日运营日报：\n\n"
@@ -80,13 +80,13 @@ async def generate_anomaly_alert(
     仅在有异常时调用（无异常不必花模型 token）。
 
     Raises:
-        AppError: 未配置运营智能体角色或异常列表为空。
+        ApplicationError: 未配置运营智能体角色或异常列表为空。
     """
     if not alerts:
-        raise AppError("无异常项，无需生成告警")
+        raise RuleViolation("无异常项，无需生成告警")
     role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
+        raise RuleViolation("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     detail = "\n".join(f"- [{a.severity}] {a.product} {a.metric}：{a.message}" for a in alerts)
     user_message = (
@@ -113,11 +113,11 @@ async def generate_proposal(
     """就运营议题输出一份结构化优化提案（AI 仅建议权，需真人确认，见 docs/04 红线）。
 
     Raises:
-        AppError: 未配置运营智能体角色。
+        ApplicationError: 未配置运营智能体角色。
     """
     role = await get_agent_role_by_code(db, OPS_DIRECTOR_CODE)
     if role is None:
-        raise AppError("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
+        raise RuleViolation("未配置平台运营部总监助理，请先在组织架构一键初始化骨架")
 
     context_part = f"\n\n参考信息：\n{context}" if context.strip() else ""
     user_message = (

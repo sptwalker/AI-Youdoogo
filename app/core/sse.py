@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ def sse_response(source: AsyncIterator[Event]) -> StreamingResponse:
         try:
             async for name, data in source:
                 yield _frame(name, data)
-        except AppError as exc:
-            yield _frame("error", {"msg": exc.msg})
+        except ApplicationError as exc:
+            yield _frame("error", {"msg": str(exc)})
             return
         except Exception:  # noqa: BLE001 - 流中未知异常也要给前端可显示的结束帧
             logger.exception("SSE 流处理异常")

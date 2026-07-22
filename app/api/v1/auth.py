@@ -12,11 +12,12 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
+from app.contexts.shared_kernel import InvalidInput, PermissionDenied
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.core.security import create_access_token
 from app.integrations.feishu.oauth import FeishuOAuthError
+from app.platform.http_runtime import ok
 from app.schemas.auth import FeishuExchangeResponse, LoginRequest, TokenResponse, UserOut
 from app.services.auth_service import authenticate, authenticate_feishu, login_by_feishu
 from app.services.feishu_login import (
@@ -106,7 +107,7 @@ async def feishu_start(
     try:
         started = await service.start(return_to)
     except InvalidReturnTo as exc:
-        raise AppError("返回地址无效", code=400, status_code=400) from exc
+        raise InvalidInput("返回地址无效") from exc
     except OAuthUnavailable:
         return _login_redirect("unavailable")
     response = RedirectResponse(started.authorization_url, status_code=303)
@@ -160,10 +161,8 @@ async def feishu_callback(
 
     try:
         user = await authenticate_feishu(db, completed.identity.open_id)
-    except AppError as exc:
-        if exc.status_code == 403:
-            return _login_redirect("access_required")
-        raise
+    except PermissionDenied:
+        return _login_redirect("access_required")
 
     token = _token_for(user.id, user.role_code)
     try:

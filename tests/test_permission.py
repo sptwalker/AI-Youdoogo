@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.knowledge import KnowledgeBase
 from app.models.resource_grant import ResourceGrant
@@ -34,7 +34,7 @@ def _user(dept_id: uuid.UUID | None, role: str = "member") -> SysUser:
 def test_check_role() -> None:
     admin = _user(None, "admin")
     permission_service.check_role(admin, "admin")  # 放行
-    with pytest.raises(AppError, match="无权限"):
+    with pytest.raises(ApplicationError, match="无权限"):
         permission_service.check_role(_user(None, "member"), "admin", "executive")
 
 

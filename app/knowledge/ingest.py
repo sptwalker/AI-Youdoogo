@@ -12,7 +12,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError, ResourceNotFound, RuleViolation
 from app.integrations.feishu.client import FeishuClient
 from app.knowledge import storage
 from app.knowledge.chunk import chunk_text
@@ -30,7 +30,7 @@ async def _index_text(db: AsyncSession, file: KnowledgeFile, text: str) -> Knowl
     try:
         chunks = chunk_text(text)
         if not chunks:
-            raise AppError("文档内容为空，无可索引文本")
+            raise RuleViolation("文档内容为空，无可索引文本")
         vectors = await embed_texts(chunks)
         db.add_all(
             KnowledgeVector(
@@ -50,10 +50,10 @@ async def _index_text(db: AsyncSession, file: KnowledgeFile, text: str) -> Knowl
         await db.rollback()
         file.status = "failed"
         await db.commit()
-        if isinstance(exc, AppError):
+        if isinstance(exc, ApplicationError):
             raise
         logger.exception("知识库入库失败 file_id=%s", file.id)
-        raise AppError("文档索引失败，请稍后重试或联系管理员") from exc
+        raise RuleViolation("文档索引失败，请稍后重试或联系管理员") from exc
 
 
 async def ingest_file(
@@ -168,7 +168,7 @@ async def delete_file(db: AsyncSession, file_id: uuid.UUID) -> None:
     """软删文件 + 硬删其向量（向量无独立价值，删文件即回收）。"""
     file = await db.get(KnowledgeFile, file_id)
     if file is None or file.is_delete:
-        raise AppError("文档不存在", code=404, status_code=404)
+        raise ResourceNotFound("文档不存在")
     await db.execute(delete(KnowledgeVector).where(KnowledgeVector.file_id == file_id))
     file.is_delete = True
     await db.commit()
@@ -180,10 +180,10 @@ async def move_file(
     """把文档移到另一个知识库（改归属库）。向量按 file_id 关联，无需动。"""
     file = await db.get(KnowledgeFile, file_id)
     if file is None or file.is_delete:
-        raise AppError("文档不存在", code=404, status_code=404)
+        raise ResourceNotFound("文档不存在")
     kb = await db.get(KnowledgeBase, knowledge_base_id)
     if kb is None or kb.is_delete:
-        raise AppError("目标知识库不存在", code=404, status_code=404)
+        raise ResourceNotFound("目标知识库不存在")
     file.knowledge_base_id = knowledge_base_id
     await db.commit()
     await db.refresh(file)

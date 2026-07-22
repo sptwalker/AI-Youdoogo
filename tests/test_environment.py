@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.knowledge import ingest
 from app.models import Base
 from app.models.agent import AgentRole
@@ -183,7 +183,7 @@ async def test_ds_owner_agent_roundtrip(db: AsyncSession) -> None:
     b = await agent_role_service.create_agent_role(db, name="数据AI2", prompt_template="x")
     ds = await data_source_service.update_ds(db, ds.id, owner_agent_id=b.id)
     assert ds.owner_agent_id == b.id
-    with pytest.raises(AppError, match="对接AI不存在"):
+    with pytest.raises(ApplicationError, match="对接AI不存在"):
         await data_source_service.create_ds(
             db, name="接口C", type="http_api", owner_agent_id=uuid.uuid4()
         )

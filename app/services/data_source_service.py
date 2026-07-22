@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
 from app.core.config import get_settings
-from app.core.exceptions import AppError
 from app.models.agent import AgentRole
 from app.models.knowledge import DataSource
 
@@ -28,13 +28,13 @@ async def _check_owner_agent(db: AsyncSession, agent_id: uuid.UUID) -> None:
     """显式校验对接 AI 存在（否则 FK 违约会被误报成"编码已存在"409）。"""
     agent = await db.get(AgentRole, agent_id)
     if agent is None or agent.is_delete:
-        raise AppError("指定的对接AI不存在", code=404, status_code=404)
+        raise ResourceNotFound("指定的对接AI不存在")
 
 
 async def get_ds(db: AsyncSession, ds_id: uuid.UUID) -> DataSource:
     ds = await db.get(DataSource, ds_id)
     if ds is None or ds.is_delete:
-        raise AppError("数据接口不存在", code=404, status_code=404)
+        raise ResourceNotFound("数据接口不存在")
     return ds
 
 
@@ -50,7 +50,7 @@ async def create_ds(
     owner_agent_id: uuid.UUID | None = None,
 ) -> DataSource:
     if type not in VALID_TYPES:
-        raise AppError(f"type 仅支持 {'/'.join(VALID_TYPES)}")
+        raise RuleViolation(f"type 仅支持 {'/'.join(VALID_TYPES)}")
     if owner_agent_id is not None:
         await _check_owner_agent(db, owner_agent_id)
     ds = DataSource(
@@ -63,7 +63,7 @@ async def create_ds(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise AppError("数据接口编码已存在", code=409, status_code=409) from exc
+        raise ConflictDetected("数据接口编码已存在") from exc
     await db.refresh(ds)
     await _refresh_env(db)
     return ds

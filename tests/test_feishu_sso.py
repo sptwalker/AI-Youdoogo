@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysUser
 from app.services import auth_service
@@ -39,7 +39,7 @@ async def test_feishu_login_rejects_unbound_user_without_creating_account(
 ) -> None:
     """未预绑定身份拒绝登录，且不会因姓名等资料自动开户。"""
     _stub_oauth(monkeypatch, {"open_id": "ou_new_123456", "name": "王五", "en_name": "Wu Wang"})
-    with pytest.raises(AppError, match="暂无系统访问权限"):
+    with pytest.raises(ApplicationError, match="暂无系统访问权限"):
         await auth_service.login_by_feishu(db, "code123")
     assert (await db.execute(select(func.count()).select_from(SysUser))).scalar_one() == 0
 
@@ -66,7 +66,7 @@ async def test_feishu_login_no_open_id_fails(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _stub_oauth(monkeypatch, {"name": "无标识"})
-    with pytest.raises(AppError, match="标识"):
+    with pytest.raises(ApplicationError, match="标识"):
         await auth_service.login_by_feishu(db, "code")
 
 
@@ -80,7 +80,7 @@ async def test_feishu_login_disabled_blocked(
     ))
     await db.commit()
     _stub_oauth(monkeypatch, {"open_id": "ou_offline_123456", "name": "停用"})
-    with pytest.raises(AppError, match="暂无系统访问权限"):
+    with pytest.raises(ApplicationError, match="暂无系统访问权限"):
         await auth_service.login_by_feishu(db, "code")
 
 

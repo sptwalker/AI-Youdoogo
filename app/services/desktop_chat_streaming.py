@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import RuleViolation
 from app.core.sse import Event
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.desktop import SPEAKER_AI, SPEAKER_USER
@@ -53,7 +53,7 @@ async def send_stream(
 ) -> AsyncIterator[Event]:
     """Persist and stream one user message through orchestration or an AI roundtable."""
     if len(set(add_agent_ids)) > max_add:
-        raise AppError(f"最多再加入 {max_add} 个 AI")
+        raise RuleViolation(f"最多再加入 {max_add} 个 AI")
     assistant = await runtime.get_assistant(db, user)
     participants = await runtime.resolve_participants(db, assistant, add_agent_ids)
 

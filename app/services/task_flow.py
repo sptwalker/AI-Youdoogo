@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import RuleViolation
 
 # 状态常量
 CREATED = "created"
@@ -43,9 +43,9 @@ def can_transition(from_status: str, to_status: str) -> bool:
 
 
 def assert_transition(from_status: str, to_status: str) -> None:
-    """校验状态迁移，非法则抛 AppError（供 service 层调用）。"""
+    """校验状态迁移，非法则抛 ApplicationError（供 service 层调用）。"""
     if to_status not in STATES:
-        raise AppError(f"未知任务状态：{to_status}")
+        raise RuleViolation(f"未知任务状态：{to_status}")
     if not can_transition(from_status, to_status):
         allowed = "、".join(sorted(TRANSITIONS.get(from_status, frozenset()))) or "无（终态）"
-        raise AppError(f"非法状态流转：{from_status} → {to_status}；当前可流转至：{allowed}")
+        raise RuleViolation(f"非法状态流转：{from_status} → {to_status}；当前可流转至：{allowed}")

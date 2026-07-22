@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.shared_kernel import ResourceNotFound
 from app.models import Base
 from app.models.meeting import MeetingInfo
 from app.models.proposal import ProposalCard
@@ -67,13 +68,10 @@ def test_cannot_see_others() -> None:
     )
 
 
-def test_assert_can_see_raises_404() -> None:
-    from app.core.exceptions import AppError
-
+def test_assert_can_see_raises_resource_not_found() -> None:
     m = _user("member")
-    with pytest.raises(AppError) as ei:
+    with pytest.raises(ResourceNotFound):
         permission_service.assert_can_see(m, creator_id=uuid.uuid4())
-    assert ei.value.status_code == 404
 
 
 # ── 三域 list 实际过滤 ──────────────────────────────────

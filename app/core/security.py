@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 import bcrypt
 import jwt
 
+from app.contexts.shared_kernel import InvalidInput
 from app.core.config import get_settings
-from app.core.exceptions import AppError
 
 ALGORITHM = "HS256"
 
@@ -23,10 +23,10 @@ def hash_password(password: str) -> str:
     """bcrypt 哈希（自带盐）。
 
     Raises:
-        AppError: 密码 UTF-8 编码超过 bcrypt 的 72 字节上限（统一 400，而非 500）。
+        ApplicationError: 密码 UTF-8 编码超过 bcrypt 的 72 字节上限（统一 400，而非 500）。
     """
     if len(password.encode()) > 72:
-        raise AppError("密码过长：UTF-8 编码后不得超过 72 字节", code=400, status_code=400)
+        raise InvalidInput("密码过长：UTF-8 编码后不得超过 72 字节")
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 

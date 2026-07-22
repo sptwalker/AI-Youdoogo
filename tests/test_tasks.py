@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysUser
 from app.services import task_flow, task_service
@@ -25,9 +25,9 @@ def test_invalid_transitions() -> None:
 
 
 def test_assert_transition_raises() -> None:
-    with pytest.raises(AppError, match="非法状态流转"):
+    with pytest.raises(ApplicationError, match="非法状态流转"):
         task_flow.assert_transition(task_flow.CREATED, task_flow.ACCEPTED)
-    with pytest.raises(AppError, match="未知任务状态"):
+    with pytest.raises(ApplicationError, match="未知任务状态"):
         task_flow.assert_transition(task_flow.CREATED, "bogus")
 
 
@@ -76,7 +76,7 @@ async def test_full_lifecycle(db: tuple[AsyncSession, uuid.UUID]) -> None:
 async def test_illegal_transition_rejected(db: tuple[AsyncSession, uuid.UUID]) -> None:
     session, uid = db
     task = await task_service.create_task(session, title="T", task_type="x", creator_id=uid)
-    with pytest.raises(AppError, match="非法状态流转"):
+    with pytest.raises(ApplicationError, match="非法状态流转"):
         await task_service.transition(session, task.id, task_flow.ACCEPTED, operator_id=uid)
 
 

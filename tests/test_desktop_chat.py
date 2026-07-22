@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.core.sse import Event
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -130,7 +130,7 @@ async def test_send_rejects_more_than_two_added(db: AsyncSession) -> None:
     """最多再加 2 个 AI。"""
     u = await _user(db)
     ids = [uuid.uuid4() for _ in range(3)]
-    with pytest.raises(AppError, match="最多"):
+    with pytest.raises(ApplicationError, match="最多"):
         await _send_all(db, u, "hi", ids)
 
 

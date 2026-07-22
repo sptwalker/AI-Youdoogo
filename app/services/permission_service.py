@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound
 from app.knowledge.scope import resolve_visible_kb_ids
 from app.models.system import SysUser
 from app.services import resource_grant_service
@@ -25,7 +25,7 @@ _PRIVILEGED = ("admin", "executive")
 def check_role(user: SysUser, *roles: str) -> None:
     """角色门唯一判定：user.role_code 不在允许集则抛 403。"""
     if user.role_code not in roles:
-        raise AppError("无权限执行此操作", code=403, status_code=403)
+        raise PermissionDenied("无权限执行此操作")
 
 
 def is_privileged(user: SysUser) -> bool:
@@ -62,7 +62,7 @@ def assert_can_see(
         user, creator_id=creator_id, department_id=department_id,
         assignee_user_id=assignee_user_id,
     ):
-        raise AppError("资源不存在", code=404, status_code=404)
+        raise ResourceNotFound("资源不存在")
 
 
 def row_filter(model: Any, user: SysUser) -> Any | None:

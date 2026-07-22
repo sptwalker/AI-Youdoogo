@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError, RuleViolation
 
 _TEXT_MIMES = {"text/plain", "text/markdown", "text/x-markdown", ""}
 _TEXT_EXTS = (".txt", ".md", ".markdown")
@@ -34,15 +34,13 @@ def _extract_pdf(content: bytes) -> str:
     reader = PdfReader(BytesIO(content))
     text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
     if not text:
-        raise AppError(
-            "该 PDF 无文本层（疑似扫描件/图片型），暂不支持；"
-            "请上传含文本的 PDF 或先 OCR 转文字"
-        )
+        raise RuleViolation("该 PDF 无文本层（疑似扫描件/图片型），暂不支持；"
+            "请上传含文本的 PDF 或先 OCR 转文字")
     return text
 
 
 def extract_text(content: bytes, mime_type: str | None, file_name: str) -> str:
-    """把文件字节解成纯文本。支持 txt/md/docx/pdf；其余抛 AppError。"""
+    """把文件字节解成纯文本。支持 txt/md/docx/pdf；其余抛 ApplicationError。"""
     name = file_name.lower()
     mime = (mime_type or "").split(";")[0].strip().lower()
     try:
@@ -52,10 +50,10 @@ def extract_text(content: bytes, mime_type: str | None, file_name: str) -> str:
             return _extract_pdf(content)
         if mime in _TEXT_MIMES or name.endswith(_TEXT_EXTS):
             return content.decode("utf-8")
-    except AppError:
+    except ApplicationError:
         raise
     except UnicodeDecodeError as exc:
-        raise AppError("文件不是 UTF-8 文本，无法解析") from exc
+        raise RuleViolation("文件不是 UTF-8 文本，无法解析") from exc
     except Exception as exc:  # noqa: BLE001 - docx/pdf 解析抛型不稳定，统一成可读错误
-        raise AppError(f"文档解析失败：{type(exc).__name__}") from exc
-    raise AppError(f"暂不支持的文件类型：{mime_type or file_name}（支持 txt/md/docx/pdf）")
+        raise RuleViolation(f"文档解析失败：{type(exc).__name__}") from exc
+    raise RuleViolation(f"暂不支持的文件类型：{mime_type or file_name}（支持 txt/md/docx/pdf）")

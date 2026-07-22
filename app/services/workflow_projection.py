@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound
 from app.models.workflow import (
     RUN_CANCELLED,
     RUN_FAILED,
@@ -134,7 +134,7 @@ async def progress(db: AsyncSession, parent_task_id: uuid.UUID) -> dict[str, Any
     """返回新工作流快照；旧 TaskCard 编排由调用方决定是否走兼容实现。"""
     run = await workflow_repository.get_run_by_parent_task(db, parent_task_id)
     if run is None:
-        raise AppError("工作流不存在", code=404, status_code=404)
+        raise ResourceNotFound("工作流不存在")
     steps = await workflow_repository.list_steps(db, run.id)
     completed = sum(1 for step in steps if step.status == STEP_SUCCEEDED)
     return {

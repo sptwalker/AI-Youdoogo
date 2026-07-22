@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.base import run_agent, run_agent_stream
 from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.core.sse import Event
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.discussion import (
@@ -76,7 +76,7 @@ def _msg_dict(m: DiscussionMessage) -> dict[str, Any]:
 async def get_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:
     c = await db.get(DiscussionChannel, channel_id)
     if c is None or c.is_delete:
-        raise AppError("讨论频道不存在", code=404, status_code=404)
+        raise ResourceNotFound("讨论频道不存在")
     return c
 
 
@@ -378,7 +378,7 @@ async def post_message_stream(
     """
     channel = await get_channel(db, channel_id)
     if channel.is_archived:
-        raise AppError("频道已归档，不可发言")
+        raise RuleViolation("频道已归档，不可发言")
 
     human = DiscussionMessage(
         channel_id=channel_id, speaker_type=SPEAKER_HUMAN, speaker_id=speaker_id,
@@ -474,12 +474,12 @@ async def promote_message(
 ) -> dict[str, Any]:
     """把一条讨论消息升格为提案/任务，回填 ref 溯源（红线：产出仍走真人确认）。"""
     if target not in _PROMOTE_TARGETS:
-        raise AppError(f"target 仅支持 {'/'.join(_PROMOTE_TARGETS)}")
+        raise RuleViolation(f"target 仅支持 {'/'.join(_PROMOTE_TARGETS)}")
     msg = await db.get(DiscussionMessage, message_id)
     if msg is None or msg.is_delete:
-        raise AppError("消息不存在", code=404, status_code=404)
+        raise ResourceNotFound("消息不存在")
     if msg.ref_id is not None:
-        raise AppError("该消息已升格过")
+        raise RuleViolation("该消息已升格过")
 
     title = msg.content[:60] or "讨论升格"
     if target == "proposal":

@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.llm import get_llm_for_role
 from app.llm.usage import extract_usage, record_usage
 from app.models.agent import AgentRole
@@ -107,10 +107,10 @@ async def run_eval(
     """用当前（或指定）提示词跑该角色的评估集，返回聚合分 + 明细。"""
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体角色不存在", code=404, status_code=404)
+        raise ResourceNotFound("智能体角色不存在")
     cases = await _applicable_cases(db, role_id)
     if not cases:
-        raise AppError("该角色暂无可用评估用例，请先在评估集中添加")
+        raise RuleViolation("该角色暂无可用评估用例，请先在评估集中添加")
     result = await _run_prompt_on_cases(
         db, role, prompt or role.prompt_template, cases, user_id
     )
@@ -127,10 +127,10 @@ async def shadow_compare(
     """
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体角色不存在", code=404, status_code=404)
+        raise ResourceNotFound("智能体角色不存在")
     cases = await _applicable_cases(db, role_id)
     if not cases:
-        raise AppError("该角色暂无可用评估用例，请先在评估集中添加")
+        raise RuleViolation("该角色暂无可用评估用例，请先在评估集中添加")
     base = await _run_prompt_on_cases(db, role, role.prompt_template, cases, user_id)
     cand = await _run_prompt_on_cases(db, role, candidate_prompt, cases, user_id)
     delta = round(cand["avg"] - base["avg"], 3)
@@ -163,7 +163,7 @@ async def list_cases(db: AsyncSession, role_id: uuid.UUID | None = None) -> list
 async def create_case(db: AsyncSession, data: dict[str, Any]) -> dict[str, Any]:
     name = (data.get("name") or "").strip()
     if not name or not (data.get("input_text") or "").strip():
-        raise AppError("用例名称和输入必填")
+        raise RuleViolation("用例名称和输入必填")
     rubric = (data.get("rubric") or "").strip() or "产出是否准确、切题、可用。"
     case = EvalCase(
         name=name, role_id=data.get("role_id"),
@@ -178,6 +178,6 @@ async def create_case(db: AsyncSession, data: dict[str, Any]) -> dict[str, Any]:
 async def delete_case(db: AsyncSession, case_id: uuid.UUID) -> None:
     case = await db.get(EvalCase, case_id)
     if case is None or case.is_delete:
-        raise AppError("用例不存在", code=404, status_code=404)
+        raise ResourceNotFound("用例不存在")
     case.is_delete = True
     await db.commit()

@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, scheduler
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.sys_config import SysConfig
@@ -99,7 +99,7 @@ async def test_config_resolve_and_set(db: AsyncSession) -> None:
 async def test_set_config_rejects_non_editable(db: AsyncSession) -> None:
     db.add(SysConfig(key="locked", value=1, value_type="int", is_editable=False))
     await db.commit()
-    with pytest.raises(AppError, match="不可编辑"):
+    with pytest.raises(ApplicationError, match="不可编辑"):
         await config_service.set_config(db, "locked", 2, updated_by=None, actor_role="admin")
 
 
@@ -139,5 +139,5 @@ async def test_scheduler_skips_user_task(db: AsyncSession) -> None:
     db.add(task)
     await db.commit()
     await db.refresh(task)
-    with pytest.raises(AppError, match="真人受理"):
+    with pytest.raises(ApplicationError, match="真人受理"):
         await scheduler.run_task(db, task.id)

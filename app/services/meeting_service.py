@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 if TYPE_CHECKING:
     from app.models.system import SysUser
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.core.sse import Event
 from app.models.meeting import (
     CLOSED,
@@ -39,7 +39,7 @@ _MEETING_TRANSITIONS: dict[str, frozenset[str]] = {
 async def get_meeting(db: AsyncSession, meeting_id: uuid.UUID) -> MeetingInfo:
     meeting = await db.get(MeetingInfo, meeting_id)
     if meeting is None or meeting.is_delete:
-        raise AppError("会议不存在", code=404, status_code=404)
+        raise ResourceNotFound("会议不存在")
     return meeting
 
 
@@ -70,7 +70,7 @@ async def set_status(
 ) -> MeetingInfo:
     meeting = await get_meeting(db, meeting_id)
     if to_status not in _MEETING_TRANSITIONS.get(meeting.status, frozenset()):
-        raise AppError(f"非法会议状态流转：{meeting.status} → {to_status}")
+        raise RuleViolation(f"非法会议状态流转：{meeting.status} → {to_status}")
     meeting.status = to_status
     await db.commit()
     await db.refresh(meeting)
@@ -79,7 +79,7 @@ async def set_status(
 
 def _require_in_progress(meeting: MeetingInfo) -> None:
     if meeting.status != IN_PROGRESS:
-        raise AppError(f"会议当前状态 {meeting.status}，需先开始（in_progress）")
+        raise RuleViolation(f"会议当前状态 {meeting.status}，需先开始（in_progress）")
 
 
 async def add_discussion(
@@ -129,9 +129,9 @@ async def cast_vote(
     comment: str | None = None,
 ) -> MeetingVote:
     if choice not in _VALID_CHOICES:
-        raise AppError(f"choice 仅支持 {'/'.join(_VALID_CHOICES)}")
+        raise RuleViolation(f"choice 仅支持 {'/'.join(_VALID_CHOICES)}")
     if voter_type not in ("human", "ai"):
-        raise AppError("voter_type 仅支持 human/ai")
+        raise RuleViolation("voter_type 仅支持 human/ai")
     meeting = await get_meeting(db, meeting_id)
     _require_in_progress(meeting)
     vote = MeetingVote(
@@ -221,7 +221,7 @@ async def confirm_resolution(
 ) -> MeetingResolution:
     resolution = await db.get(MeetingResolution, resolution_id)
     if resolution is None or resolution.is_delete:
-        raise AppError("决议不存在", code=404, status_code=404)
+        raise ResourceNotFound("决议不存在")
     resolution.is_confirmed = True
     resolution.confirmed_by = confirmed_by
     await db.commit()

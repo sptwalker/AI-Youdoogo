@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, scheduler
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysUser
 from app.services import agent_role_service, task_flow, task_service
@@ -59,13 +59,13 @@ async def test_new_department_agent_via_config_only(
 async def test_duplicate_role_name_rejected(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     session, _ = ctx
     await agent_role_service.create_agent_role(session, name="重复角色", prompt_template="x")
-    with pytest.raises(AppError, match="已存在"):
+    with pytest.raises(ApplicationError, match="已存在"):
         await agent_role_service.create_agent_role(session, name="重复角色", prompt_template="y")
 
 
 async def test_invalid_model_role_rejected(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     session, _ = ctx
-    with pytest.raises(AppError, match="model_role"):
+    with pytest.raises(ApplicationError, match="model_role"):
         await agent_role_service.create_agent_role(
             session, name="X", prompt_template="p", model_role="bogus"
         )

@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
 from app.core.database import get_db
-from app.core.exceptions import ok
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.services import audit_service, resource_grant_service
 
 router = APIRouter(prefix="/resource-grants", tags=["permission"])

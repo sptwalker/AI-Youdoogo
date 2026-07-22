@@ -13,8 +13,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.foundations.integration.governed_data_query import SqlRejected, check_sql
 from app.services import audit_service, data_catalog_service, ops_data
-from app.services.sql_guard import SqlRejected, check_sql
 
 logger = logging.getLogger(__name__)
 

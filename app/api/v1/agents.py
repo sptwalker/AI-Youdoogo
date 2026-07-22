@@ -17,11 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import ops
 from app.agents.base import run_agent
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.integrations.feishu import notify
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.schemas.agent import (
     AgentRoleCreate,
     AgentRoleOut,
@@ -59,7 +60,7 @@ async def ops_daily_report(body: DailyReportRequest, db: DB, manager: Manager) -
         try:
             query_date = date.fromisoformat(body.stat_date)
         except ValueError as exc:
-            raise AppError("stat_date 需为 YYYY-MM-DD，或直接在 rows 传入数据") from exc
+            raise RuleViolation("stat_date 需为 YYYY-MM-DD，或直接在 rows 传入数据") from exc
         rows = await ops_data.get_ops_metrics(db, query_date)
     record = await ops.generate_daily_report(
         db, stat_date=body.stat_date, rows=rows, operator_id=manager.id
@@ -75,10 +76,10 @@ async def ops_anomaly_check(body: AnomalyCheckRequest, db: DB, manager: Manager)
     try:
         d = date.fromisoformat(body.stat_date)
     except ValueError as exc:
-        raise AppError("stat_date 需为 YYYY-MM-DD") from exc
+        raise RuleViolation("stat_date 需为 YYYY-MM-DD") from exc
     today = await ops_data.get_ops_metrics(db, d)
     if not today:
-        raise AppError("该日无运营数据，请先上传")
+        raise RuleViolation("该日无运营数据，请先上传")
     prev = await ops_data.get_ops_metrics(db, d - timedelta(days=1))
     alerts = anomaly.detect_anomalies(today, prev)
 
@@ -208,7 +209,7 @@ async def consult(role_id: uuid.UUID, body: ConsultRequest, db: DB, user: Curren
     """
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete or not role.is_active:
-        raise AppError("AI 顾问不存在或已停用", code=404, status_code=404)
+        raise ResourceNotFound("AI 顾问不存在或已停用")
     # 折叠近期历史（最多 6 轮）为上下文
     convo = "\n".join(
         f"{'我' if h.get('role') == 'user' else role.name}：{h.get('content', '')}"

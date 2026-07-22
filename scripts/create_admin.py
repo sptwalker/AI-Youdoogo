@@ -14,8 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
+from app.contexts.shared_kernel import ApplicationError  # noqa: E402
 from app.core.database import async_session_factory  # noqa: E402
-from app.core.exceptions import AppError  # noqa: E402
 from app.schemas.auth import UserCreate  # noqa: E402
 from app.services.auth_service import create_user  # noqa: E402
 
@@ -39,8 +39,8 @@ async def main() -> int:
                     username=username, password=password, real_name=real_name, role_code="admin"
                 ),
             )
-        except AppError as exc:
-            print(f"失败：{exc.msg}")
+        except ApplicationError as exc:
+            print(f"失败：{exc}")
             return 1
     print(f"管理员已创建：{user.username}（id={user.id}）")
     return 0

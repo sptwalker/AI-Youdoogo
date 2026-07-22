@@ -6,7 +6,7 @@ import pytest
 from docx import Document
 from reportlab.pdfgen import canvas
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.knowledge.extract import extract_text
 
 
@@ -51,12 +51,12 @@ def test_pdf_pages() -> None:
 
 
 def test_unsupported_type_rejected() -> None:
-    with pytest.raises(AppError, match="暂不支持"):
+    with pytest.raises(ApplicationError, match="暂不支持"):
         extract_text(b"\x00\x01", "image/png", "pic.png")
 
 
 def test_corrupt_docx_reported() -> None:
-    with pytest.raises(AppError, match="解析失败"):
+    with pytest.raises(ApplicationError, match="解析失败"):
         extract_text(b"not a real docx", None, "bad.docx")
 
 
@@ -64,10 +64,10 @@ def test_scanned_pdf_reports_ocr_hint() -> None:
     """无文本层的 PDF（扫描件）给出需 OCR 的明确提示，而非笼统"内容为空"。"""
     b = BytesIO()
     canvas.Canvas(b).save()  # 空白页，无文本层
-    with pytest.raises(AppError, match="扫描件|OCR"):
+    with pytest.raises(ApplicationError, match="扫描件|OCR"):
         extract_text(b.getvalue(), "application/pdf", "scan.pdf")
 
 
 def test_non_utf8_text_rejected() -> None:
-    with pytest.raises(AppError, match="UTF-8"):
+    with pytest.raises(ApplicationError, match="UTF-8"):
         extract_text("你好".encode("gbk"), "text/plain", "gbk.txt")

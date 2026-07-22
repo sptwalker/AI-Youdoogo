@@ -12,10 +12,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.models.collab import CollabRequest
 from app.models.system import SysDepartment, SysUser
+from app.platform.http_runtime import ok
 from app.services import audit_service, collab_service
 
 router = APIRouter(tags=["collab"])
@@ -124,11 +125,11 @@ async def review_request(
     """复核 approve/reject（仅目标部门主管或 admin；红线：仅分发闸门）。"""
     r = await db.get(CollabRequest, request_id)
     if r is None or r.is_delete:
-        raise AppError("协作请求不存在", code=404, status_code=404)
+        raise ResourceNotFound("协作请求不存在")
     if user.role_code != "admin":
         dept = await db.get(SysDepartment, r.target_department_id)
         if dept is None or dept.supervisor_user_id != user.id:
-            raise AppError("仅目标部门主管或管理员可复核", code=403, status_code=403)
+            raise PermissionDenied("仅目标部门主管或管理员可复核")
     r = await collab_service.review_request(
         db, request_id, decision=body.decision, reviewer_id=user.id, note=body.note
     )

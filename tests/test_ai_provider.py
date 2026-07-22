@@ -185,7 +185,7 @@ async def test_test_provider_persists_status(
 
 
 async def test_invalid_tier_rejected(db: AsyncSession) -> None:
-    from app.core.exceptions import AppError
+    from app.contexts.shared_kernel import ApplicationError
 
-    with pytest.raises(AppError, match="tier"):
+    with pytest.raises(ApplicationError, match="tier"):
         await svc.create(db, name="X", tier="bogus", base_url="u", api_key="k", model="m")

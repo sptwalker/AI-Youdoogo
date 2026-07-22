@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.base import get_agent_role, run_agent, run_agent_stream
 from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.core.sse import Event
 from app.models.agent import AgentTaskRecord
 from app.models.meeting import (
@@ -32,13 +32,13 @@ VALID_CHOICES = ("approve", "reject", "abstain")
 async def _get_meeting(db: AsyncSession, meeting_id: uuid.UUID) -> MeetingInfo:
     meeting = await db.get(MeetingInfo, meeting_id)
     if meeting is None or meeting.is_delete:
-        raise AppError("会议不存在", code=404, status_code=404)
+        raise ResourceNotFound("会议不存在")
     return meeting
 
 
 def _require_in_progress(meeting: MeetingInfo) -> None:
     if meeting.status != IN_PROGRESS:
-        raise AppError(f"会议当前状态 {meeting.status}，需先开始（in_progress）")
+        raise RuleViolation(f"会议当前状态 {meeting.status}，需先开始（in_progress）")
 
 
 async def _list_discussions(
@@ -63,7 +63,7 @@ async def ai_expert_speak_stream(
     _require_in_progress(meeting)
     role = await get_agent_role(db, EXPERT_NAME)
     if role is None:
-        raise AppError("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
+        raise RuleViolation("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
 
     history = await _list_discussions(db, meeting_id)
     context = "\n".join(f"{item.speaker_name}：{item.content}" for item in history)
@@ -154,7 +154,7 @@ async def ai_expert_vote(
     _require_in_progress(meeting)
     role = await get_agent_role(db, EXPERT_NAME)
     if role is None:
-        raise AppError("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
+        raise RuleViolation("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
     record = await run_agent(
         db,
         role,
@@ -189,10 +189,10 @@ async def generate_minutes(
     meeting = await _get_meeting(db, meeting_id)
     discussions = await _list_discussions(db, meeting_id)
     if not discussions:
-        raise AppError("会议暂无发言，无法生成纪要")
+        raise RuleViolation("会议暂无发言，无法生成纪要")
     role = await get_agent_role(db, EXPERT_NAME)
     if role is None:
-        raise AppError("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
+        raise RuleViolation("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
     body = "\n".join(
         f"{item.speaker_name}（{item.speaker_type}）：{item.content}"
         for item in discussions
@@ -223,11 +223,11 @@ async def resolution_to_task(
 ) -> TaskCard:
     resolution = await db.get(MeetingResolution, resolution_id)
     if resolution is None or resolution.is_delete:
-        raise AppError("决议不存在", code=404, status_code=404)
+        raise ResourceNotFound("决议不存在")
     if not resolution.is_confirmed:
-        raise AppError("决议未经真人确认，不可转任务卡（决议须真人确认生效）")
+        raise RuleViolation("决议未经真人确认，不可转任务卡（决议须真人确认生效）")
     if resolution.converted_task_id is not None:
-        raise AppError("该决议已转过任务卡")
+        raise RuleViolation("该决议已转过任务卡")
     task = await task_service.create_task(
         db,
         title=f"[会议决议] {resolution.content[:60]}",

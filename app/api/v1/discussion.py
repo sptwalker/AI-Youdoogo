@@ -15,8 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import InvalidInput, PermissionDenied, RuleViolation
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.core.sse import sse_response
 from app.knowledge import storage
 from app.models.discussion import (
@@ -26,6 +26,7 @@ from app.models.discussion import (
     DiscussionMessage,
 )
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 from app.services import discussion_service
 
@@ -45,7 +46,7 @@ async def _require_channel_member(
     """校验频道存在且当前真人是有效成员。"""
     await discussion_service.get_channel(db, channel_id)
     if not await discussion_service.is_member(db, channel_id, user.id):
-        raise AppError("仅群成员可访问", code=403, status_code=403)
+        raise PermissionDenied("仅群成员可访问")
 
 
 async def _can_download_attachment(
@@ -79,7 +80,7 @@ async def upload_attachment(
     """上传群聊附件（图片/文件，I6）→ MinIO → 返回附件元数据供发消息带上。"""
     content = await file.read()
     if len(content) > _MAX_ATTACH_BYTES:
-        raise AppError(f"文件过大（>{_MAX_ATTACH_BYTES // 1024 // 1024}MB）")
+        raise RuleViolation(f"文件过大（>{_MAX_ATTACH_BYTES // 1024 // 1024}MB）")
     name = file.filename or "未命名"
     is_image = name.lower().endswith(_IMAGE_EXT)
     object_name = f"chat/{uuid.uuid4().hex}/{name}"
@@ -102,9 +103,9 @@ async def download_attachment(
     """下载群聊附件（storage_path=bucket/object，I6）。"""
     _, _, object_name = storage_path.partition("/")
     if not object_name.startswith("chat/"):  # 限定只能下群聊附件，防越权读任意对象
-        raise AppError("非法附件路径", code=400, status_code=400)
+        raise InvalidInput("非法附件路径")
     if not await _can_download_attachment(db, storage_path, user.id):
-        raise AppError("无权访问该附件", code=403, status_code=403)
+        raise PermissionDenied("无权访问该附件")
     data = await storage.get_object_bytes(object_name)
     return StreamingResponse(
         io.BytesIO(data), media_type="application/octet-stream",
@@ -189,7 +190,7 @@ async def list_members(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict
 async def add_members(channel_id: uuid.UUID, body: dict, db: DB, user: CurrentUser) -> dict:
     """群主加成员。body: {members: [{member_type, member_id, member_name}]}。"""
     if not await discussion_service.is_owner(db, channel_id, user.id):
-        raise AppError("仅群主可添加成员", code=403, status_code=403)
+        raise PermissionDenied("仅群主可添加成员")
     n = await discussion_service.add_members(db, channel_id, body.get("members") or [])
     return ok({"added": n})
 
@@ -200,9 +201,9 @@ async def remove_member(
 ) -> dict:
     """踢出成员（仅群主）。不能踢群主自己。"""
     if not await discussion_service.is_owner(db, channel_id, user.id):
-        raise AppError("仅群主可踢出成员", code=403, status_code=403)
+        raise PermissionDenied("仅群主可踢出成员")
     if member_type == "human" and await discussion_service.is_owner(db, channel_id, member_id):
-        raise AppError("不能踢出群主", code=400, status_code=400)
+        raise InvalidInput("不能踢出群主")
     await discussion_service.remove_member(db, channel_id, member_type, member_id)
     return ok()
 
@@ -211,7 +212,7 @@ async def remove_member(
 async def disband_channel(channel_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
     """解散讨论群（仅群主）：归档入 KB 后软删频道 + 全部成员。"""
     if not await discussion_service.is_owner(db, channel_id, user.id):
-        raise AppError("仅群主可解散讨论群", code=403, status_code=403)
+        raise PermissionDenied("仅群主可解散讨论群")
     await discussion_service.disband_channel(db, channel_id)
     return ok()
 

@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.models.task import TaskCard
 from app.models.workflow import RUN_QUEUED, WorkflowEvent, WorkflowRun, WorkflowStep
 from app.services import outbox_service, task_service
@@ -70,7 +70,7 @@ async def create_workflow(
 ) -> WorkflowRun:
     """在调用方事务中原子创建 workflow、TaskCard 镜像、步骤、事件和首个 outbox。"""
     if len(steps) < 2:
-        raise AppError("持久化编排至少需要两个步骤")
+        raise RuleViolation("持久化编排至少需要两个步骤")
     parent = await task_service.create_task(
         db,
         title=title[:200],
@@ -144,7 +144,7 @@ async def create_workflow(
 async def get_run(db: AsyncSession, workflow_id: uuid.UUID) -> WorkflowRun:
     run = await db.get(WorkflowRun, workflow_id)
     if run is None or run.is_delete:
-        raise AppError("工作流不存在", code=404, status_code=404)
+        raise ResourceNotFound("工作流不存在")
     return run
 
 

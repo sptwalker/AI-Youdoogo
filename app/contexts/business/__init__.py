@@ -1,0 +1,1 @@
+"""Business-scenario bounded contexts."""

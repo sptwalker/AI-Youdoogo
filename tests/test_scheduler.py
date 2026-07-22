@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, scheduler
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.system import SysUser
@@ -64,5 +64,5 @@ async def test_run_task_without_assignee_rejected(
 ) -> None:
     session, uid, _ = ctx
     task = await task_service.create_task(session, title="T", task_type="x", creator_id=uid)
-    with pytest.raises(AppError, match="未分配智能体"):
+    with pytest.raises(ApplicationError, match="未分配智能体"):
         await scheduler.run_task(session, task.id, operator_id=uid)

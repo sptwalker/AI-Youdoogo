@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.services import feedback_service
@@ -48,7 +48,7 @@ async def test_add_feedback(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> N
 
 async def test_add_feedback_score_range(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> None:
     session, _, record_id = ctx
-    with pytest.raises(AppError, match="1~5"):
+    with pytest.raises(ApplicationError, match="1~5"):
         await feedback_service.add_feedback(
             session, task_record_id=record_id, rater_id=uuid.uuid4(), score=9
         )
@@ -56,7 +56,7 @@ async def test_add_feedback_score_range(ctx: tuple[AsyncSession, uuid.UUID, uuid
 
 async def test_add_feedback_missing_record(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> None:
     session, _, _ = ctx
-    with pytest.raises(AppError, match="不存在"):
+    with pytest.raises(ApplicationError, match="不存在"):
         await feedback_service.add_feedback(
             session, task_record_id=uuid.uuid4(), rater_id=uuid.uuid4(), score=3
         )
@@ -83,5 +83,5 @@ async def test_optimize_prompt_no_low_scores(
     await feedback_service.add_feedback(
         session, task_record_id=record_id, rater_id=uuid.uuid4(), score=5
     )  # 高分不入优化样本
-    with pytest.raises(AppError, match="无需优化"):
+    with pytest.raises(ApplicationError, match="无需优化"):
         await feedback_service.optimize_prompt(session, role_id)

@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.knowledge.scope import resolve_visible_kb_ids
 from app.models import Base
 from app.models.knowledge import KnowledgeBase, KnowledgeFile
@@ -40,15 +40,15 @@ async def test_create_scopes(session: AsyncSession) -> None:
     assert d.department_id == dept_id
     p = await kb_svc.create_kb(session, name="C", scope="personal", owner_agent_id=agent_id)
     assert p.owner_agent_id == agent_id
-    with pytest.raises(AppError, match="部门"):
+    with pytest.raises(ApplicationError, match="部门"):
         await kb_svc.create_kb(session, name="D", scope="department")
-    with pytest.raises(AppError, match="智能体"):
+    with pytest.raises(ApplicationError, match="智能体"):
         await kb_svc.create_kb(session, name="E", scope="personal")
 
 
 async def test_default_kb_not_deletable(session: AsyncSession) -> None:
     default = await kb_svc.get_default_kb(session)
-    with pytest.raises(AppError, match="不可删除"):
+    with pytest.raises(ApplicationError, match="不可删除"):
         await kb_svc.delete_kb(session, default.id)
 
 
@@ -60,7 +60,7 @@ async def test_delete_blocked_by_files(session: AsyncSession) -> None:
         )
     )
     await session.commit()
-    with pytest.raises(AppError, match="文档"):
+    with pytest.raises(ApplicationError, match="文档"):
         await kb_svc.delete_kb(session, kb.id)
 
 

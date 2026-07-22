@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import scheduler
 from app.api.deps import CurrentUser, HumanUser
 from app.core.database import get_db
-from app.core.exceptions import ok
+from app.platform.http_runtime import ok
 from app.schemas.task import (
     DecomposeRequest,
     TaskCreate,

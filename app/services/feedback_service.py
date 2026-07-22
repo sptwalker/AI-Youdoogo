@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.llm import get_llm_for_role
 from app.llm.usage import extract_usage, record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -37,10 +37,10 @@ async def add_feedback(
 ) -> AgentFeedback:
     """给一条智能体执行记录打分（1~5）。"""
     if not 1 <= score <= 5:
-        raise AppError("评分需为 1~5")
+        raise RuleViolation("评分需为 1~5")
     record = await db.get(AgentTaskRecord, task_record_id)
     if record is None or record.is_delete:
-        raise AppError("执行记录不存在", code=404, status_code=404)
+        raise ResourceNotFound("执行记录不存在")
     fb = AgentFeedback(
         task_record_id=task_record_id, rater_id=rater_id, score=score, comment=comment
     )
@@ -75,14 +75,14 @@ async def optimize_prompt(
     """基于低分反馈产出改进版提示词（仅建议，不自动落地）。
 
     Raises:
-        AppError: 角色不存在 / 无低分样本可供优化。
+        ApplicationError: 角色不存在 / 无低分样本可供优化。
     """
     role = await db.get(AgentRole, role_id)
     if role is None or role.is_delete:
-        raise AppError("智能体角色不存在", code=404, status_code=404)
+        raise ResourceNotFound("智能体角色不存在")
     samples = await _collect_low_scored(db, role_id, threshold, limit)
     if not samples:
-        raise AppError(f"该角色暂无评分≤{threshold}的反馈，无需优化")
+        raise RuleViolation(f"该角色暂无评分≤{threshold}的反馈，无需优化")
 
     sample_text = "\n\n".join(
         f"[{i + 1}] 评分 {s}/5，评语：{c or '（无）'}\n产出摘要：{o[:300]}"

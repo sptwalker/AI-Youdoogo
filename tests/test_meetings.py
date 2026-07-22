@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.meeting import CLOSED, IN_PROGRESS
@@ -99,7 +99,7 @@ async def test_resolution_requires_human_confirm(ctx, monkeypatch: pytest.Monkey
     m = await _open_meeting(session, uid)
     r = await meeting_service.create_resolution(session, m.id, content="决议X")
 
-    with pytest.raises(AppError, match="真人确认"):
+    with pytest.raises(ApplicationError, match="真人确认"):
         await meeting_service.resolution_to_task(session, r.id, creator_id=uid)
 
     confirmed = await meeting_service.confirm_resolution(session, r.id, confirmed_by=uid)
@@ -107,14 +107,14 @@ async def test_resolution_requires_human_confirm(ctx, monkeypatch: pytest.Monkey
 
     task = await meeting_service.resolution_to_task(session, r.id, creator_id=uid)
     assert task.task_type == "resolution_execution"
-    with pytest.raises(AppError, match="已转过"):
+    with pytest.raises(ApplicationError, match="已转过"):
         await meeting_service.resolution_to_task(session, r.id, creator_id=uid)
 
 
 async def test_discuss_requires_in_progress(ctx) -> None:
     session, uid = ctx
     m = await meeting_service.create_meeting(session, title="M", creator_id=uid)  # scheduled
-    with pytest.raises(AppError, match="需先开始"):
+    with pytest.raises(ApplicationError, match="需先开始"):
         await meeting_service.add_discussion(
             session, m.id, speaker_id=uid, speaker_name="x", content="hi"
         )
@@ -124,14 +124,14 @@ async def test_illegal_status_transition(ctx) -> None:
     session, uid = ctx
     m = await _open_meeting(session, uid)
     await meeting_service.set_status(session, m.id, CLOSED)
-    with pytest.raises(AppError, match="非法会议状态流转"):
+    with pytest.raises(ApplicationError, match="非法会议状态流转"):
         await meeting_service.set_status(session, m.id, IN_PROGRESS)
 
 
 async def test_minutes_needs_discussion(ctx) -> None:
     session, uid = ctx
     m = await _open_meeting(session, uid)
-    with pytest.raises(AppError, match="无发言"):
+    with pytest.raises(ApplicationError, match="无发言"):
         await meeting_service.generate_minutes(session, m.id)
 
 

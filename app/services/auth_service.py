@@ -6,7 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import (
+    ApplicationError,
+    AuthenticationFailed,
+    ConflictDetected,
+    PermissionDenied,
+    ResourceNotFound,
+    RuleViolation,
+)
 from app.core.security import DUMMY_HASH, hash_password, verify_password
 from app.models.system import SysUser
 from app.schemas.auth import VALID_ROLES, UserCreate, UserUpdate
@@ -19,27 +26,23 @@ async def authenticate(db: AsyncSession, username: str, password: str) -> SysUse
     用户不存在时也执行一次 bcrypt 校验，使两分支耗时一致（防时序侧信道枚举用户名）。
 
     Raises:
-        AppError: 认证失败（401）或账号停用（403）。
+        ApplicationError: 认证失败（401）或账号停用（403）。
     """
     stmt = select(SysUser).where(SysUser.username == username, SysUser.is_delete.is_(False))
     user = (await db.execute(stmt)).scalar_one_or_none()
     if user is None:
         verify_password(password, DUMMY_HASH)  # 恒定耗时
-        raise AppError("用户名或密码错误", code=401, status_code=401)
+        raise AuthenticationFailed("用户名或密码错误")
     if not verify_password(password, user.password_hash):
-        raise AppError("用户名或密码错误", code=401, status_code=401)
+        raise AuthenticationFailed("用户名或密码错误")
     if not user.is_active:
-        raise AppError("账号已停用", code=403, status_code=403)
+        raise PermissionDenied("账号已停用")
     return user
 
 
-def _deny_feishu_user() -> AppError:
+def _deny_feishu_user() -> ApplicationError:
     """未绑定、停用和软删统一拒绝，避免枚举本地账号状态。"""
-    return AppError(
-        "当前飞书账号暂无系统访问权限，请联系管理员完成账号授权或状态确认。",
-        code=403,
-        status_code=403,
-    )
+    return PermissionDenied("当前飞书账号暂无系统访问权限，请联系管理员完成账号授权或状态确认。")
 
 
 async def _find_feishu_user(db: AsyncSession, open_id: str) -> SysUser | None:
@@ -56,7 +59,7 @@ async def authenticate_feishu(db: AsyncSession, open_id: str) -> SysUser:
     JWT、``/me`` 和权限依赖链路。
     """
     if not valid_feishu_open_id(open_id):
-        raise AppError("飞书未返回用户标识", code=401, status_code=401)
+        raise AuthenticationFailed("飞书未返回用户标识")
 
     user = await _find_feishu_user(db, open_id)
     if user is None or user.is_delete or not user.is_active:
@@ -76,23 +79,23 @@ async def login_by_feishu(db: AsyncSession, code: str) -> SysUser:
     该兼容端点与浏览器 PKCE 回调共享相同预绑定策略；不自动开户或授予角色。
 
     Raises:
-        AppError: 飞书换取身份失败 / 未绑定 / 账号停用或软删。
+        ApplicationError: 飞书换取身份失败 / 未绑定 / 账号停用或软删。
     """
     from app.integrations.feishu.client import FeishuAPIError, feishu_client
 
     try:
         info = await feishu_client.oauth_user_info(code)
     except FeishuAPIError as exc:
-        raise AppError(f"飞书登录失败:{exc}", code=401, status_code=401) from exc
+        raise AuthenticationFailed(f"飞书登录失败:{exc}") from exc
     open_id = info.get("open_id")
     if not isinstance(open_id, str):
-        raise AppError("飞书未返回用户标识", code=401, status_code=401)
+        raise AuthenticationFailed("飞书未返回用户标识")
     return await authenticate_feishu(db, open_id)
 
 
 def _check_role(role_code: str) -> None:
     if role_code not in VALID_ROLES:
-        raise AppError(f"非法角色：{role_code}，可选 {'/'.join(VALID_ROLES)}")
+        raise RuleViolation(f"非法角色：{role_code}，可选 {'/'.join(VALID_ROLES)}")
 
 
 async def _refresh_env(db: AsyncSession) -> None:
@@ -109,7 +112,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> SysUser:
         await db.execute(select(SysUser.id).where(SysUser.username == data.username))
     ).scalar_one_or_none()
     if exists is not None:
-        raise AppError("用户名已存在", code=409, status_code=409)
+        raise ConflictDetected("用户名已存在")
     user = SysUser(
         username=data.username,
         password_hash=hash_password(data.password),
@@ -124,7 +127,7 @@ async def create_user(db: AsyncSession, data: UserCreate) -> SysUser:
     except IntegrityError as exc:  # 先查后插的竞态窗口（如双击提交），撞唯一约束兜底为 409
         await db.rollback()
         msg = "该飞书身份已绑定其他用户" if data.feishu_open_id else "用户名已存在"
-        raise AppError(msg, code=409, status_code=409) from exc
+        raise ConflictDetected(msg) from exc
     await db.refresh(user)
     await _refresh_env(db)
     return user
@@ -140,11 +143,11 @@ async def update_user(db: AsyncSession, user_id: uuid.UUID, data: UserUpdate) ->
     """更新用户：仅更新提供的字段。
 
     Raises:
-        AppError: 用户不存在（404）或角色非法（400）。
+        ApplicationError: 用户不存在（404）或角色非法（400）。
     """
     user = await get_user_by_id(db, user_id)
     if user is None:
-        raise AppError("用户不存在", code=404, status_code=404)
+        raise ResourceNotFound("用户不存在")
     if data.role_code is not None:
         _check_role(data.role_code)
         user.role_code = data.role_code
@@ -164,7 +167,7 @@ async def update_user(db: AsyncSession, user_id: uuid.UUID, data: UserUpdate) ->
     except IntegrityError as exc:
         await db.rollback()
         if feishu_binding_changed:
-            raise AppError("该飞书身份已绑定其他用户", code=409, status_code=409) from exc
+            raise ConflictDetected("该飞书身份已绑定其他用户") from exc
         raise
     await db.refresh(user)
     await _refresh_env(db)

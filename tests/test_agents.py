@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, ops
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 
@@ -105,13 +105,13 @@ async def test_run_agent_failure_is_recorded(
 
 
 async def test_empty_rows_rejected(db: AsyncSession) -> None:
-    with pytest.raises(AppError, match="为空"):
+    with pytest.raises(ApplicationError, match="为空"):
         await ops.generate_daily_report(db, stat_date="2026-07-11", rows=[])
 
 
 async def test_missing_role_rejected(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ops, "OPS_DIRECTOR_CODE", "no_such_code")
-    with pytest.raises(AppError, match="未配置"):
+    with pytest.raises(ApplicationError, match="未配置"):
         await ops.generate_daily_report(db, stat_date="2026-07-11", rows=_ROWS)
 
 

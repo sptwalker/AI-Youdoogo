@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.core import runtime_config
-from app.core.exceptions import AppError
 from app.models.sys_config import SysConfig
 from app.services import audit_service
 
@@ -70,9 +70,9 @@ async def set_config(
     """改配置即时生效（仅 is_editable 可改）+ 同步覆盖层 + 落审计。"""
     cfg = await _get(db, key)
     if cfg is None:
-        raise AppError("配置项不存在", code=404, status_code=404)
+        raise ResourceNotFound("配置项不存在")
     if not cfg.is_editable:
-        raise AppError("该配置项不可编辑")
+        raise RuleViolation("该配置项不可编辑")
     cfg.value = value
     cfg.updated_by = updated_by
     await db.commit()

@@ -8,10 +8,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.shared_kernel import RuleViolation
 from app.core.database import get_db
-from app.core.exceptions import AppError, ok
 from app.integrations.thinkingdata.client import ThinkingDataError
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.services import data_catalog_service, data_query_service, ops_data, td_event_service
 from app.services.excel_ingest import ExcelParseError
 
@@ -80,14 +81,14 @@ async def save_event_aliases(body: EventAliasSave, db: DB, _: Manager) -> dict:
 async def upload_daily(db: DB, _: Manager, file: Annotated[UploadFile, File()]) -> dict:
     """上传 ops_daily 模板 Excel（≤20MB），解析后幂等落库。"""
     if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
-        raise AppError("文件过大（>20MB），请压缩或拆分后上传")
+        raise RuleViolation("文件过大（>20MB），请压缩或拆分后上传")
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:
-        raise AppError("文件过大（>20MB），请压缩或拆分后上传")
+        raise RuleViolation("文件过大（>20MB），请压缩或拆分后上传")
     try:
         summary = await ops_data.ingest_ops_daily_excel(db, content)
     except ExcelParseError as exc:
-        raise AppError(str(exc)) from exc
+        raise RuleViolation(str(exc)) from exc
     return ok(summary)
 
 
@@ -121,4 +122,4 @@ async def sync_thinkingdata(
     try:
         return ok(await ops_data.ingest_from_thinkingdata(db, stat_date))
     except ThinkingDataError as exc:
-        raise AppError(f"ThinkingData 拉取失败：{exc}") from exc
+        raise RuleViolation(f"ThinkingData 拉取失败：{exc}") from exc

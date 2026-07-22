@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.database import get_db
-from app.core.exceptions import ok
 from app.core.sse import sse_response
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.schemas.meeting import (
     AiSpeakRequest,
     AiVoteRequest,

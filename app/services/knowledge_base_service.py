@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
 from app.models.knowledge import (
     SCOPE_COMPANY,
     SCOPE_DEPARTMENT,
@@ -24,7 +24,7 @@ VALID_SCOPES = (SCOPE_COMPANY, SCOPE_DEPARTMENT, SCOPE_PERSONAL)
 async def get_kb(db: AsyncSession, kb_id: uuid.UUID) -> KnowledgeBase:
     kb = await db.get(KnowledgeBase, kb_id)
     if kb is None or kb.is_delete:
-        raise AppError("知识库不存在", code=404, status_code=404)
+        raise ResourceNotFound("知识库不存在")
     return kb
 
 
@@ -35,7 +35,7 @@ async def get_default_kb(db: AsyncSession) -> KnowledgeBase:
     )
     kb = (await db.execute(stmt)).scalar_one_or_none()
     if kb is None:
-        raise AppError("未找到公司公共知识库，请先执行数据库迁移")
+        raise RuleViolation("未找到公司公共知识库，请先执行数据库迁移")
     return kb
 
 
@@ -52,11 +52,11 @@ async def create_kb(
 ) -> KnowledgeBase:
     """新建知识库。department scope 需 department_id；personal scope 需 owner_agent_id。"""
     if scope not in VALID_SCOPES:
-        raise AppError(f"scope 仅支持 {'/'.join(VALID_SCOPES)}")
+        raise RuleViolation(f"scope 仅支持 {'/'.join(VALID_SCOPES)}")
     if scope == SCOPE_DEPARTMENT and department_id is None:
-        raise AppError("部门知识库需指定所属部门")
+        raise RuleViolation("部门知识库需指定所属部门")
     if scope == SCOPE_PERSONAL and owner_agent_id is None:
-        raise AppError("个人知识区需指定归属的智能体")
+        raise RuleViolation("个人知识区需指定归属的智能体")
     kb = KnowledgeBase(
         name=name,
         code=code or f"kb_{uuid.uuid4().hex[:8]}",
@@ -71,7 +71,7 @@ async def create_kb(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise AppError("知识库编码已存在", code=409, status_code=409) from exc
+        raise ConflictDetected("知识库编码已存在") from exc
     await db.refresh(kb)
     return kb
 
@@ -106,7 +106,7 @@ async def delete_kb(db: AsyncSession, kb_id: uuid.UUID) -> None:
     """软删知识库。含文件时拒绝（先清空文件）；公司公共库不可删。"""
     kb = await get_kb(db, kb_id)
     if kb.is_default:
-        raise AppError("公司公共知识库不可删除")
+        raise RuleViolation("公司公共知识库不可删除")
     n = (
         await db.execute(
             select(func.count())
@@ -117,7 +117,7 @@ async def delete_kb(db: AsyncSession, kb_id: uuid.UUID) -> None:
         )
     ).scalar_one()
     if n:
-        raise AppError(f"该知识库下还有 {n} 个文档，请先删除文档")
+        raise RuleViolation(f"该知识库下还有 {n} 个文档，请先删除文档")
     kb.is_delete = True
     await db.commit()
 

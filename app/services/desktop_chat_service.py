@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import run_agent, run_agent_stream
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound
 from app.core.sse import Event
 from app.knowledge.ingest import ingest_text
 from app.models.agent import TIER_MEMBER, AgentRole
@@ -212,7 +212,7 @@ async def _resolve_participants(
             or not agent.is_active
             or agent.owner_user_id is not None
         ):
-            raise AppError("要加入的 AI 不存在或不可用", code=404, status_code=404)
+            raise ResourceNotFound("要加入的 AI 不存在或不可用")
         seen.add(aid)
         participants.append(agent)
     return participants

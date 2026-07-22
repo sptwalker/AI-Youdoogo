@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysDepartment
 from app.services import collab_service
@@ -86,5 +86,5 @@ async def test_review_request(db: AsyncSession) -> None:
     )
     assert approved.status == "approved" and approved.reviewed_by == reviewer
     # 已复核不可再复核
-    with pytest.raises(AppError, match="不可复核"):
+    with pytest.raises(ApplicationError, match="不可复核"):
         await collab_service.review_request(db, r.id, decision="reject", reviewer_id=reviewer)

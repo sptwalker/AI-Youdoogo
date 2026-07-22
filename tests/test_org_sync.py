@@ -120,10 +120,10 @@ async def test_sync_idempotent(db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 
 async def test_sync_requires_root(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """未初始化公司根 → 报错。"""
-    from app.core.exceptions import AppError
+    from app.contexts.shared_kernel import ApplicationError
 
     _stub_client(monkeypatch, [], {})
-    with pytest.raises(AppError, match="根节点"):
+    with pytest.raises(ApplicationError, match="根节点"):
         await org_sync_service.sync_from_feishu(db)
 
 

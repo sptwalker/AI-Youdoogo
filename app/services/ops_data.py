@@ -54,7 +54,7 @@ async def ingest_ops_daily_excel(db: AsyncSession, content: bytes) -> dict[str, 
     """解析 ops_daily 模板 Excel 并按 (stat_date, product) 幂等 upsert。
 
     Raises:
-        ExcelParseError: 文件损坏 / 无法匹配模板（由 excel_ingest 抛，API 层转 AppError）。
+        ExcelParseError: 文件损坏 / 无法匹配模板（由 excel_ingest 抛，API 层转 ApplicationError）。
     """
     result = parse_workbook(content)
     for row in result.rows:
@@ -104,9 +104,9 @@ async def ingest_from_thinkingdata(db: AsyncSession, stat_date: date) -> dict[st
     cfg = await _resolve_td_config(db)
     mapping = cfg["mapping"]
     if not cfg["sql_tpl"]:
-        from app.core.exceptions import AppError
+        from app.contexts.shared_kernel import RuleViolation
 
-        raise AppError("未配置 td_daily_metrics_sql（系统配置页设置）")
+        raise RuleViolation("未配置 td_daily_metrics_sql（系统配置页设置）")
 
     sql = cfg["sql_tpl"].replace("${stat_date}", stat_date.isoformat())
     client = ThinkingDataClient(base_url=cfg["base_url"], api_secret=cfg["api_secret"])

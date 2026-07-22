@@ -16,7 +16,15 @@ if TYPE_CHECKING:
     from app.models.system import SysUser
 
 from app.agents.base import get_agent_role, run_agent
-from app.core.exceptions import AppError
+from app.contexts.business.proposal_management import (
+    InvalidProposalDecision,
+    ProposalAlreadyConverted,
+    ProposalExpertUnavailable,
+    ProposalNotApproved,
+    ProposalNotFound,
+    ProposalResearchNotAllowed,
+    ProposalReviewNotAllowed,
+)
 from app.models.proposal import (
     APPROVED,
     DRAFT,
@@ -63,7 +71,7 @@ async def create_proposal(
 async def get_proposal(db: AsyncSession, proposal_id: uuid.UUID) -> ProposalCard:
     proposal = await db.get(ProposalCard, proposal_id)
     if proposal is None or proposal.is_delete:
-        raise AppError("提案不存在", code=404, status_code=404)
+        raise ProposalNotFound()
     return proposal
 
 
@@ -73,14 +81,14 @@ async def run_ai_research(
     """会商AI专家对提案做会前预研，产出评审记录并置状态为 reviewed。
 
     Raises:
-        AppError: 提案不存在 / 已进入终态 / 未配置会商专家角色。
+        ProposalError: 提案不存在 / 已进入终态 / 未配置会商专家角色。
     """
     proposal = await get_proposal(db, proposal_id)
     if proposal.status in (APPROVED, REJECTED):
-        raise AppError("提案已完成评审，不可再预研")
+        raise ProposalResearchNotAllowed()
     role = await get_agent_role(db, EXPERT_NAME)
     if role is None:
-        raise AppError("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
+        raise ProposalExpertUnavailable()
 
     # 置「预研中」并提交，使长耗时 reasoner 调用期间该状态对前端可见
     proposal.status = RESEARCHING
@@ -133,13 +141,13 @@ async def human_review(
     """真人评审：approve/reject 决定提案是否通过（红线：仅此处能置 approved）。
 
     Raises:
-        AppError: decision 非法 / 提案未到可评审状态。
+        ProposalError: decision 非法 / 提案未到可评审状态。
     """
     if decision not in ("approve", "reject"):
-        raise AppError("decision 仅支持 approve / reject")
+        raise InvalidProposalDecision()
     proposal = await get_proposal(db, proposal_id)
     if proposal.status != REVIEWED:
-        raise AppError(f"提案当前状态 {proposal.status} 不可评审（需先完成 AI 预研至 reviewed）")
+        raise ProposalReviewNotAllowed(proposal.status)
 
     db.add(
         ProposalReview(
@@ -163,13 +171,13 @@ async def convert_to_task(
     """把已通过的提案转为任务卡（红线：仅 approved 提案可转，避免未确认决议落地）。
 
     Raises:
-        AppError: 提案未通过 / 已转过。
+        ProposalError: 提案未通过 / 已转过。
     """
     proposal = await get_proposal(db, proposal_id)
     if proposal.status != APPROVED:
-        raise AppError("仅『已通过』的提案可转任务卡（决议须真人确认）")
+        raise ProposalNotApproved()
     if proposal.converted_task_id is not None:
-        raise AppError("该提案已转过任务卡")
+        raise ProposalAlreadyConverted()
 
     task = await task_service.create_task(
         db,

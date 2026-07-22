@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
 from app.core.database import get_db
-from app.core.exceptions import ok
 from app.models.system import SysUser
+from app.platform.http_runtime import ok
 from app.schemas.knowledge import DataSourceCreate, DataSourceUpdate
 from app.services import data_source_service as ds_svc
 

@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.llm import factory
 from app.llm.model_tester import test_card
 from app.models.ai_provider import TIER_DAILY, TIER_REASONING, VALID_TIERS, AiProvider
@@ -34,13 +34,13 @@ def _hint(api_key: str) -> str:
 
 def _check_tier(tier: str) -> None:
     if tier not in VALID_TIERS:
-        raise AppError(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
+        raise RuleViolation(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
 
 
 async def get_provider(db: AsyncSession, provider_id: uuid.UUID) -> AiProvider:
     card = await db.get(AiProvider, provider_id)
     if card is None or card.is_delete:
-        raise AppError("AI 卡片不存在", code=404, status_code=404)
+        raise ResourceNotFound("AI 卡片不存在")
     return card
 
 
@@ -127,7 +127,7 @@ async def set_primary(db: AsyncSession, provider_id: uuid.UUID) -> AiProvider:
     """把卡片设为该档位主用（同档互斥：其余同档卡片清零）。禁用卡片不可设主用。"""
     card = await get_provider(db, provider_id)
     if not card.is_active:
-        raise AppError("禁用中的卡片不能设为主用，请先启用")
+        raise RuleViolation("禁用中的卡片不能设为主用，请先启用")
     stmt = select(AiProvider).where(
         AiProvider.tier == card.tier, AiProvider.is_delete.is_(False)
     )

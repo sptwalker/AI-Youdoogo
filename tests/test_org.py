@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.exceptions import AppError
+from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.system import SysDepartment, SysUser
@@ -82,7 +82,7 @@ async def test_depth_limited_to_two(ctx: tuple[AsyncSession, uuid.UUID]) -> None
     l1 = await _dept(session, "dept_hr")
     l2 = await org_service.create_node(session, name="招聘组", parent_id=l1.id)
     assert l2.level == 2 and l2.node_type == "dept_l2"
-    with pytest.raises(AppError, match="最多两级"):
+    with pytest.raises(ApplicationError, match="最多两级"):
         await org_service.create_node(session, name="太深了", parent_id=l2.id)
 
 
@@ -92,7 +92,7 @@ async def test_delete_blocked_by_children_and_employees(
     session, ceo = ctx
     await org_template.seed_org_template(session, ceo_user_id=ceo)
     hr = await _dept(session, "dept_hr")
-    with pytest.raises(AppError, match="智能体员工"):  # 有总监员工
+    with pytest.raises(ApplicationError, match="智能体员工"):  # 有总监员工
         await org_service.delete_node(session, hr.id)
 
 
