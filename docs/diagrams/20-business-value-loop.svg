@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1150" viewBox="0 0 1800 1150" role="img" aria-labelledby="title desc">
+  <title id="title">企业智能体业务价值流与三类场景闭环</title>
+  <desc id="desc">业务视角。展示运营洞察、提案决策和会议决策三条业务价值流，它们汇聚到统一的任务执行与真人验收闭环；底部展示三类业务共同依赖的企业知识、智能协同、企业能力、治理门禁和反馈演进机制。</desc>
+
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#17324d" flood-opacity="0.09"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#40566f"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2f6fed"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#d96b20"/>
+    </marker>
+    <style>
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; fill: #17324d; }
+      .title { font-size: 31px; font-weight: 700; }
+      .subtitle { font-size: 14px; fill: #62758a; }
+      .section-title { font-size: 19px; font-weight: 700; }
+      .lane-no { font-size: 30px; font-weight: 800; }
+      .lane-title { font-size: 19px; font-weight: 700; }
+      .lane-note { font-size: 12px; fill: #5f7388; }
+      .box-title { font-size: 14px; font-weight: 700; }
+      .box-text { font-size: 11px; fill: #52677c; }
+      .small { font-size: 11px; fill: #5c6f82; }
+      .edge-label { font-size: 11px; font-weight: 600; fill: #40566f; }
+      .main-edge { fill: none; stroke: #40566f; stroke-width: 2.2; marker-end: url(#arrow); }
+      .event-edge { fill: none; stroke: #2f6fed; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow-blue); }
+      .feedback-edge { fill: none; stroke: #d96b20; stroke-width: 2.3; stroke-dasharray: 7 6; marker-end: url(#arrow-orange); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1150" fill="#f8fafc"/>
+  <text x="900" y="42" text-anchor="middle" class="title">企业智能体业务价值流与三类场景闭环</text>
+  <text x="900" y="68" text-anchor="middle" class="subtitle">业务视角：从数据、提案和议题出发，经人机协同形成行动，再以真实业务结果验证价值</text>
+
+  <!-- Business triggers -->
+  <rect x="50" y="92" width="1700" height="76" rx="20" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.8"/>
+  <text x="78" y="122" class="section-title">业务触发</text>
+  <text x="78" y="145" class="lane-note">系统直接接收业务目标、异常事实和决策议题</text>
+
+  <rect x="420" y="109" width="190" height="40" rx="11" fill="#eef5ff" stroke="#91b8ed"/>
+  <text x="515" y="134" text-anchor="middle" class="box-title">管理层目标与决策需求</text>
+  <rect x="635" y="109" width="190" height="40" rx="11" fill="#eef5ff" stroke="#91b8ed"/>
+  <text x="730" y="134" text-anchor="middle" class="box-title">业务部门日常与临时任务</text>
+  <rect x="850" y="109" width="190" height="40" rx="11" fill="#eef5ff" stroke="#91b8ed"/>
+  <text x="945" y="134" text-anchor="middle" class="box-title">指标异常与企业事件</text>
+  <rect x="1065" y="109" width="190" height="40" rx="11" fill="#eef5ff" stroke="#91b8ed"/>
+  <text x="1160" y="134" text-anchor="middle" class="box-title">会议议题与协作请求</text>
+  <rect x="1280" y="109" width="190" height="40" rx="11" fill="#eef5ff" stroke="#91b8ed"/>
+  <text x="1375" y="134" text-anchor="middle" class="box-title">定时任务与外部 API</text>
+
+  <!-- Lane 1: operations -->
+  <rect x="50" y="190" width="1305" height="185" rx="20" fill="#eef6ff" stroke="#6da7e8" stroke-width="1.9"/>
+  <rect x="50" y="190" width="185" height="185" rx="20" fill="#dcecff"/>
+  <text x="142" y="235" text-anchor="middle" class="lane-no" fill="#2765ac">1</text>
+  <text x="142" y="265" text-anchor="middle" class="lane-title" fill="#275d98">运营洞察</text>
+  <text x="142" y="287" text-anchor="middle" class="lane-note">数据 → 异常 → 行动</text>
+  <text x="142" y="320" text-anchor="middle" class="box-text">核心产物</text>
+  <text x="142" y="340" text-anchor="middle" class="box-title">日报 · 告警 · 优化提案</text>
+
+  <rect x="260" y="225" width="145" height="93" rx="12" fill="#ffffff" stroke="#9ec2ef"/>
+  <text x="332" y="250" text-anchor="middle" class="box-title">运营数据接入</text>
+  <text x="332" y="272" text-anchor="middle" class="box-text">Excel · 数据平台</text>
+  <text x="332" y="291" text-anchor="middle" class="box-text">企业系统 / API</text>
+
+  <rect x="430" y="225" width="145" height="93" rx="12" fill="#ffffff" stroke="#9ec2ef"/>
+  <text x="502" y="250" text-anchor="middle" class="box-title">指标归一</text>
+  <text x="502" y="272" text-anchor="middle" class="box-text">日活 · 新增</text>
+  <text x="502" y="291" text-anchor="middle" class="box-text">次日留存 · 数据来源</text>
+
+  <rect x="600" y="225" width="145" height="93" rx="12" fill="#ffffff" stroke="#9ec2ef"/>
+  <text x="672" y="250" text-anchor="middle" class="box-title">规则检测异常</text>
+  <text x="672" y="272" text-anchor="middle" class="box-text">环比骤降 · 低于底线</text>
+  <text x="672" y="291" text-anchor="middle" class="box-text">形成异常清单</text>
+
+  <rect x="770" y="225" width="145" height="93" rx="12" fill="#ffffff" stroke="#9ec2ef"/>
+  <text x="842" y="250" text-anchor="middle" class="box-title">智能体分析</text>
+  <text x="842" y="272" text-anchor="middle" class="box-text">趋势 · 原因 · 影响</text>
+  <text x="842" y="291" text-anchor="middle" class="box-text">结合知识与历史背景</text>
+
+  <rect x="940" y="225" width="145" height="93" rx="12" fill="#ffffff" stroke="#9ec2ef"/>
+  <text x="1012" y="250" text-anchor="middle" class="box-title">形成业务产物</text>
+  <text x="1012" y="272" text-anchor="middle" class="box-text">运营日报 / 告警</text>
+  <text x="1012" y="291" text-anchor="middle" class="box-text">优化建议 / 提案</text>
+
+  <rect x="1110" y="225" width="210" height="93" rx="12" fill="#fffaf0" stroke="#d9bd75"/>
+  <text x="1215" y="250" text-anchor="middle" class="box-title">管理者阅示与定优先级</text>
+  <text x="1215" y="272" text-anchor="middle" class="box-text">仅报告：归档与持续监测</text>
+  <text x="1215" y="291" text-anchor="middle" class="box-text">需要行动：进入任务或提案流程</text>
+
+  <path d="M405 271 L430 271" class="main-edge"/><path d="M575 271 L600 271" class="main-edge"/>
+  <path d="M745 271 L770 271" class="main-edge"/><path d="M915 271 L940 271" class="main-edge"/>
+  <path d="M1085 271 L1110 271" class="main-edge"/><path d="M1320 271 L1390 271" class="main-edge"/>
+
+  <!-- Lane 2: proposal -->
+  <rect x="50" y="400" width="1305" height="185" rx="20" fill="#f4f0ff" stroke="#9578dc" stroke-width="1.9"/>
+  <rect x="50" y="400" width="185" height="185" rx="20" fill="#e7ddff"/>
+  <text x="142" y="445" text-anchor="middle" class="lane-no" fill="#6a4cbd">2</text>
+  <text x="142" y="475" text-anchor="middle" class="lane-title" fill="#5b43a4">提案决策</text>
+  <text x="142" y="497" text-anchor="middle" class="lane-note">想法 → 预研 → 真人决策</text>
+  <text x="142" y="530" text-anchor="middle" class="box-text">核心产物</text>
+  <text x="142" y="550" text-anchor="middle" class="box-title">提案 · 评审记录 · 落地任务</text>
+
+  <rect x="275" y="435" width="165" height="93" rx="12" fill="#ffffff" stroke="#b29ee8"/>
+  <text x="357" y="460" text-anchor="middle" class="box-title">创建标准化提案</text>
+  <text x="357" y="482" text-anchor="middle" class="box-text">背景 · 方案 · 收益风险</text>
+  <text x="357" y="501" text-anchor="middle" class="box-text">优先级 · 所属部门</text>
+
+  <rect x="470" y="435" width="165" height="93" rx="12" fill="#ffffff" stroke="#b29ee8"/>
+  <text x="552" y="460" text-anchor="middle" class="box-title">AI 会前预研</text>
+  <text x="552" y="482" text-anchor="middle" class="box-text">可行性 · 收益 · 风险</text>
+  <text x="552" y="501" text-anchor="middle" class="box-text">只产生参考结论</text>
+
+  <rect x="665" y="435" width="165" height="93" rx="12" fill="#ffffff" stroke="#b29ee8"/>
+  <text x="747" y="460" text-anchor="middle" class="box-title">AI 自查与修订</text>
+  <text x="747" y="482" text-anchor="middle" class="box-text">按标准评分并找问题</text>
+  <text x="747" y="501" text-anchor="middle" class="box-text">低分时重写后再呈现</text>
+
+  <rect x="860" y="435" width="165" height="93" rx="12" fill="#fff2f2" stroke="#d26969" stroke-width="1.7"/>
+  <text x="942" y="460" text-anchor="middle" class="box-title" fill="#9e3535">真人评审</text>
+  <text x="942" y="482" text-anchor="middle" class="box-text">通过 / 驳回</text>
+  <text x="942" y="501" text-anchor="middle" class="box-text">真人拥有最终决定权</text>
+
+  <rect x="1055" y="435" width="245" height="93" rx="12" fill="#ffffff" stroke="#a894df"/>
+  <text x="1177" y="460" text-anchor="middle" class="box-title">通过后转为落地任务</text>
+  <text x="1177" y="482" text-anchor="middle" class="box-text">驳回：关闭或修改后重新发起</text>
+  <text x="1177" y="501" text-anchor="middle" class="box-text">通过：创建任务卡并进入执行</text>
+
+  <path d="M440 481 L470 481" class="main-edge"/><path d="M635 481 L665 481" class="main-edge"/>
+  <path d="M830 481 L860 481" class="main-edge"/><path d="M1025 481 L1055 481" class="main-edge"/>
+  <path d="M1300 481 L1390 481" class="main-edge"/>
+  <rect x="275" y="542" width="1025" height="25" rx="8" fill="#fffafa" stroke="#d8a2a2" stroke-dasharray="6 5"/>
+  <text x="787" y="559" text-anchor="middle" class="small" fill="#9b3b3b">业务红线：未完成 AI 预研不能进入真人评审；只有真人评审可以把提案置为“通过”</text>
+
+  <!-- Lane 3: meeting -->
+  <rect x="50" y="610" width="1305" height="185" rx="20" fill="#ecfaf5" stroke="#63b89d" stroke-width="1.9"/>
+  <rect x="50" y="610" width="185" height="185" rx="20" fill="#d9f3ea"/>
+  <text x="142" y="655" text-anchor="middle" class="lane-no" fill="#14745e">3</text>
+  <text x="142" y="685" text-anchor="middle" class="lane-title" fill="#126a57">会议决策</text>
+  <text x="142" y="707" text-anchor="middle" class="lane-note">议题 → 会商 → 真人确认</text>
+  <text x="142" y="740" text-anchor="middle" class="box-text">核心产物</text>
+  <text x="142" y="760" text-anchor="middle" class="box-title">纪要 · 决议 · 执行任务</text>
+
+  <rect x="255" y="645" width="145" height="93" rx="12" fill="#ffffff" stroke="#91cfbc"/>
+  <text x="327" y="670" text-anchor="middle" class="box-title">创建并开始会议</text>
+  <text x="327" y="692" text-anchor="middle" class="box-text">主题 · 参会人</text>
+  <text x="327" y="711" text-anchor="middle" class="box-text">状态进入进行中</text>
+
+  <rect x="420" y="645" width="145" height="93" rx="12" fill="#ffffff" stroke="#91cfbc"/>
+  <text x="492" y="670" text-anchor="middle" class="box-title">真人与 AI 会商</text>
+  <text x="492" y="692" text-anchor="middle" class="box-text">观点 · 分歧 · 追问</text>
+  <text x="492" y="711" text-anchor="middle" class="box-text">AI 发言只供参考</text>
+
+  <rect x="585" y="645" width="145" height="93" rx="12" fill="#ffffff" stroke="#91cfbc"/>
+  <text x="657" y="670" text-anchor="middle" class="box-title">真人 / AI 投票</text>
+  <text x="657" y="692" text-anchor="middle" class="box-text">票型分开统计</text>
+  <text x="657" y="711" text-anchor="middle" class="box-text">以真人票为准</text>
+
+  <rect x="750" y="645" width="145" height="93" rx="12" fill="#ffffff" stroke="#91cfbc"/>
+  <text x="822" y="670" text-anchor="middle" class="box-title">AI 生成纪要</text>
+  <text x="822" y="692" text-anchor="middle" class="box-text">主要观点 · 分歧点</text>
+  <text x="822" y="711" text-anchor="middle" class="box-text">建议决议</text>
+
+  <rect x="915" y="645" width="145" height="93" rx="12" fill="#ffffff" stroke="#91cfbc"/>
+  <text x="987" y="670" text-anchor="middle" class="box-title">形成决议草案</text>
+  <text x="987" y="692" text-anchor="middle" class="box-text">行动内容 · 负责人</text>
+  <text x="987" y="711" text-anchor="middle" class="box-text">计划完成时间</text>
+
+  <rect x="1080" y="645" width="220" height="93" rx="12" fill="#fff2f2" stroke="#d26969" stroke-width="1.7"/>
+  <text x="1190" y="670" text-anchor="middle" class="box-title" fill="#9e3535">真人确认决议</text>
+  <text x="1190" y="692" text-anchor="middle" class="box-text">未确认：仅是草案，不得生效</text>
+  <text x="1190" y="711" text-anchor="middle" class="box-text">已确认：可转任务进入执行</text>
+
+  <path d="M400 691 L420 691" class="main-edge"/><path d="M565 691 L585 691" class="main-edge"/>
+  <path d="M730 691 L750 691" class="main-edge"/><path d="M895 691 L915 691" class="main-edge"/>
+  <path d="M1060 691 L1080 691" class="main-edge"/><path d="M1300 691 L1390 691" class="main-edge"/>
+  <rect x="255" y="752" width="1045" height="25" rx="8" fill="#fffafa" stroke="#d8a2a2" stroke-dasharray="6 5"/>
+  <text x="777" y="769" text-anchor="middle" class="small" fill="#9b3b3b">业务红线：AI 发言和 AI 票只提供参考；只有经过真人确认的会议决议才能转为执行任务</text>
+
+  <!-- Shared execution and acceptance -->
+  <rect x="1390" y="190" width="360" height="605" rx="22" fill="#ffffff" stroke="#7e91a5" stroke-width="2"/>
+  <text x="1570" y="225" text-anchor="middle" class="section-title">统一执行与验收闭环</text>
+  <text x="1570" y="246" text-anchor="middle" class="lane-note">三类业务需要行动时汇聚到同一条执行链</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1430" y="275" width="280" height="68" rx="13" fill="#f3efff" stroke="#a891df"/>
+    <rect x="1430" y="365" width="280" height="68" rx="13" fill="#eaf8f4" stroke="#6fbaa3"/>
+    <rect x="1430" y="455" width="280" height="68" rx="13" fill="#eaf8fa" stroke="#72bac4"/>
+    <rect x="1430" y="545" width="280" height="68" rx="13" fill="#eef5ff" stroke="#82aae0"/>
+    <rect x="1430" y="635" width="280" height="95" rx="13" fill="#fff6e8" stroke="#d99b56"/>
+  </g>
+  <text x="1570" y="301" text-anchor="middle" class="box-title">任务卡与工作流</text>
+  <text x="1570" y="323" text-anchor="middle" class="box-text">拆解 · 分派 · 进度 · 暂停/恢复</text>
+  <text x="1570" y="391" text-anchor="middle" class="box-title">智能体或真人执行</text>
+  <text x="1570" y="413" text-anchor="middle" class="box-text">专业分析、协作或人工处理</text>
+  <text x="1570" y="481" text-anchor="middle" class="box-title">调用企业能力与业务系统</text>
+  <text x="1570" y="503" text-anchor="middle" class="box-text">数据查询 · 连接器 · API/MCP · 沙箱</text>
+  <text x="1570" y="571" text-anchor="middle" class="box-title">形成可验证的业务产物</text>
+  <text x="1570" y="593" text-anchor="middle" class="box-text">文件交付 · 协作请求 · 业务状态变更</text>
+  <text x="1570" y="661" text-anchor="middle" class="box-title">真人验收与真实业务结果</text>
+  <text x="1570" y="684" text-anchor="middle" class="box-text">完成率 · 响应时效 · 活跃/留存</text>
+  <text x="1570" y="705" text-anchor="middle" class="box-text">转化 · 成本 · 质量 · 用户修正</text>
+  <path d="M1570 343 L1570 365" class="main-edge"/><path d="M1570 433 L1570 455" class="main-edge"/>
+  <path d="M1570 523 L1570 545" class="main-edge"/><path d="M1570 613 L1570 635" class="main-edge"/>
+
+  <!-- Shared capability foundation -->
+  <rect x="50" y="835" width="1700" height="250" rx="22" fill="#f1f4f7" stroke="#9baaba" stroke-width="1.9"/>
+  <text x="78" y="868" class="section-title" fill="#526579">三类业务共同依赖的企业能力</text>
+  <text x="78" y="889" class="lane-note">共同能力服务于业务场景，但业务事实、真人决策和最终验收仍由各业务流程拥有</text>
+
+  <rect x="80" y="915" width="290" height="105" rx="14" fill="#fff8e5" stroke="#d2ad53"/>
+  <text x="225" y="942" text-anchor="middle" class="box-title">企业事实与知识上下文</text>
+  <text x="225" y="965" text-anchor="middle" class="box-text">企业数据 · SOP · 历史会议 · 业务档案</text>
+  <text x="225" y="986" text-anchor="middle" class="box-text">组织结构 · 专家快照 · 来源与版本</text>
+  <text x="225" y="1007" text-anchor="middle" class="box-text">向业务提供有权限的上下文快照</text>
+
+  <rect x="405" y="915" width="290" height="105" rx="14" fill="#f3efff" stroke="#a891df"/>
+  <text x="550" y="942" text-anchor="middle" class="box-title">智能理解与人机协同</text>
+  <text x="550" y="965" text-anchor="middle" class="box-text">意图理解 · 工作规划 · 专家路由</text>
+  <text x="550" y="986" text-anchor="middle" class="box-text">RAG · 多智能体会商 · 真人任务</text>
+  <text x="550" y="1007" text-anchor="middle" class="box-text">关键产出自查与低分修订</text>
+
+  <rect x="730" y="915" width="290" height="105" rx="14" fill="#eaf8f4" stroke="#6fbaa3"/>
+  <text x="875" y="942" text-anchor="middle" class="box-title">企业能力与交付工具</text>
+  <text x="875" y="965" text-anchor="middle" class="box-text">数据查询 · 报告生成 · 文件交付</text>
+  <text x="875" y="986" text-anchor="middle" class="box-text">跨部门协作 · 企业系统连接</text>
+  <text x="875" y="1007" text-anchor="middle" class="box-text">所有调用带授权、幂等、回执和证据</text>
+
+  <rect x="1055" y="915" width="290" height="105" rx="14" fill="#fff0f0" stroke="#d87a7a"/>
+  <text x="1200" y="942" text-anchor="middle" class="box-title">控制与安全门禁</text>
+  <text x="1200" y="965" text-anchor="middle" class="box-text">身份 · 权限 · 数据范围 · 风险分级</text>
+  <text x="1200" y="986" text-anchor="middle" class="box-text">预算 · 真人审批 · 内容安全 · 审计</text>
+  <text x="1200" y="1007" text-anchor="middle" class="box-text">高风险动作默认拒绝，凭据最小授权</text>
+
+  <rect x="1380" y="915" width="290" height="105" rx="14" fill="#fff3e9" stroke="#df9456"/>
+  <text x="1525" y="942" text-anchor="middle" class="box-title">业务反馈与受控演进</text>
+  <text x="1525" y="965" text-anchor="middle" class="box-text">指标 · 验收意见 · 告警 · 失败原因</text>
+  <text x="1525" y="986" text-anchor="middle" class="box-text">评估 → 候选改进 → 人工审批</text>
+  <text x="1525" y="1007" text-anchor="middle" class="box-text">版本发布 · 灰度监测 · 可回滚</text>
+
+  <path d="M1570 730 L1570 895 L1525 895 L1525 915" class="feedback-edge"/>
+  <text x="1582" y="823" class="edge-label" fill="#b85b1c">业务结果与验收反馈</text>
+  <path d="M1450 915 L1450 820 L550 820 L550 915" class="feedback-edge"/>
+  <text x="1000" y="813" text-anchor="middle" class="edge-label" fill="#b85b1c">只有经过评估与审批的知识、提示词、路由和能力版本才能重新进入生产</text>
+
+  <rect x="80" y="1038" width="1590" height="30" rx="10" fill="#c94545"/>
+  <text x="875" y="1059" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">真人最终决策权：AI 可以分析、建议、投参考票和生成草稿，但不能替代提案通过、会议决议确认和高风险业务验收</text>
+
+  <text x="900" y="1122" text-anchor="middle" class="subtitle">业务价值的最终判断标准不是“模型输出成功”，而是业务动作完成、真人验收通过并产生可观测的真实结果</text>
+</svg>

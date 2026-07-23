@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+  <title id="title">企业智能体 4+2 运行闭环架构</title>
+  <desc id="desc">管理视角。四层运行架构自上而下展示意图与结果、中枢编排、业务执行与技能、上下文与记忆；右侧控制保障面在每个关键节点实施检查；底部反馈闭环把真实业务结果转化为经过评估、审批和版本发布的改进。</desc>
+
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#17324d" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#40566f"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#b7791f"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#d96b20"/>
+    </marker>
+    <style>
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; fill: #17324d; }
+      .title { font-size: 32px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #62758a; }
+      .layer-no { font-size: 26px; font-weight: 800; }
+      .layer-title { font-size: 21px; font-weight: 700; }
+      .layer-note { font-size: 13px; fill: #62758a; }
+      .box-title { font-size: 16px; font-weight: 700; }
+      .box-text { font-size: 13px; fill: #43566b; }
+      .edge-label { font-size: 12px; font-weight: 600; fill: #40566f; }
+      .rail-title { font-size: 18px; font-weight: 700; fill: #9f2f2f; }
+      .rail-label { font-size: 13px; font-weight: 700; fill: #8c3030; }
+      .rail-text { font-size: 12px; fill: #6f4545; }
+      .main-edge { fill: none; stroke: #40566f; stroke-width: 2.5; marker-end: url(#arrow); }
+      .result-edge { fill: none; stroke: #2563eb; stroke-width: 2.8; marker-end: url(#arrow-blue); }
+      .context-edge { fill: none; stroke: #b7791f; stroke-width: 2.2; stroke-dasharray: 7 6; marker-end: url(#arrow-amber); }
+      .feedback-edge { fill: none; stroke: #d96b20; stroke-width: 2.5; marker-end: url(#arrow-orange); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#f8fafc"/>
+  <text x="800" y="44" text-anchor="middle" class="title">企业智能体 4+2 运行闭环架构</text>
+  <text x="800" y="70" text-anchor="middle" class="subtitle">管理视角：四层负责业务运行，控制保障面逐点拦截，反馈闭环只发布经过评估与审批的改进</text>
+
+  <!-- Runtime frame -->
+  <rect x="60" y="95" width="1245" height="805" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="88" y="124" class="box-title" fill="#42566d">四层运行架构</text>
+  <text x="1218" y="124" text-anchor="end" class="layer-note">逻辑分层，不等于四个服务或四个数据库</text>
+
+  <!-- Context supply bus behind the layers -->
+  <path d="M115 829 L82 829 L82 196" fill="none" stroke="#b7791f" stroke-width="2.2" stroke-dasharray="7 6"/>
+  <path d="M82 206 L118 206" class="context-edge"/>
+  <path d="M82 385 L118 385" class="context-edge"/>
+  <path d="M82 600 L118 600" class="context-edge"/>
+  <text x="74" y="515" text-anchor="middle" class="edge-label" fill="#9a6717" transform="rotate(-90 74 515)">按身份、范围、版本供给上下文快照</text>
+
+  <!-- Layer 1 -->
+  <g filter="url(#shadow)">
+    <rect x="115" y="145" width="1155" height="125" rx="18" fill="#eaf2ff" stroke="#3b82f6" stroke-width="2.2"/>
+  </g>
+  <rect x="115" y="145" width="112" height="125" rx="18" fill="#dbeafe"/>
+  <text x="171" y="190" text-anchor="middle" class="layer-no" fill="#2563eb">1</text>
+  <text x="171" y="218" text-anchor="middle" class="box-title" fill="#2458aa">意图与</text>
+  <text x="171" y="239" text-anchor="middle" class="box-title" fill="#2458aa">结果层</text>
+  <text x="250" y="168" class="layer-title">接单、澄清与结果交流窗口</text>
+  <text x="250" y="188" class="layer-note">同一窗口完成目标输入、进度沟通、待决事项与结果交付</text>
+
+  <rect x="250" y="204" width="235" height="48" rx="11" fill="#ffffff" stroke="#9bbcf3"/>
+  <text x="367" y="224" text-anchor="middle" class="box-title">用户 / 应用 / 事件 / API</text>
+  <text x="367" y="243" text-anchor="middle" class="box-text">业务目标 · 约束 · 验收标准</text>
+
+  <rect x="548" y="204" width="245" height="48" rx="11" fill="#ffffff" stroke="#9bbcf3"/>
+  <text x="670" y="224" text-anchor="middle" class="box-title">请求归一与必要澄清</text>
+  <text x="670" y="243" text-anchor="middle" class="box-text">意图契约</text>
+
+  <rect x="950" y="204" width="280" height="48" rx="11" fill="#ffffff" stroke="#6ea1ef"/>
+  <text x="1090" y="224" text-anchor="middle" class="box-title">进度 · 交付物 · 证据 · 待决事项</text>
+  <text x="1090" y="243" text-anchor="middle" class="box-text">结果契约</text>
+
+  <path d="M485 228 L548 228" class="main-edge"/>
+  <path d="M793 228 L930 228" fill="none" stroke="#9bb4cc" stroke-width="1.8" stroke-dasharray="5 5"/>
+  <text x="860" y="218" text-anchor="middle" class="layer-note">执行完成后回到同一交流窗口</text>
+
+  <!-- Layer 2 -->
+  <g filter="url(#shadow)">
+    <rect x="115" y="295" width="1155" height="175" rx="18" fill="#f2edff" stroke="#7c5ce0" stroke-width="2.2"/>
+  </g>
+  <rect x="115" y="295" width="112" height="175" rx="18" fill="#e8ddff"/>
+  <text x="171" y="360" text-anchor="middle" class="layer-no" fill="#6d4cc8">2</text>
+  <text x="171" y="389" text-anchor="middle" class="box-title" fill="#5d43a9">中枢</text>
+  <text x="171" y="410" text-anchor="middle" class="box-title" fill="#5d43a9">编排层</text>
+  <text x="250" y="321" class="layer-title">围绕目标规划、分派、协调和恢复</text>
+  <text x="250" y="341" class="layer-note">负责编排运行，但不吞并来源业务上下文的领域规则</text>
+
+  <rect x="250" y="365" width="205" height="70" rx="12" fill="#ffffff" stroke="#b6a3ed"/>
+  <text x="352" y="391" text-anchor="middle" class="box-title">工作规划</text>
+  <text x="352" y="413" text-anchor="middle" class="box-text">目标拆解 · 验收条件 · 依赖</text>
+
+  <rect x="490" y="365" width="225" height="70" rx="12" fill="#ffffff" stroke="#b6a3ed"/>
+  <text x="602" y="391" text-anchor="middle" class="box-title">可行性与策略检查</text>
+  <text x="602" y="413" text-anchor="middle" class="box-text">能力 · 数据范围 · 风险 · 预算</text>
+
+  <rect x="750" y="365" width="205" height="70" rx="12" fill="#ffffff" stroke="#b6a3ed"/>
+  <text x="852" y="391" text-anchor="middle" class="box-title">路由与分派</text>
+  <text x="852" y="413" text-anchor="middle" class="box-text">智能体 · 企业能力 · 真人</text>
+
+  <rect x="990" y="365" width="240" height="70" rx="12" fill="#ffffff" stroke="#9a80e5"/>
+  <text x="1110" y="391" text-anchor="middle" class="box-title">工作流运行</text>
+  <text x="1110" y="413" text-anchor="middle" class="box-text">DAG · 状态 · 租约 · 暂停/恢复</text>
+
+  <path d="M455 400 L490 400" class="main-edge"/>
+  <path d="M715 400 L750 400" class="main-edge"/>
+  <path d="M955 400 L990 400" class="main-edge"/>
+  <path d="M670 252 L670 280 L352 280 L352 365" class="main-edge"/>
+  <text x="513" y="278" text-anchor="middle" class="edge-label">意图契约</text>
+
+  <!-- Layer 3 -->
+  <g filter="url(#shadow)">
+    <rect x="115" y="495" width="1155" height="215" rx="18" fill="#e8f8f3" stroke="#169776" stroke-width="2.2"/>
+  </g>
+  <rect x="115" y="495" width="112" height="215" rx="18" fill="#d6f3e9"/>
+  <text x="171" y="573" text-anchor="middle" class="layer-no" fill="#0f8064">3</text>
+  <text x="171" y="602" text-anchor="middle" class="box-title" fill="#116d59">业务执行</text>
+  <text x="171" y="623" text-anchor="middle" class="box-title" fill="#116d59">与技能层</text>
+  <text x="250" y="521" class="layer-title">由受治理的执行者完成真实业务行动</text>
+  <text x="250" y="541" class="layer-note">所有副作用必须通过已发布、可授权、可审计的企业能力契约</text>
+
+  <rect x="250" y="562" width="210" height="104" rx="12" fill="#ffffff" stroke="#8fd0bd"/>
+  <text x="355" y="585" text-anchor="middle" class="box-title">受治理的执行者</text>
+  <rect x="268" y="599" width="82" height="42" rx="9" fill="#e6f6f1" stroke="#9bd4c4"/>
+  <text x="309" y="625" text-anchor="middle" class="box-text">专科智能体</text>
+  <rect x="360" y="599" width="82" height="42" rx="9" fill="#fff8e7" stroke="#dcc27a"/>
+  <text x="401" y="625" text-anchor="middle" class="box-text">真人任务</text>
+
+  <rect x="505" y="575" width="220" height="78" rx="12" fill="#ffffff" stroke="#8fd0bd"/>
+  <text x="615" y="602" text-anchor="middle" class="box-title">能力执行</text>
+  <text x="615" y="624" text-anchor="middle" class="box-text">参数校验 · 幂等 · 授权 · 回执</text>
+
+  <rect x="770" y="575" width="220" height="78" rx="12" fill="#ffffff" stroke="#8fd0bd"/>
+  <text x="880" y="602" text-anchor="middle" class="box-title">业务上下文用例</text>
+  <text x="880" y="624" text-anchor="middle" class="box-text">领域规则 · 状态变更 · 事件</text>
+
+  <rect x="1035" y="575" width="195" height="78" rx="12" fill="#ffffff" stroke="#8fd0bd"/>
+  <text x="1132" y="602" text-anchor="middle" class="box-title">企业系统与工具</text>
+  <text x="1132" y="624" text-anchor="middle" class="box-text">ERP/CRM · API/MCP · 沙箱</text>
+
+  <path d="M460 614 L505 614" class="main-edge"/>
+  <path d="M725 614 L770 614" class="main-edge"/>
+  <path d="M990 614 L1035 614" class="main-edge"/>
+  <path d="M1110 435 L1110 478 L355 478 L355 562" class="main-edge"/>
+  <text x="724" y="489" text-anchor="middle" class="edge-label">工作流步骤 / 真人任务</text>
+
+  <rect x="720" y="666" width="510" height="30" rx="10" fill="#ccede3" stroke="#66b9a2"/>
+  <text x="975" y="686" text-anchor="middle" class="box-title" fill="#126d59">能力结果 · 执行证据 · 领域事件 · 业务结果</text>
+  <path d="M880 653 L880 666" class="main-edge"/>
+  <path d="M1132 653 L1132 666" class="main-edge"/>
+
+  <!-- Return result to the Intent Layer -->
+  <path d="M1230 681 L1250 681 L1250 278 L1090 278 L1090 252" class="result-edge"/>
+  <text x="1262" y="472" text-anchor="middle" class="edge-label" fill="#2563eb" transform="rotate(-90 1262 472)">结果、证据、进度与待决事项</text>
+
+  <!-- Layer 4 -->
+  <g filter="url(#shadow)">
+    <rect x="115" y="735" width="1155" height="140" rx="18" fill="#fff6dc" stroke="#ca8a04" stroke-width="2.2"/>
+  </g>
+  <rect x="115" y="735" width="112" height="140" rx="18" fill="#ffedb5"/>
+  <text x="171" y="790" text-anchor="middle" class="layer-no" fill="#a96700">4</text>
+  <text x="171" y="819" text-anchor="middle" class="box-title" fill="#8b5b06">上下文与</text>
+  <text x="171" y="840" text-anchor="middle" class="box-title" fill="#8b5b06">记忆层</text>
+  <text x="250" y="761" class="layer-title">唯一受治理的共同知识入口，不是共享写库</text>
+  <text x="250" y="781" class="layer-note">来源业务上下文与企业系统继续拥有事实写入权</text>
+
+  <rect x="250" y="798" width="245" height="55" rx="11" fill="#ffffff" stroke="#ddbd67"/>
+  <text x="372" y="820" text-anchor="middle" class="box-title">事实写入所有者</text>
+  <text x="372" y="840" text-anchor="middle" class="box-text">业务上下文 · 企业系统</text>
+
+  <rect x="550" y="798" width="310" height="55" rx="11" fill="#ffffff" stroke="#ddbd67"/>
+  <text x="705" y="820" text-anchor="middle" class="box-title">受治理的知识与环境投影</text>
+  <text x="705" y="840" text-anchor="middle" class="box-text">SOP · 知识检索 · 语义目录 · 组织记忆</text>
+
+  <rect x="915" y="798" width="315" height="55" rx="11" fill="#ffffff" stroke="#d3aa3d"/>
+  <text x="1072" y="820" text-anchor="middle" class="box-title">上下文快照</text>
+  <text x="1072" y="840" text-anchor="middle" class="box-text">身份与范围 · 来源追踪 · 版本 · 过期策略</text>
+
+  <path d="M495 826 L550 826" class="context-edge"/>
+  <path d="M860 826 L915 826" class="context-edge"/>
+
+  <!-- Feedback loop -->
+  <rect x="60" y="925" width="1245" height="125" rx="22" fill="#fff2e8" stroke="#d96b20" stroke-width="2.3"/>
+  <text x="88" y="956" class="box-title" fill="#ad4f12">闭环反馈机制</text>
+  <text x="88" y="977" class="layer-note">真实结果只能形成候选改进，不能直接在线修改生产策略</text>
+
+  <rect x="90" y="994" width="200" height="38" rx="10" fill="#ffffff" stroke="#edb184"/>
+  <text x="190" y="1018" text-anchor="middle" class="box-title">业务结果 / 执行证据</text>
+  <rect x="335" y="994" width="170" height="38" rx="10" fill="#ffffff" stroke="#edb184"/>
+  <text x="420" y="1018" text-anchor="middle" class="box-title">评估与归因</text>
+  <rect x="550" y="994" width="170" height="38" rx="10" fill="#ffffff" stroke="#edb184"/>
+  <text x="635" y="1018" text-anchor="middle" class="box-title">候选改进</text>
+  <rect x="765" y="994" width="170" height="38" rx="10" fill="#ffffff" stroke="#edb184"/>
+  <text x="850" y="1018" text-anchor="middle" class="box-title">评估与人工审批</text>
+  <rect x="980" y="994" width="285" height="38" rx="10" fill="#ffffff" stroke="#df9258"/>
+  <text x="1122" y="1018" text-anchor="middle" class="box-title">版本发布 · 灰度监测 · 可回滚</text>
+
+  <path d="M290 1013 L335 1013" class="feedback-edge"/>
+  <path d="M505 1013 L550 1013" class="feedback-edge"/>
+  <path d="M720 1013 L765 1013" class="feedback-edge"/>
+  <path d="M935 1013 L980 1013" class="feedback-edge"/>
+  <path d="M975 696 L975 905 L190 905 L190 994" class="feedback-edge"/>
+  <text x="550" y="918" text-anchor="middle" class="edge-label" fill="#b95a1b">业务结果 / 指标 / 审核意见 / 告警</text>
+  <path d="M1122 994 L1122 875" class="feedback-edge"/>
+  <text x="1135" y="922" class="edge-label" fill="#b95a1b">经批准的知识 / SOP 版本</text>
+  <path d="M1265 1013 L1290 1013 L1290 400 L1230 400" class="feedback-edge"/>
+  <text x="1281" y="719" text-anchor="middle" class="edge-label" fill="#b95a1b" transform="rotate(-90 1281 719)">经批准的策略 / 路由 / 能力版本</text>
+
+  <!-- Control and assurance plane -->
+  <rect x="1330" y="95" width="220" height="955" rx="24" fill="#fff0f0" stroke="#cf4545" stroke-width="2.4"/>
+  <text x="1440" y="132" text-anchor="middle" class="rail-title">控制与安全保障面</text>
+  <text x="1440" y="153" text-anchor="middle" class="rail-text">贯穿全链路的独立合规护栏</text>
+  <text x="1440" y="177" text-anchor="middle" class="rail-label">CEAD · 每一步都检查</text>
+
+  <line x1="1368" y1="210" x2="1368" y2="995" stroke="#cf4545" stroke-width="3"/>
+
+  <circle cx="1368" cy="235" r="9" fill="#ffffff" stroke="#cf4545" stroke-width="3"/>
+  <text x="1390" y="228" class="rail-label">意图与结果</text>
+  <text x="1390" y="248" class="rail-text">身份 · 输入风险 · 脱敏</text>
+  <text x="1390" y="266" class="rail-text">引用 · 内容安全 · 外发策略</text>
+
+  <circle cx="1368" cy="385" r="9" fill="#ffffff" stroke="#cf4545" stroke-width="3"/>
+  <text x="1390" y="378" class="rail-label">规划与分派</text>
+  <text x="1390" y="398" class="rail-text">数据范围 · 能力授权</text>
+  <text x="1390" y="416" class="rail-text">预算 · 风险 · 真人停点</text>
+
+  <circle cx="1368" cy="600" r="9" fill="#ffffff" stroke="#cf4545" stroke-width="3"/>
+  <text x="1390" y="593" class="rail-label">能力与副作用</text>
+  <text x="1390" y="613" class="rail-text">参数 · 幂等 · 审批凭证</text>
+  <text x="1390" y="631" class="rail-text">最小权限凭据引用</text>
+
+  <circle cx="1368" cy="810" r="9" fill="#ffffff" stroke="#cf4545" stroke-width="3"/>
+  <text x="1390" y="803" class="rail-label">上下文供给</text>
+  <text x="1390" y="823" class="rail-text">先做范围过滤 · 保留来源</text>
+  <text x="1390" y="841" class="rail-text">版本/过期 · 注入防护</text>
+
+  <circle cx="1368" cy="980" r="9" fill="#ffffff" stroke="#cf4545" stroke-width="3"/>
+  <text x="1390" y="973" class="rail-label">反馈升级</text>
+  <text x="1390" y="993" class="rail-text">评估集 · 审批 · 灰度</text>
+  <text x="1390" y="1011" class="rail-text">审计 · 监测 · 回滚</text>
+
+  <rect x="1365" y="1030" width="150" height="28" rx="9" fill="#cf4545"/>
+  <text x="1440" y="1049" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">高风险动作默认拒绝</text>
+</svg>

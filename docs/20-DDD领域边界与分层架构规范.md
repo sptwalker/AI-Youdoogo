@@ -1,11 +1,13 @@
-# 20 · 基础底座域与 DDD 分层架构规范
+# 20 · 企业智能体四层架构与 DDD 领域边界规范
 
-> 状态：已评审生效，渐进迁移中（2026-07-22）。
-> 范围：定义基础底座域、业务域、技术 Platform、Context 内分层、依赖方向和渐进迁移路线。
-> 目标形态：模块化单体，不拆微服务，不改变现有 API 与 durable runtime 语义。
-> 相关事实源：工作流运行语义以 `docs/14-任务编排层设计.md` 为准；本文负责代码边界和数据所有权。
-> 生效规则：本文是后端领域边界、数据所有权、依赖方向和迁移顺序的事实源；`CLAUDE.md` 与
-> `docs/05-开发规范手册.md` 已同步。
+> 状态：架构语义重定义版（2026-07-22），代码按模块化单体继续渐进迁移。
+> 范围：定义“四层运行架构 + 两大横切支撑系统”、DDD 限界上下文、数据所有权、Context 内分层、
+> 依赖方向和迁移路线。
+> 目标形态：模块化单体，不因概念分层直接拆微服务，不改变现有 API 与 durable runtime 语义。
+> 相关事实源：工作流持久化、租约、幂等和真人停点以 `docs/14-任务编排层设计.md` 为准；本文负责
+> 系统架构语义、领域边界和代码依赖规则。
+> 生效规则：本文是后端运行模块、领域边界、数据所有权和依赖方向的事实源。`docs/02-总体架构设计.md`
+> 中原“七层技术架构”仅保留为历史技术视图；与本文冲突时以本文为准。
 
 ## 0. 实施状态
 
@@ -13,7 +15,7 @@
 
 | 阶段 | 状态 | 当前结果 |
 |---|---|---|
-| 阶段 0：边界评审 | 已完成 | Foundation/Business/Platform/Bootstrap 与 Context Map 正式生效 |
+| 阶段 0：架构语义与边界评审 | 已完成 | 四层运行架构、两大横切系统与 DDD Context Map 已明确分离 |
 | 阶段 1：边界护栏 | 已完成首版 | 新增静态 import boundary test；兼容 facade 仅在仍有历史调用方时保留 |
 | 阶段 2：Platform 与 Bootstrap | 进行中 | Bootstrap、Database、Outbox、HTTP Runtime 已落地；旧 `AppError` 调用及异常 facade 已移除 |
 | 阶段 3：Capability 与 Connector | 部分开始 | Governed Data Query 的 SQL 护栏已迁入首个真实 Context |
@@ -24,61 +26,262 @@
 对应 Context 或 Platform；仍有调用方的旧模块只能向新实现单向 re-export，新模块禁止反向依赖
 兼容 facade。旧异常入口的仓库内调用方已迁移完成，因此不再保留 facade。
 
-## 1. 核心结论
+## 1. 总体架构结论
 
-项目应分成四类代码边界：
+### 1.1 必须同时区分三种架构视图
+
+本系统只有一套实现，但必须从三个正交视图描述。三者回答不同问题，禁止再用同一张“分层图”混为一谈：
+
+| 视图 | 结构 | 回答的问题 | 是否直接对应目录 |
+|---|---|---|---|
+| 系统运行视图 | 四层 + 两大横切系统 | 一个目标如何被接收、规划、执行、治理并学习 | 否 |
+| DDD 领域视图 | Business/Foundation Bounded Context + Context Map | 谁拥有规则、状态、数据和公开语言 | 只对应叶子 Context |
+| 代码依赖视图 | Contracts/Domain/Application/Entrypoints/Infrastructure + Platform/Bootstrap | 源码依赖应指向哪里，技术细节放在哪里 | 是 |
+
+因此：
+
+- “意图层”不是 `intent/` 大包；它可能由业务 Context 的 Entrypoint、Assistant Conversations 和
+  Work Planning 的输入契约共同实现；
+- “编排层”不是一个万能 `orchestration_service.py`；它由 Work Planning、Workflow Runtime、
+  Task Management 等多个限界上下文协作完成；
+- “记忆底座”不是所有 Context 共写的数据库；它是统一、受治理的上下文获取入口，源事实仍由各 Context
+  分别拥有；
+- “控制面”和“反馈闭环”不是调用链末端的两个普通模块，而是贯穿四层的独立护栏与演进机制；
+- `domain/application/infrastructure` 是单个 Context 内部的代码层，不能拿来替代四层运行架构。
+
+### 1.2 四层运行架构 + 两大横切支撑系统
+
+![企业智能体 4+2 运行闭环架构](diagrams/20-enterprise-agent-4-plus-2.svg)
+
+图采用纵向四层结构，第一层内部同时展示目标接入和结果交付，避免把同一个交流窗口误解成两个独立层。
+中枢编排层明确分派给智能体、企业能力或真人；业务执行层通过受治理的能力契约产生业务动作和证据；
+上下文与记忆层横跨前三层提供带身份范围、来源、版本和过期策略的上下文快照。右侧控制保障面表示每个
+关键节点的强制检查，底部反馈闭环只允许经过评估、审批和版本发布的改进重新进入生产系统。
+
+独立文件：[SVG 矢量图](diagrams/20-enterprise-agent-4-plus-2.svg) ·
+[PNG 汇报图](diagrams/20-enterprise-agent-4-plus-2.png)
+
+四层是主运行链路；上下文与记忆层为意图、编排和执行提供统一的事实读取与上下文组装能力。控制面拦截每个
+关键决策点，反馈闭环消费全过程证据。它们共同构成“4 + 2”架构，而不是六个按顺序调用的普通 Service。
+
+### 1.3 不可破坏的架构规则
+
+1. 用户给出的是业务目标、约束和预期结果，不要求用户预先拆成机械指令；
+2. 编排层负责规划、路由和运行协调，不直接吞并各业务 Context 的领域规则；
+3. 执行层只能通过已注册、版本化、可授权的 Capability 调用工具和企业系统；
+4. 上下文系统提供统一读取语言，但不取消来源 Context 的数据写入所有权；
+5. 高风险副作用必须在执行前完成身份、权限、数据范围、风险和审批检查；
+6. 每次输出必须能够关联意图、计划、执行证据、数据来源、模型/能力版本和审计记录；
+7. 反馈只能形成“候选改进”，不得绕过评估、版本、审批和发布流程直接修改生产 Prompt、策略或权限；
+8. 运行架构的逻辑分层不等于进程、服务或数据库拆分，当前目标仍是模块化单体。
+
+## 2. 六大系统模块的规范定义
+
+### 2.1 意图与结果层（Intent Layer）
+
+**定位：** 系统的接单窗口、澄清窗口和结果交付窗口。
+
+**接收：** 用户、前端应用、企业事件、定时任务或外部 API 提交的宽泛业务目标，同时捕获：
+
+- `principal`：谁以什么身份发起；
+- `business_goal`：希望改变什么业务状态或回答什么问题；
+- `expected_outcome`：预期结果、格式和验收标准；
+- `constraints`：时间、成本、数据范围、合规和禁止事项；
+- `context_refs`：会话、业务对象、附件、数据源等引用；
+- `channel`：HTTP、SSE、消息、Webhook、CLI 等来源；
+- `risk_hints`：是否可能涉及外发、写入、资金、隐私或其他高风险动作。
+
+这些字段构成逻辑上的 `IntentEnvelope`。它是边界 DTO，不默认成为共享领域 Entity。
+
+**输出：** 面向调用者的 `ResultEnvelope`，至少包含结论、产物、证据/引用、完成状态、未解决事项、需要人工
+决定的项目以及可追踪 ID。
+
+**负责：** 身份接入、请求归一、必要澄清、进度呈现、结果解释和验收回传。
+
+**不负责：** 自己拆解 durable workflow、直接调用数据库/LLM/Tool、保存 WorkflowStep 真相或决定业务对象
+是否生效。来源业务 Context 仍拥有业务命令和最终不变量。
+
+### 2.2 中枢编排层（Orchestration Layer）
+
+**定位：** 围绕业务目标进行规划、分派、协调、恢复和结果汇总的管理大脑。
+
+逻辑角色包括：
+
+- **Supervisor**：保持目标、约束、计划状态和全局完成条件；
+- **Task Decomposer / Planner**：把意图转换为可验证的 `WorkflowPlan`；
+- **Router / Dispatcher**：根据能力、数据范围、风险、成本和可用性选择 Agent、Capability 或真人；
+- **Workflow Runtime**：负责 DAG、状态、租约、attempt、重试、暂停、恢复和真人停点；
+- **Result Synthesizer**：把各步骤证据整理为可交付结果，但不能伪造缺失证据。
+
+这些名称是运行角色，不自动等于一个类、一个智能体或一个限界上下文。DDD 上至少由 Work Planning、
+Workflow Runtime、Task Management 及来源业务 Context 协作实现。
+
+编排层必须在规划前向上下文系统请求受权限约束的 `ContextSnapshot`，并把验收标准、依赖、执行者类型、
+所需能力、风险级别、人工节点和失败策略写进计划。运行真相源继续使用 PostgreSQL durable runtime；
+LangGraph 或其他推理框架只能作为 Planner/WorkflowEngine adapter，不能创建第二套状态真相源。
+
+编排层不直接读取其他 Context 的 ORM，不直接调用具体供应商 SDK，也不能为了“智能”绕过 Capability
+Execution、权限检查、幂等记录和真人审批。
+
+### 2.3 业务执行与技能层（Agent Skills / Enterprise Capability）
+
+**定位：** 系统的手和脚，负责在授权范围内完成可验证的业务行动闭环。
+
+包含：
+
+- 专科智能体及其版本化专家快照；
+- Capability/Skill/Tool 的定义、授权、幂等和执行记录；
+- 企业业务 Context 提供的 application use case；
+- ERP、CRM、数据平台等企业子系统的开放接口；
+- Connector、外部 API、MCP Server 和代码执行沙箱；
+- 交付物、协作请求和其他产生真实副作用的执行能力。
+
+术语必须区分：
+
+- **Agent**：在一次执行中使用模型、上下文和能力完成任务的受治理执行者；不是一个共享万能领域模型；
+- **Expert**：可版本化的角色、职责、模型策略、知识范围和能力授权配置；
+- **Capability**：面向编排层发布的稳定业务能力契约；
+- **Skill**：Capability 的一种可复用流程/认知实现，可以不产生副作用；
+- **Tool**：Capability 的可调用执行形式，尤其需要参数校验、授权、幂等和结果归一；
+- **MCP**：发布资源与能力的边界协议/适配方式，不是领域层，也不是新的数据所有者。
+
+企业子系统接入采用“领域契约 + MCP/Adapter”的形式：子系统所属 Context 先发布稳定的 command/query/result
+语言，MCP Server 或其他 adapter 再把协议请求翻译为该 Context 的 Application Use Case。禁止 MCP handler
+绕过 Application 直接暴露数据库、ORM、内部 Service 或密钥；禁止把“能被模型调用”误认为“已被授权”。
+
+每次执行必须返回结构化 `CapabilityResult`，包含状态、业务结果、证据、外部引用、幂等键、错误分类和审计
+关联。无证据的自由文本不能单独证明高风险动作成功。
+
+### 2.4 记忆底座与上下文系统（Context System / Memory）
+
+**定位：** 所有智能体获取企业事实、标准、历史和当前环境的唯一受治理入口，是系统主动性的知识基座。
+
+“唯一共同知识源”指统一的查询、权限、语义、引用和上下文组装入口，不表示把所有原始数据复制到一个库，
+更不表示允许多个 Context 共同修改同一业务对象。正确结构是：
 
 ```text
-业务场景域
-  ↓ 使用稳定业务能力
-基础底座域
-  ↓ 通过端口使用技术机制
-Platform
-
-Bootstrap 负责装配全部模块
+来源 Context / 企业系统（事实写入所有者）
+  → 发布事件、快照或受控查询接口
+  → Wiki / Index / Retrieval / Semantic Catalog / Organizational Memory
+  → scope filter + provenance + version
+  → ContextSnapshot
+  → Intent / Orchestration / Agent Execution
 ```
 
-四类边界的含义：
+包含：企业私有数据湖的受控访问、Wiki 与 SOP、向量/全文索引、语义目录、组织与专家快照、历史会议和对话、
+组织记忆、运行历史及经批准的策略版本。PostgreSQL、对象存储和向量数据库是 Platform 存储机制，不是领域
+事实的自动所有者。
 
-| 类型 | 回答的问题 | 示例 |
+`ContextSnapshot` 至少携带：主体与数据范围、来源引用、版本/时间、用途、相关事实、缺失信息、敏感级别和
+过期策略。检索必须先做访问范围过滤，再召回和重排；生成结果必须保留 provenance/citations。
+
+上下文系统不得：把原始 Prompt 注入内容当可信指令、让向量索引覆盖来源事实、把归档 transcript 永久当作
+无差别记忆、向调用者泄露无权限数据，或让 Agent 直接跨 Context 查询私有表。
+
+### 2.5 闭环反馈机制（Feedback Loop）
+
+**定位：** 把“系统做了什么”和“现实中是否有效”连接起来的进化引擎。
+
+输入包括业务转化率、点击率、完成时长、成本、质量评分、异常告警、失败分类、人工审核意见、用户修正、
+工具结果和模型评估。来源业务 Context 拥有原始业务结果，AI Quality/Usage & Budget/Audit 等 Context 只保存
+自己需要的评估记录、指标或不可变证据引用。
+
+标准闭环：
+
+```text
+执行证据/业务结果
+  → 反馈采集与归因
+  → 质量评估、异常检测和根因分类
+  → 形成 Prompt/路由/能力/知识/SOP 的候选改进
+  → 离线或影子评估
+  → 必要的人工审批
+  → 版本化发布与灰度
+  → 持续监测，可回滚
+```
+
+反馈闭环可以更新记忆、评估数据和候选策略，但不得直接修改来源业务事实，不得让模型自行提高权限，也不得
+未经验证自动覆盖生产 Prompt、路由、SOP 或安全策略。“自我完善”必须是可评估、可审批、可追踪、可回滚的
+受控演进。
+
+### 2.6 控制与安全保障防线（Control & Assurance Plane）
+
+**定位：** 贯穿四层和反馈闭环的独立合规护栏，不是最后一步补做的安全检查。
+
+包含独立数字身份、RBAC + ABAC、数据范围、能力授权、凭据引用、内容安全、Prompt Injection 防护、模型评估、
+审计追踪、预算限制、异常熔断和 Human-in-the-loop。
+
+系统采用能力对齐设计（CEAD）约束每次行动：
+
+```text
+Principal
+  → Role/Attribute Policy
+  → Data Scope
+  → Capability ID + Version
+  → Risk/Side-effect Classification
+  → Approval Requirement
+  → Credential Scope
+  → Execution Evidence
+  → Audit Record
+```
+
+关键控制点：
+
+1. **意图接入：** 认证主体、租户/组织范围、输入内容和请求风险；
+2. **计划生成：** 校验计划中每一步是否可授权、是否需要真人、是否超预算；
+3. **能力执行：** 再次校验 principal、ExpertSnapshot、capability、参数、数据范围、幂等和审批凭证；
+4. **外部副作用：** 使用最小范围 CredentialRef，禁止模型接触明文密钥；
+5. **结果交付：** 事实引用、敏感数据脱敏、内容安全和外发策略；
+6. **反馈升级：** 评估集、策略版本、审批、灰度和回滚。
+
+高风险动作默认 fail closed。Human Review 只记录审核请求和决定，来源业务 Context 必须在执行生效动作前重新
+校验自己的状态、不变量、权限和审批版本；审批通过不等于业务动作已经成功。
+
+## 3. DDD 边界与代码组织
+
+### 3.1 从六大模块映射到限界上下文
+
+系统模块是运行责任集合，不是限界上下文。下表只表示主要承载关系：
+
+| 系统模块 | 主要 Bounded Context | 说明 |
 |---|---|---|
-| 业务场景域 | 公司正在处理什么业务问题 | 提案、会议、运营分析 |
-| 基础底座域 | 多个业务场景共同依赖什么稳定业务能力 | Wiki、专家、Tool、API Connector、Workflow |
-| Platform | 这些能力具体如何连接数据库、网络和供应商 | PostgreSQL、Redis、HTTP、MinIO、LLM Gateway |
-| Bootstrap | 选择哪些实现并如何启动系统 | FastAPI app、lifespan、worker、handler 注册 |
+| 意图与结果层 | Assistant Conversations、Group Messaging、各 Business Context Entrypoint | 捕获目标、澄清、呈现进度和结果；不拥有编排运行状态 |
+| 中枢编排层 | Work Planning、Workflow Runtime、Task Management | 计划、路由、durable execution、人机任务投影；Supervisor 是运行角色 |
+| 业务执行与技能层 | Expert Management、Agent Execution、Capability Catalog、Capability Execution、Connector Management/Execution、Governed Data Query、Deliverable Management、Collaboration Requests 及各 Business Context | 执行并产生证据或业务副作用 |
+| 上下文与记忆层 | Wiki Management、Knowledge Indexing/Retrieval、Semantic Catalog、Organizational Memory、Environment Projection、Organization Structure | 统一提供有范围、有版本、有来源的 ContextSnapshot |
+| 反馈闭环 | AI Quality、Usage & Budget，以及各来源 Business Context 的 outcome/event | 原始结果仍归来源 Context；反馈模块负责评估、归因和候选改进 |
+| 控制与保障面 | Identity、Access Control、Human Review、Audit Trail、System Configuration | 横切所有调用；Platform Security 只实现技术机制 |
 
-Wiki、Expert、Tool、Connector/API 都是具有业务语义和生命周期的基础底座域；数据库、HTTP client、Redis、
-对象存储只是 Platform 技术实现。
+Provider Management 为执行和编排提供模型路由快照；其供应商 SDK、熔断和调用实现属于 Platform LLM Gateway。
+一个 Context 可以参与多条运行链路，但只能拥有自己定义的模型和写入数据。
 
-禁止把所有底座能力放进一个 `foundation/common/core` 大包。每个底座 Context 必须有独立的数据所有权、
-公开契约和依赖边界。
+### 3.2 限界上下文（Bounded Context）
 
-## 2. 概念定义
-
-### 2.1 业务域组（Business Area）
-
-业务域组只用于导航，例如 `knowledge`、`execution`、`governance`。域组本身不拥有模型、表或 Service，
-组内叶子目录才是限界上下文。
-
-### 2.2 限界上下文（Bounded Context）
-
-限界上下文拥有一套明确的语言、模型、规则、数据和公开契约。一个业务对象只能有一个写入所有者。
+限界上下文拥有一套明确的语言、模型、规则、数据和公开契约。一个业务事实只能有一个写入所有者。
 
 例如：
 
 - Expert Management 拥有专家生命周期；
 - Agent Execution 拥有一次 Agent 执行记录；
-- Workflow Runtime 拥有 WorkflowStep 状态；
+- Workflow Runtime 拥有 WorkflowRun/WorkflowStep 状态；
 - Task Management 拥有 TaskCard；
-- Capability Execution 拥有 ToolExecution。
+- Capability Execution 拥有 ToolExecution；
+- Organizational Memory 拥有提炼后的记忆条目，但不拥有产生记忆的会议、会话或业务对象。
 
-它们不能共享一个通用 `Agent/Task/Status` 领域模型。
+它们不能共享一个通用 `Agent/Task/Status/Memory` 领域模型。
 
-### 2.3 基础底座域（Foundation Context）
+### 3.3 业务域、基础底座域、Platform 与 Bootstrap
 
-基础底座域是被多个业务场景复用、但仍然具有业务语义的限界上下文。
+| 类型 | 回答的问题 | 示例 |
+|---|---|---|
+| 业务场景域 | 公司正在处理什么业务问题 | 提案、会议、运营分析 |
+| 基础底座域 | 多个业务场景共同依赖什么稳定业务能力 | Knowledge、Expert、Capability、Workflow、Identity |
+| Platform | 这些能力具体如何连接数据库、网络和供应商 | PostgreSQL、Redis、HTTP、MinIO、LLM Gateway |
+| Bootstrap | 选择哪些实现并如何启动系统 | FastAPI app、lifespan、worker、handler 注册 |
 
-一个能力满足以下信号中的至少三项时，可以成为基础底座 Context：
+Wiki、Expert、Capability、Connector、Workflow 等具有业务语义和生命周期，属于 Foundation Context；数据库、
+HTTP client、Redis、对象存储、模型 SDK 和 MCP transport 是 Platform/Adapter 技术实现。
+
+一个能力满足以下信号中的至少三项时，可以成为独立 Foundation Context：
 
 1. 有独立 Aggregate、表或写入所有权；
 2. 有自己的业务术语、生命周期或状态机；
@@ -88,18 +291,15 @@ Wiki、Expert、Tool、Connector/API 都是具有业务语义和生命周期的�
 6. 与调用方有不同的变化原因和变化频率；
 7. 替换技术实现不应改变它的业务契约。
 
-“很多地方 import”“文件很长”或“可以复用”本身不能证明它是基础域。
+“很多地方 import”“文件很长”“可以复用”“接了一个 MCP Server”都不能单独证明它是新领域。禁止把所有
+底座能力放进 `foundation/common/core` 大包。
 
-### 2.4 Platform
+### 3.4 业务域组（Business Area）
 
-Platform 是无业务语义的技术机制。Platform 可以知道 `URL/timeout/event_type/object_path`，但不能知道：
+业务域组只用于导航，例如 `knowledge`、`execution`、`governance`。域组本身不拥有模型、表或 Service，
+组内叶子目录才是限界上下文。域组名称不要求与四层运行架构一一对应。
 
-- 哪个专家可以使用某个 Tool；
-- WorkflowStep 什么时候完成；
-- 某个提案是否允许通过；
-- 某个 Wiki 页面是否对某部门可见。
-
-### 2.5 代码层
+### 3.5 Context 内代码分层
 
 每个复杂 Context 内部采用：
 
@@ -107,20 +307,20 @@ Platform 是无业务语义的技术机制。Platform 可以知道 `URL/timeout/
 contracts       对外发布的稳定语言，按需创建
 domain          业务规则、不变量、实体和值对象
 application     command/query/use case/ports/事务编排
-entrypoints     HTTP、事件、Worker、CLI 等入站适配器
-infrastructure  ORM、repository、外部 client 等出站实现
+entrypoints     HTTP、事件、Worker、CLI、MCP 等入站适配器
+infrastructure  ORM、repository、外部 client、MCP client 等出站实现
 ```
 
-简单 Context 可以保持为少量文件，但依赖规则不变。禁止为了目录整齐预建空层。
+这里的五层属于“代码依赖视图”，不是前述四层运行架构。简单 Context 可以保持为少量文件，但依赖规则不变；
+禁止为了目录整齐预建空层。
 
-### 2.6 Shared Kernel
+### 3.6 Shared Kernel
 
-Shared Kernel 是经多个 Context 共同确认的极小稳定契约，不是新的业务 Context，也不是通用业务代码收容所。
-当前只包含与传输无关的应用失败分类，不得包含 HTTP status/code、FastAPI、ORM、外部服务类型
-或可变领域模型。特定 Context 的业务失败仍应使用本地领域语言，例如 Proposal Management 不使用
-通用错误取代自己的提案规则错误。
+Shared Kernel 是经多个 Context 共同确认的极小稳定契约，不是新的业务 Context，也不是“共同知识源”或通用
+业务代码收容所。当前只包含与传输无关的应用失败分类，不得包含 HTTP status/code、FastAPI、ORM、外部
+服务类型、Prompt、ContextSnapshot 或可变领域模型。特定 Context 的业务失败必须使用本地领域语言。
 
-## 3. 目标目录结构
+### 3.7 目标目录结构
 
 ```text
 app/
@@ -186,10 +386,12 @@ app/
     database/
     outbox/
     http_runtime/
+    mcp_runtime/
     llm_gateway/
     cache/
     realtime/
     object_storage/
+    sandbox_runtime/
     observability/
     security/
     integrations/
@@ -198,7 +400,10 @@ app/
 `foundations/knowledge` 等域组目录只允许包含子 Context 和说明文档，禁止在域组级创建共享 `service.py`、
 `models.py` 或 `domain.py`。
 
-## 4. 基础底座域总表
+## 4. DDD 基础底座域总表
+
+以下按 DDD 业务域组列出数据所有权，不按四层运行架构重复建目录。各 Context 在运行架构中的主要位置见
+3.1；“Foundation”表示跨业务场景复用的业务能力，不表示它是最底部的技术设施。
 
 边界等级：
 
@@ -222,7 +427,7 @@ app/
 | Organization Structure | A | 部门树、主管、岗位、组织归属和外部组织映射 | GetOrganizationSnapshot、AssignMember |
 | Expert Management | A | 专家档案、职责、Prompt 策略、模型策略、知识范围、能力绑定、启停和版本 | GetExpertSnapshot、AssignCapabilities |
 | Capability Catalog | A | Skill/Tool 定义、版本、输入输出 schema、风险级别、副作用类型 | ListCapabilities、GetCapabilityDefinition |
-| Environment Projection | A | 面向 Agent 的组织/专家/知识/数据源组合快照、版本和失效状态 | GetEnvironmentSnapshot、InvalidateSnapshot |
+| Environment Projection | A | 面向意图、编排和 Agent 的组织/专家/知识/数据源组合快照、版本和失效状态 | BuildContextSnapshot、GetEnvironmentSnapshot、InvalidateSnapshot |
 
 ### 4.3 Execution Foundation
 
@@ -422,7 +627,38 @@ Connector Execution
 
 禁止让 Tool handler 自行拼 URL、读取环境变量、注入密钥或直接返回供应商 SDK 对象。
 
-### 5.5 Agent Execution
+### 5.5 企业能力的 MCP 接入边界
+
+MCP 是 Open Host Service/Published Language 的协议适配，不替代 DDD 边界。必须区分两类方向：
+
+```text
+出站调用：
+Capability Execution
+  → 目标 Context Port / Connector Execution
+  → Infrastructure MCP Client
+  → 外部 MCP Server
+
+入站发布：
+MCP Transport
+  → Context MCP Entrypoint
+  → Context Application Use Case
+  → Domain / Repository Port
+```
+
+规则：
+
+1. MCP tool/resource 名称必须映射到版本化 `CapabilityDefinition` 或目标 Context 的 Published Language；
+2. MCP discovery 必须按 principal、组织、数据范围和能力授权过滤，发现能力不等于获准调用；
+3. 入站 MCP Server 不得直接暴露 ORM、表结构、文件路径、环境变量、明文密钥或内部 Service；
+4. 出站 MCP client 的传输、连接池、超时和协议错误属于 Platform；业务错误归一属于 Connector/目标 Context；
+5. 有副作用的 MCP 调用必须经过 ToolExecution 幂等记录、风险策略、必要审批和审计；
+6. MCP 返回内容按不可信外部输入处理，进入上下文或 Prompt 前必须做来源标注、范围检查和注入防护；
+7. Agent 只能看到被 Capability Catalog 和 Access Control 联合允许的 MCP 能力子集。
+
+企业各子系统可以逐步以 MCP 暴露能力，但子系统本身仍是业务事实所有者；中枢只保存 ID、版本、快照、调用
+记录和自己的 read model，不能借 MCP 复制出第二套写模型。
+
+### 5.6 Agent Execution
 
 Agent Execution 负责一次 Agent 调用的完整协调，但不拥有专家、工作流或 Tool 业务规则。
 
@@ -452,13 +688,13 @@ AgentExecutionResult
 
 Agent Execution 不接收 `AsyncSession`、`AgentRole ORM` 或 FastAPI Request。
 
-### 5.6 Work Planning 与 Workflow Runtime
+### 5.7 Work Planning 与 Workflow Runtime
 
 两个 Context 不能继续混为一个 Workflow Service：
 
 ```text
 Work Planning
-  WorkIntent → WorkflowPlan
+  IntentEnvelope → WorkIntent → WorkflowPlan
 
 Workflow Runtime
   WorkflowPlan → WorkflowRun/WorkflowStep
@@ -470,7 +706,7 @@ Workflow Runtime
 Work Planning 拥有计划语义，Workflow Runtime 拥有 durable execution 语义。未来 LangGraph 只能实现 Planning 或
 WorkflowEngine adapter，不能成为第二套状态真相源。
 
-### 5.7 Task Management 与 Human Review
+### 5.8 Task Management 与 Human Review
 
 Task Management 拥有 TaskCard 的人机协同生命周期。Workflow Runtime 拥有 WorkflowStep 的执行生命周期。
 
@@ -488,6 +724,70 @@ Human accepts TaskCard
 Human Review 可统一承载审核请求、审核人、风险等级和决定记录，但不能直接把 Proposal、Meeting、Task 或 Workflow
 改成成功状态。业务生效动作始终由来源 Context 执行。
 
+### 5.9 Context System 与 Organizational Memory
+
+“Context System”是由多个 Context 协作提供的统一读取能力，不建立一个拥有所有数据的 `ContextSystem` 聚合：
+
+| 职责 | 所有者 |
+|---|---|
+| 原始业务事实 | Proposal/Meeting/Workflow/Conversation 等来源 Context |
+| 文档生命周期与可见范围 | Wiki Management |
+| 索引版本和重建状态 | Knowledge Indexing |
+| 召回、排序、引用 | Knowledge Retrieval |
+| 术语、别名、指标口径 | Semantic Catalog |
+| 提炼后的长期记忆、来源和淘汰策略 | Organizational Memory |
+| 面向一次任务的 ContextSnapshot 组合、版本和失效 | Environment Projection |
+| 数据访问判定 | Access Control |
+
+标准链路：
+
+```text
+Intent/Planning/Agent Execution
+  → ContextQuery(principal, purpose, refs, time, budget)
+  → Environment Projection
+  → Organization/Expert/Wiki/Retrieval/Memory/Data Query ports
+  → Access Control decisions
+  → ContextSnapshot(facts, citations, versions, missing, expires_at)
+```
+
+Organizational Memory 只接收已授权的归档事件或显式记忆命令。记忆提炼失败时可以保留受控来源引用，但不得
+默默把未经验证的模型推断升级为企业事实。事实、推断、偏好、摘要和决策必须以类型和置信度区分。
+
+### 5.10 Feedback Loop 与 AI Quality
+
+AI Quality 拥有评估用例、评分、反馈归因、影子评估和候选策略验证；它不拥有业务转化率、Task、Proposal、
+Meeting、Prompt 生产配置或访问策略。来源 Context 通过 event/query 提供结果，AI Quality 保存不可变引用和
+自己的评估结论。
+
+```text
+OutcomeRecorded / ExecutionCompleted / ReviewRecorded
+  → FeedbackIntake
+  → EvaluationRun
+  → ImprovementCandidate
+  → ShadowEvaluation
+  → PromotionDecision
+  → VersionedPolicy/Prompt/Route published by its owning Context
+```
+
+不同改进对象必须回到自己的所有者发布：Prompt/Expert 策略归 Expert Management，模型路由归 Provider
+Management，Capability 定义归 Capability Catalog，SOP/知识归 Wiki Management，访问规则归 Access Control。
+AI Quality 只能建议和验证，不能跨 Context 直接写生产配置。
+
+### 5.11 Control & Assurance Plane 的领域边界
+
+控制面不是一个 `SecurityService` 大类，而是多个治理 Context 与 Platform 机制的组合：
+
+- Identity 解析 `Principal`；
+- Access Control 根据主体、资源、动作和环境属性产生 `PolicyDecision`；
+- Capability Catalog 声明风险、副作用和所需权限；
+- Human Review 管理 `ReviewRequest/ReviewDecision`；
+- Audit Trail 追加记录谁在何时基于什么版本做了什么；
+- Usage & Budget 决定模型/能力消耗是否可用；
+- Platform Security 负责加密、签名、secret resolver、内容过滤等技术实现。
+
+控制面通过明确的 application port 和 policy decision 参与用例，不允许治理 Context 直接修改来源 Aggregate。
+审批凭证必须绑定 `principal + action + target + payload_hash + policy_version + expires_at`，防止审批后参数被替换。
+
 ## 6. 业务场景域
 
 当前已经形成的业务场景 Context：
@@ -497,6 +797,19 @@ Human Review 可统一承载审核请求、审核人、风险等级和决定记�
 | Proposal Management | 提案、评审、通过/驳回和转执行意图 | Expert、Agent、Knowledge、Human Review、Work Planning |
 | Meeting Management | 会议、议题、参会、投票、纪要和真人决议 | Expert、Agent、Knowledge、Human Review、Work Planning |
 | Operational Analytics | 运营指标、异常事实、趋势和分析口径 | Connector、Data Query、Semantic Catalog、Agent、Deliverable |
+
+### 6.1 业务价值流与三类场景闭环
+
+![企业智能体业务价值流与三类场景闭环](diagrams/20-business-value-loop.svg)
+
+该图面向业务负责人和管理层，展示运营洞察、提案决策、会议决策三条价值流如何形成业务产物，并在需要行动时
+汇聚到统一的任务执行、企业能力调用、真人验收和业务结果反馈闭环。图中的真人门禁是领域规则：AI 预研不能
+替代提案评审，AI 发言和 AI 票不能替代会议决议确认，模型输出成功也不能替代真实业务结果。
+
+独立文件：[SVG 矢量图](diagrams/20-business-value-loop.svg) ·
+[PNG 汇报图](diagrams/20-business-value-loop.png)
+
+### 6.2 场景扩展与边界约束
 
 未来销售、研发、财务、HR 等真实业务流程出现独立规则、数据和生命周期后，再建立对应业务 Context；不能仅因
 存在一个部门或专家角色就预建空领域。
@@ -509,46 +822,106 @@ Human Review 可统一承载审核请求、审核人、风险等级和决定记�
 - LLM provider SDK：Platform adapter；
 - 通用页面、DTO、ORM Base。
 
-## 7. 核心 Context Map
+## 7. 六模块流转与核心 Context Map
+
+### 7.1 端到端主链路
+
+```text
+1. Intent Layer
+   用户目标 + Principal + ExpectedOutcome + Constraints
+   → IntentEnvelope
+
+2. Orchestration Layer
+   IntentEnvelope
+   → ContextQuery → ContextSnapshot
+   → WorkIntent → WorkflowPlan
+   → Policy/Capability/Human feasibility check
+   → WorkflowRun
+
+3. Agent Skills / Enterprise Capability
+   WorkflowStep
+   → ExpertExecutionSnapshot
+   → AgentExecution
+   → CapabilityExecution
+   → Business Context / Connector / MCP / Sandbox
+   → CapabilityResult + Evidence + Domain/Integration Event
+
+4. Context System / Memory
+   全程提供有权限、有版本、有来源的上下文
+   并接收允许归档的事件、结果引用和经验证的知识更新
+
+1. Intent Layer
+   ResultEnvelope + Deliverable + Evidence + PendingHumanDecision
+   → 用户/应用
+
+Feedback Loop
+   Outcome/Event/Metric/Review
+   → Evaluation → ImprovementCandidate → 受控发布
+```
+
+每一步都带 `principal/tenant/trace/workflow/step/attempt/version` 等必要关联。任何层都不得仅靠自然语言字符串
+隐式传递身份、权限、幂等键、审批凭证或业务状态。
+
+### 7.2 核心 Context Map
+
+![企业智能体核心 DDD 限界上下文映射图](diagrams/20-ddd-context-map.svg)
+
+该图面向工程设计，重点回答“谁拥有模型和写入数据、跨 Context 通过什么契约协作”。上方只保留核心业务
+链路；上下文与组织记忆、治理、AI 运营分别独立成区；Platform 与 Bootstrap 位于最外层，只实现 Context
+定义的端口，不拥有领域事实。为避免图中连线过载，完整的 command/query/event 关系继续以文字清单为准。
+
+独立文件：[SVG 矢量图](diagrams/20-ddd-context-map.svg) ·
+[PNG 汇报图](diagrams/20-ddd-context-map.png)
 
 ```text
 Proposal Management ─┐
-Meeting Management  ─┼─command/event→ Work Planning
+Meeting Management  ─┼─IntentEnvelope/command/event→ Work Planning
 Assistant Conversation┘
 
-Work Planning ──WorkflowPlan──→ Workflow Runtime
-Workflow Runtime ──query──────→ Expert Management
-Workflow Runtime ──command────→ Agent Execution
+Work Planning ──ContextQuery────→ Environment Projection
+Environment Projection ──query─→ Knowledge Retrieval / Organizational Memory
+Environment Projection ──query─→ Organization Structure / Expert Management
+Work Planning ──WorkflowPlan───→ Workflow Runtime
 
-Agent Execution ──query───────→ Knowledge Retrieval
-Agent Execution ──authorize───→ Usage & Budget
-Agent Execution ──command─────→ Capability Execution
+Workflow Runtime ──snapshot query──→ Expert Management
+Workflow Runtime ──command────────→ Agent Execution
+Agent Execution ──context query────→ Environment Projection
+Agent Execution ──authorize────────→ Usage & Budget
+Agent Execution ──command──────────→ Capability Execution
 
-Capability Execution ──query──→ Capability Catalog
-Capability Execution ──command→ Connector Execution
-Capability Execution ──command→ Governed Data Query
-Capability Execution ──command→ Deliverable Management
-Capability Execution ──command→ Collaboration Requests
+Capability Execution ──definition query──→ Capability Catalog
+Capability Execution ──policy query──────→ Access Control / Human Review
+Capability Execution ──command───────────→ Connector Execution / Governed Data Query
+Capability Execution ──command───────────→ Deliverable Management / Collaboration Requests
+Connector Execution ──adapter────────────→ HTTP/MCP Runtime → Enterprise System
 
 Workflow Runtime ──progress event──→ Task Management
 Task Management ──accepted event───→ Workflow Runtime
-
-Organization Structure ──changed event──→ Expert Management
-Identity ──Principal──→ Access Control
-Access Control ──decision──→ 各 Context Entrypoint/Application
 
 Wiki Management ──published event──→ Knowledge Indexing
 Knowledge Indexing ──ready event────→ Knowledge Retrieval
 Conversation/Group Messaging ──archive event──→ Organizational Memory
 
 Provider Management ──route snapshot──→ Platform LLM Gateway
-Agent Execution ──usage event──────────→ Usage & Budget
-Agent Execution ──quality sample───────→ AI Quality
+Agent/Capability/Business Context ──usage/outcome/quality event──→ AI Quality / Usage & Budget
+AI Quality ──validated candidate──→ owning Context promotion use case
 ```
 
-箭头表示 command/query/event 契约，不表示允许直接 import 对方内部模块。
+### 7.3 横切控制关系
 
-## 8. Context 内分层定义
+```text
+Identity ──Principal──────────────→ 每个 Entrypoint/Application Use Case
+Access Control ──PolicyDecision───→ ContextQuery / Plan / Capability / Result Delivery
+Human Review ──ReviewDecision─────→ 来源 Context 的重新校验用例
+Audit Trail ←─append evidence────── Intent / Plan / Execute / Review / Promote
+```
+
+箭头表示 command/query/event 或 policy 契约，不表示允许直接 import 对方的 domain/application/infrastructure，
+也不表示控制面可以越过来源 Context 修改业务状态。
+
+## 8. 限界上下文内部代码分层定义
+
+本节是代码依赖视图，不是四层运行架构的再次拆分。
 
 ### 8.1 Contracts
 
@@ -607,7 +980,7 @@ Application 定义自己需要的 port，Infrastructure 实现。Application 禁
 
 ### 8.4 Entrypoints
 
-职责：把 HTTP、SSE、消息、Worker、CLI 输入转换成 command/query，并映射输出和错误。
+职责：把 HTTP、SSE、消息、Worker、CLI、MCP 输入转换成 command/query，并映射输出和错误。
 
 标准形状：
 
@@ -619,7 +992,7 @@ Entrypoint 禁止直接查询 Repository、执行 SQL、调用 LLM 或包含业�
 
 ### 8.5 Infrastructure
 
-职责：实现 Repository、Gateway、Clock、EventPublisher、ObjectStorage 等 application port。
+职责：实现 Repository、Gateway、Clock、EventPublisher、ObjectStorage、MCP Client 等 application port。
 
 可以依赖 SQLAlchemy、Redis、MinIO、httpx 和 Platform；禁止包含核心业务决策，禁止返回 ORM/SDK 对象给内层。
 
@@ -659,6 +1032,26 @@ Bootstrap ──────────────────→ 全部外层
   → 下游 Application Use Case
 ```
 
+上下文组装默认形状：
+
+```text
+调用方 Application
+  → 调用方 ContextQueryPort
+  → Environment Projection facade
+  → 来源 Context published query / read model
+  → ContextSnapshot + provenance/version/scope
+```
+
+治理检查默认形状：
+
+```text
+来源 Use Case
+  → Policy/Review/Budget Port
+  → Governance Context Contract
+  → PolicyDecision / ReviewDecision / BudgetDecision
+  → 来源 Use Case 重新校验并执行或拒绝
+```
+
 ### 9.3 数据所有权
 
 1. 一个业务对象只有一个写入 Context；
@@ -667,6 +1060,9 @@ Bootstrap ──────────────────→ 全部外层
 4. 禁止跨 Context 传递 ORM 或共享可变 Entity；
 5. 跨 Aggregate/Context 默认最终一致；
 6. 事件消费者必须处理重复、延迟、乱序和版本兼容。
+7. ContextSnapshot、索引和向量是带版本的 read model，不得反向覆盖来源事实；
+8. Feedback/Evaluation/Audit 只能保存自己的记录或来源引用，不得取得被评估业务对象的写入所有权；
+9. 审批、权限和预算结果是一次决策凭证，不是来源 Aggregate 的替代状态。
 
 ### 9.4 Platform 依赖
 
@@ -680,6 +1076,8 @@ Domain/Application ─X→ Platform 具体实现
 ```
 
 业务 handler 由 Bootstrap 注册到 Outbox/Realtime registry，Platform 不得反向 import 业务模块。
+HTTP/MCP/LLM/Sandbox runtime 只负责协议、资源和运行机制；Capability 名称、风险、授权、业务错误和结果语义
+必须留在 Context。
 
 ## 10. 事务与可靠性
 
@@ -696,11 +1094,11 @@ Application Use Case
 
 Repository 默认 `flush`，完整用例的 commit 由 UnitOfWork/Application 决定。
 
-### 10.2 LLM、Tool、API 长调用
+### 10.2 LLM、Tool、API、MCP 与 Sandbox 长调用
 
 ```text
 事务 1：claim/lease/ToolExecution pending → commit
-事务外：LLM / Tool / HTTP / object storage
+事务外：LLM / Tool / HTTP / MCP / sandbox / object storage
 事务 2：校验 owner/version/attempt → 保存结果和后续事件 → commit
 ```
 
@@ -723,6 +1121,22 @@ Deferred(available_at, reason)
 RetryableFailure(error)
 TerminalFailure(error)
 ```
+
+### 10.4 全链路追踪与执行证据
+
+Intent、Plan、Workflow、Agent、Capability、Connector/MCP、Deliverable、Review、Feedback 必须能够通过稳定标识
+关联。最低追踪字段为：
+
+```text
+principal_id / tenant_id / trace_id
+intent_id / workflow_id / step_id / attempt
+expert_version / capability_id / capability_version
+policy_version / approval_id / idempotency_key
+context_snapshot_version / source_refs
+```
+
+不是每张表都要复制全部字段，但必须能够通过不可歧义的引用还原链路。对外副作用成功至少要有幂等执行记录、
+目标系统引用或可验证回执；模型生成的一句“已完成”不能作为成功证据。
 
 ## 11. 当前文件目标归属
 
@@ -751,6 +1165,7 @@ TerminalFailure(error)
 | `connectivity_service.py` | Connector Management/Execution | 健康语义与网络实现分开 |
 | `data_query_service.py`、`data_catalog_service.py`、`sql_guard.py` | Governed Data Query | 查询和 SQL 护栏 |
 | `integrations/feishu/*`、`thinkingdata/client.py` | Platform Integrations | 底层供应商 client |
+| MCP server/client transport、session、codec | Platform MCP Runtime + Context adapter | 协议机制在 Platform；tool/resource 语义归目标 Context |
 | `desktop_chat_service.py`、`desktop_chat_repository.py` | Assistant Conversations | 工作台聚合与会话数据分开 |
 | `discussion_service.py` | Group Messaging | 频道、消息、成员、未读 |
 | `realtime_service.py` | Group Messaging adapter + Platform Realtime | 群语义与 Redis 机制分开 |
@@ -764,7 +1179,7 @@ TerminalFailure(error)
 | `llm/factory.py`、`fallback.py`、`health.py` | Platform LLM Gateway | 模型调用实现 |
 | `llm/usage.py`、预算共享状态 | Usage & Budget | 用量政策与供应商 usage 解析分开 |
 | `eval_service.py`、`feedback_service.py`、`reflection_service.py` | AI Quality | 评估和反馈闭环 |
-| `environment_service.py` | Environment Projection | 事件失效的组合 read model |
+| `environment_service.py` | Environment Projection | 组合 ContextSnapshot、版本、来源引用和事件失效 read model |
 | `proposal_service.py` | Proposal Management | 提案业务场景 |
 | `meeting_service.py`、`meeting_ai_actions.py` | Meeting Management | 会议规则与 Agent adapter 分开 |
 | `ops_data.py`、`anomaly.py` | Operational Analytics | 运营业务事实和异常 |
@@ -789,8 +1204,16 @@ TerminalFailure(error)
 11. Capability Execution 禁止承载 Wiki、查询、交付、协作的业务逻辑；
 12. 禁止新增无所有权的 `common/shared/utils/base/service` 业务模块；
 13. 兼容 facade 只允许旧入口使用，新模块禁止反向 import facade；
-14. 业务域组目录禁止放共享 Service、Entity 和 Repository。
-15. Shared Kernel 禁止依赖 Framework、Platform 或外层兼容入口，禁止放入 Context 特定规则。
+14. 业务域组目录禁止放共享 Service、Entity 和 Repository；
+15. Shared Kernel 禁止依赖 Framework、Platform 或外层兼容入口，禁止放入 Context 特定规则；
+16. 禁止把四层运行架构机械映射成四个巨型目录、四个 Service 或四个数据库；
+17. 禁止让 Supervisor/Planner 绕过 Workflow Runtime 直接修改运行状态或执行高风险 Tool；
+18. 禁止让 Agent、Tool 或 MCP handler 直接读取其他 Context 私有表、ORM 或明文密钥；
+19. 禁止把 MCP discovery、Prompt 中的 Tool 名称或模型的调用意愿当成授权结果；
+20. 禁止让向量索引、检索摘要或 Organizational Memory 反向覆盖来源 Context 的事实；
+21. 禁止让反馈闭环未经评估、版本化、审批和灰度直接修改生产 Prompt、路由、SOP、能力或权限；
+22. 禁止用自然语言字符串代替 principal、policy decision、approval token、idempotency key 和业务状态；
+23. 禁止 Human Review、Audit Trail 或 AI Quality 直接修改来源业务 Aggregate。
 
 ## 13. 测试分层
 
@@ -801,6 +1224,9 @@ TerminalFailure(error)
 | Contract test | DTO/event 兼容和 adapter 翻译 | 可选序列化器 |
 | Infrastructure integration | ORM、并发、外部协议 | DB/mock server |
 | Entrypoint test | 参数、身份、错误和传输映射 | FastAPI client |
+| Policy/assurance test | RBAC/ABAC、数据范围、风险审批、fail closed、凭证绑定 | fake policy/review ports |
+| MCP contract test | discovery 过滤、schema、协议翻译、错误归一、授权和幂等 | mock MCP client/server |
+| Feedback promotion test | 归因、评估门槛、版本发布、灰度和回滚 | fake metrics/config ports |
 | Architecture boundary | import 方向、循环和禁用依赖 | 静态分析 |
 | End-to-end | 少量关键闭环 | 完整环境 |
 
@@ -811,12 +1237,23 @@ TerminalFailure(error)
 - Context 不跨域 import 内部模型；
 - Expert/Agent/Capability/Workflow 四条边界；
 - Environment Projection 不被来源 Context 反向调用；
-- 新模块不反向 import 兼容 facade。
+- MCP Runtime 不拥有 Capability/业务语义，MCP adapter 不绕过 Application；
+- Governance/Feedback Context 不直接写来源业务模型；
+- 新模块不反向 import 兼容 facade；
 - Shared Kernel 无 Framework、Platform 和外层依赖；已删除的异常 facade 不得回归。
+
+关键闭环测试至少覆盖：
+
+- 宽泛目标进入后形成 `IntentEnvelope → WorkIntent → WorkflowPlan → WorkflowRun`；
+- ContextSnapshot 在权限范围内返回来源、版本和缺失信息，越权数据 fail closed；
+- 高风险 Capability 无有效审批不得执行，审批参数被篡改时必须失效；
+- Tool/MCP 重复事件复用同一幂等结果，不产生重复副作用；
+- ResultEnvelope 能关联执行证据和引用，而不是只返回自由文本；
+- 反馈只生成候选改进，未通过评估/审批时不得改变生产版本。
 
 ## 14. 渐进迁移路线
 
-### 阶段 0：评审基础底座 Context
+### 阶段 0：评审 4 + 2 架构语义与基础底座 Context
 
 先确认：
 
@@ -826,7 +1263,10 @@ TerminalFailure(error)
 4. Connector Management、Connector Execution、HTTP Runtime 是否三层分开；
 5. Work Planning 与 Workflow Runtime 是否分开；
 6. Human Review 是否先作为 B 级候选 Context；
-7. Desktop 是否只作为组合入口。
+7. Desktop 是否只作为组合入口；
+8. 四层运行模块是否与 DDD Context、Context 内代码层明确分开；
+9. Context System 是否是受治理读取入口，而不是共享写库；
+10. Feedback Loop 与 Control Plane 是否作为横切系统参与所有关键节点。
 
 通过后更新 `CLAUDE.md` 和 `docs/05`。
 
@@ -852,6 +1292,8 @@ TerminalFailure(error)
 - `ToolDispatcher/ToolExecution` 形成 Capability Execution；
 - DataSource 形成 Connector Management；
 - HTTP/Feishu/ThinkingData client 保留在 Platform；
+- 建立 Platform MCP Runtime 与 Context MCP adapter 边界；
+- MCP tool/resource 映射到 CapabilityDefinition/Published Language；
 - Tool handler 改为调用目标 Context port。
 
 ### 阶段 4：拆分 Expert 与 Agent Execution
@@ -874,14 +1316,17 @@ TerminalFailure(error)
 - KnowledgeBase/File 迁入 Wiki Management；
 - ingest/index 通过 DocumentPublished event 驱动；
 - Retrieval 通过稳定 query port 暴露；
-- Semantic Catalog 和 Memory 先作为 B 级模块隔离。
+- Semantic Catalog 和 Memory 先作为 B 级模块隔离；
+- Environment Projection 形成统一 `ContextQuery → ContextSnapshot` facade；
+- Snapshot 保留 scope、provenance、version、missing 和过期策略。
 
-### 阶段 7：治理与沟通底座
+### 阶段 7：治理、反馈与沟通底座
 
 - Identity、Access Control、Audit 分离；
-- Environment 改为事件失效 projection；
 - Assistant Conversation、Group Messaging、Collaboration Requests 分离；
-- 评估是否升格 Human Review。
+- 评估是否升格 Human Review；
+- 高风险能力绑定审批凭证、payload hash、policy version 和有效期；
+- AI Quality 建立候选改进、影子评估、受控发布和回滚链路。
 
 ### 阶段 8：业务场景迁移与清理
 
@@ -892,28 +1337,39 @@ TerminalFailure(error)
 
 ## 15. 评审验收清单
 
-1. 基础底座域和纯技术 Platform 是否已明确分开；
-2. Wiki、Expert、Tool、API 是否有独立数据所有权和公开契约；
-3. Tool 是否被定义为业务能力，而不是 Python 函数或 HTTP API；
-4. Connector/API 配置、调用语义和 HTTP 传输是否分开；
-5. Expert 是否只绑定 capability ID，不拥有 Tool 实现；
-6. Agent Execution 是否不接收 Session/ORM；
-7. Capability Execution 是否不承载目标业务逻辑；
-8. Work Planning 与 Workflow Runtime 是否分开；
-9. TaskCard 是否归 Task Management；
-10. Outbox 是否归 Platform，业务 handler 是否归各 Context；
-11. Human Review 是否只协调审核，不直接修改来源业务状态；
-12. Context 间是否只通过 port/contracts/event 协作；
-13. 是否以模块化单体渐进迁移，不拆微服务；
-14. 是否停止向横向 `app/services` 大平铺继续增加新业务代码。
+1. 是否明确区分四层运行架构、DDD 领域边界和 Context 内代码分层；
+2. 意图层是否接收目标、约束和预期结果，而不是要求用户预拆机械指令；
+3. 编排层是否通过 Work Planning + Workflow Runtime 工作，而不是形成万能编排 Service；
+4. 上下文系统是否提供统一、受治理、带来源和版本的 ContextSnapshot；
+5. 记忆、索引和 read model 是否没有夺取来源 Context 的写入所有权；
+6. 基础底座域和纯技术 Platform 是否已明确分开；
+7. Wiki、Expert、Capability、Connector 是否有独立数据所有权和公开契约；
+8. Tool 是否被定义为业务能力，而不是 Python 函数或 HTTP/MCP 接口；
+9. MCP 是否只是受治理的协议适配，且不暴露 ORM、数据库或密钥；
+10. Connector 配置、调用语义和 HTTP/MCP 传输是否分开；
+11. Expert 是否只绑定 capability ID，不拥有 Tool 实现；
+12. Agent Execution 是否不接收 Session/ORM，且返回结构化结果和证据；
+13. Capability Execution 是否负责授权、风险、幂等和分发，但不承载目标业务逻辑；
+14. Work Planning 与 Workflow Runtime 是否分开；
+15. TaskCard 是否归 Task Management，Human Review 是否只拥有审核生命周期；
+16. 控制面是否在意图、计划、执行、结果和反馈升级节点强制生效；
+17. 反馈是否只形成经过评估、审批、版本化和可回滚的改进；
+18. Outbox/MCP/HTTP/LLM runtime 是否归 Platform，业务 handler 是否归各 Context；
+19. Context 间是否只通过 port/contracts/event/policy decision 协作；
+20. 是否以模块化单体渐进迁移，并停止向横向 `app/services` 大平铺增加新业务代码。
 
 ## 16. 最终判断标准
 
 架构是否有效，不看目录数量，而看：
 
 - 一个业务事实是否只有一个写入所有者；
+- 一个宽泛业务目标是否能被转换为可验证、可恢复、可审计的执行计划；
 - 一次业务变化是否主要限制在一个 Context；
 - 调用方是否只理解稳定契约，不理解内部步骤；
+- 所有 Agent 是否基于同一套受治理的上下文入口行动，同时保持来源事实的独立所有权；
+- 高风险能力是否在最小权限、数据范围和人工审批约束内执行；
+- 每个结果是否能回溯到意图、上下文版本、计划、能力版本、执行证据和审批记录；
+- 反馈是否真正连接业务结果，又不会形成不可控的在线自修改；
 - Tool/API/LLM/DB 等技术细节是否被隐藏；
 - 核心规则是否可在无数据库、无网络、无框架条件下测试；
 - 新模块是否隐藏了复杂度，而不是增加透传和跳转；
