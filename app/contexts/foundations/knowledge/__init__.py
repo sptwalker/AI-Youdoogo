@@ -1,0 +1,1 @@
+"""Knowledge foundation bounded contexts."""

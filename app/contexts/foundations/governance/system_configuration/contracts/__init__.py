@@ -1,0 +1,1 @@
+"""Published System Configuration contracts."""

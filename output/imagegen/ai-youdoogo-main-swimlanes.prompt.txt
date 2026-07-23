@@ -1,0 +1,57 @@
+Use case: infographic-diagram
+Asset type: Chinese software architecture swimlane diagram for a technical design document
+
+Primary request:
+Create one polished 16:9 landscape swimlane diagram titled exactly “AI-Youdoogo 主要调用链路泳道图”. It must explain the four most important end-to-end invocation flows of a modular-monolith, DDD-oriented enterprise AI system. Use a clean white canvas, crisp vector-like shapes, straight orthogonal arrows, rounded rectangles, generous spacing, and highly legible Chinese typography.
+
+Layout:
+- Eight vertical swimlanes from left to right. Render these lane headers verbatim and only once:
+  1. “用户 / 前端”
+  2. “会话 / 业务场景”
+  3. “Work Planning”
+  4. “Workflow Runtime”
+  5. “Expert / Agent Execution”
+  6. “Capability / Wiki / API”
+  7. “Task / Human Review”
+  8. “Platform”
+- Four horizontal process bands from top to bottom, clearly separated and labeled A, B, C, D.
+- Each process band flows mainly left to right. Return arrows may flow right to left only when showing a result or resume signal.
+- Use solid arrows for commands and queries; use dashed arrows for events. Include a small legend: “实线：Command / Query” and “虚线：Event”.
+
+Band A, render title exactly “A  对话 → Work Planning → Durable Workflow”:
+“用户输入” → “SendAssistantMessage” → “WorkIntent” → “PlanWork” → “WorkflowPlan” → “StartWorkflow” → “WorkflowRun / Steps” → “Outbox” → “Worker claim / lease” → “ExecuteStep”.
+Visually emphasize that Work Planning owns the plan, while Workflow Runtime owns durable execution.
+
+Band B, render title exactly “B  Expert Snapshot → Agent → Tool / API / Wiki”:
+“ExecuteStep” → “GetExpertSnapshot” → “ExpertExecutionSnapshot” → “ExecuteAgent” → “LLM Gateway”.
+From “ExecuteAgent”, show two clear branches:
+1. “SearchKnowledge” → “Knowledge Retrieval” → “Rerank + Citations” → result back to “ExecuteAgent”.
+2. “ExecuteCapability” → “Capability Catalog” → “授权 + 参数校验 + 幂等” → three compact target boxes: “search_wiki”, “query_business_data”, “call_external_api”.
+For “call_external_api”, continue to “Connector Execution” → “HTTP Runtime” → “External API”, then return “ConnectorResult” to “ExecuteAgent”.
+Finish with “AgentExecutionResult” → “StepCompleted”.
+
+Band C, render title exactly “C  Wiki 发布 → Indexing → Retrieval”:
+“上传 / 编辑 Wiki” → “PublishDocument” → dashed event “DocumentPublished” → “IndexDocument” → “Chunk + Embedding + Vector” → dashed event “IndexReady” → “SearchKnowledge” → “权限过滤” → “Rerank” → “Citations”.
+Show “Wiki Management”, “Knowledge Indexing”, and “Knowledge Retrieval” as three separate ownership blocks, not one combined service.
+
+Band D, render title exactly “D  真人审核 → TaskAccepted → Resume Workflow”:
+“WorkflowProgressed” → dashed event → “Task Projection” → “TaskCard” → “真人验收” → decision diamond “通过 / 驳回”.
+Passing path: dashed event “TaskAccepted” → “ResumeWorkflow” → “校验 waiting_human + attempt” → “继续执行”.
+Rejecting path: dashed event “TaskRejected” → “退回 / 重试 / 终止”.
+Use orange only for human-review nodes and the decision diamond.
+
+Visual style:
+- Modern enterprise architecture slide, precise and restrained, no decorative illustration.
+- White background; deep blue and indigo for runtime/execution; teal for knowledge; violet for expert/capability; orange for human review; neutral gray for Platform.
+- Thin lane dividers, subtle shadows, strong hierarchy, high contrast.
+- All text must be horizontal, readable, correctly spelled, and rendered verbatim where quoted.
+- Keep node labels short and large enough to read at normal slide zoom.
+- Use small domain badges where helpful: “Context”, “Event”, “Platform”.
+
+Constraints:
+- No logos, no mascots, no photographs, no 3D objects, no watermark.
+- No invented services or extra process bands.
+- Do not merge Work Planning with Workflow Runtime.
+- Do not merge Expert Management with Agent Execution.
+- Do not portray Tool as equivalent to an external API.
+- Do not show Platform owning business rules.

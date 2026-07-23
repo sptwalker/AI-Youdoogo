@@ -14,12 +14,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Load runtime configuration, synchronize providers, and manage background workers."""
+    from app.bootstrap import workflow_worker
+    from app.contexts.foundations.environment_projection.infrastructure.archivist import (
+        ensure_archivist,
+    )
     from app.core import runtime_config
     from app.services import (
         ai_provider_service,
         config_service,
-        environment_service,
-        workflow_worker,
     )
 
     try:
@@ -29,7 +31,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             if seeded:
                 logger.info("首次部署：从 .env 种子 %d 张 AI 卡片", seeded)
             await ai_provider_service.sync_to_factory(db)
-            await environment_service.ensure_archivist(db)
+            await ensure_archivist(db)
         logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - startup keeps the environment fallback available
         logger.exception("载入配置覆盖层/AI 卡片失败")

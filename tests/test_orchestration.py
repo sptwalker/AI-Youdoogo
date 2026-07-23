@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.task_management import legacy_public as legacy_taskcard_workflow
 from app.models import Base
 from app.models.system import SysUser
 from app.services import orchestration_service as orch
@@ -51,10 +52,18 @@ def test_red_line_by_whitelist() -> None:
 
 # ── parse_plan 纯函数 ───────────────────────────────────
 def test_parse_plan_valid_dag() -> None:
-    raw = _plan_json([
-        {"no": 0, "title": "取数", "skill": "data_query", "instruction": "查", "depends_on": []},
-        {"no": 1, "title": "做报", "skill": "deliver", "instruction": "做", "depends_on": [0]},
-    ])
+    raw = _plan_json(
+        [
+            {
+                "no": 0,
+                "title": "取数",
+                "skill": "data_query",
+                "instruction": "查",
+                "depends_on": [],
+            },
+            {"no": 1, "title": "做报", "skill": "deliver", "instruction": "做", "depends_on": [0]},
+        ]
+    )
     steps = orch.parse_plan(raw)
     assert steps is not None and len(steps) == 2
     assert steps[1].depends_on == [0] and steps[0].skill == "data_query"
@@ -71,36 +80,54 @@ def test_parse_plan_less_than_two_steps_none() -> None:
 
 
 def test_parse_plan_strips_code_fence() -> None:
-    raw = "```json\n" + _plan_json([
-        {"no": 0, "title": "a", "skill": "data_query", "instruction": "x", "depends_on": []},
-        {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [0]},
-    ]) + "\n```"
+    raw = (
+        "```json\n"
+        + _plan_json(
+            [
+                {
+                    "no": 0,
+                    "title": "a",
+                    "skill": "data_query",
+                    "instruction": "x",
+                    "depends_on": [],
+                },
+                {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [0]},
+            ]
+        )
+        + "\n```"
+    )
     assert orch.parse_plan(raw) is not None
 
 
 def test_parse_plan_cycle_rejected() -> None:
     """0→1→0 成环 → None。"""
-    raw = _plan_json([
-        {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": [1]},
-        {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [0]},
-    ])
+    raw = _plan_json(
+        [
+            {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": [1]},
+            {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [0]},
+        ]
+    )
     assert orch.parse_plan(raw) is None
 
 
 def test_parse_plan_dangling_dep_rejected() -> None:
     """依赖不存在的 no → None。"""
-    raw = _plan_json([
-        {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": []},
-        {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [9]},
-    ])
+    raw = _plan_json(
+        [
+            {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": []},
+            {"no": 1, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": [9]},
+        ]
+    )
     assert orch.parse_plan(raw) is None
 
 
 def test_parse_plan_duplicate_no_rejected() -> None:
-    raw = _plan_json([
-        {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": []},
-        {"no": 0, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": []},
-    ])
+    raw = _plan_json(
+        [
+            {"no": 0, "title": "a", "skill": "deliver", "instruction": "x", "depends_on": []},
+            {"no": 0, "title": "b", "skill": "deliver", "instruction": "y", "depends_on": []},
+        ]
+    )
     assert orch.parse_plan(raw) is None
 
 
@@ -111,8 +138,10 @@ def test_parse_plan_garbage_none() -> None:
 
 def test_parse_plan_caps_steps() -> None:
     """超过上限只取前 _MAX_STEPS（且截断后依赖仍需合法）。"""
-    many = [{"no": i, "title": f"s{i}", "skill": "deliver", "instruction": "x",
-             "depends_on": []} for i in range(20)]
+    many = [
+        {"no": i, "title": f"s{i}", "skill": "deliver", "instruction": "x", "depends_on": []}
+        for i in range(20)
+    ]
     steps = orch.parse_plan(_plan_json(many))
     assert steps is not None and len(steps) == orch._MAX_STEPS
 
@@ -186,7 +215,8 @@ async def test_build_steps_multi_dependency(db: AsyncSession) -> None:
 
 # ── B.2 调度驱动 ────────────────────────────────────────
 from app.services import task_flow  # noqa: E402
-from app.services.collab_protocol import ProtocolResult  # noqa: E402
+
+ProtocolResult = legacy_taskcard_workflow.ProtocolResult
 
 
 async def _parent_with_steps(
@@ -202,44 +232,47 @@ async def _parent_with_steps(
 
 
 def _ready_titles(steps: list[Any]) -> set[str]:
-    return {s.title for s in orch._ready_steps(steps)}
+    return {s.title for s in legacy_taskcard_workflow.ready_steps(steps)}
 
 
 async def test_ready_steps_gated_by_deps(db: AsyncSession) -> None:
     """只有依赖全 accepted 的步骤才 ready。"""
-    _, pid, by_no = await _parent_with_steps(db, [
-        orch.PlanStep(no=0, title="A", skill="data_query", instruction="a", depends_on=[]),
-        orch.PlanStep(no=1, title="B", skill="deliver", instruction="b", depends_on=[0]),
-    ])
-    steps = await orch._step_cards(db, pid)
+    _, pid, by_no = await _parent_with_steps(
+        db,
+        [
+            orch.PlanStep(no=0, title="A", skill="data_query", instruction="a", depends_on=[]),
+            orch.PlanStep(no=1, title="B", skill="deliver", instruction="b", depends_on=[0]),
+        ],
+    )
+    steps = await legacy_taskcard_workflow.step_cards(db, pid)
     assert _ready_titles(steps) == {"A"}  # B 依赖未完成
     # 手动把 A accept，B 才 ready
     by_no[0].status = task_flow.ACCEPTED
     await db.commit()
-    steps = await orch._step_cards(db, pid)
+    steps = await legacy_taskcard_workflow.step_cards(db, pid)
     assert _ready_titles(steps) == {"B"}
 
 
-async def test_advance_auto_runs_non_redline_pipes_output(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_advance_auto_runs_non_redline_pipes_output(db: AsyncSession) -> None:
     """全非红线链:两步都自动跑完 + 上游 datasets 喂到下游 step_input + 编排完成。"""
-    _, pid, by_no = await _parent_with_steps(db, [
-        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
-        orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
-    ])
+    _, pid, by_no = await _parent_with_steps(
+        db,
+        [
+            orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+            orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
+        ],
+    )
     ran: list[str] = []
 
     async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
         ran.append(step.title)
-        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        await legacy_taskcard_workflow.to_reported(_db, step, operator_id, "stub", "ok")
         p = ProtocolResult()
         if step.task_type == "data_query":
             p.datasets.append({"sql": "q", "columns": ["dau"], "rows": [{"dau": 42}]})
         return p
 
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
-    snap = await orch.advance(db, pid, operator_id=None)
+    snap = await legacy_taskcard_workflow.advance(db, pid, operator_id=None, step_runner=_fake_run)
     assert ran == ["取数", "做报"]  # 拓扑序
     assert snap["done"] is True and snap["accepted"] == 2
     # 上游 datasets 已喂到下游 step_input
@@ -247,21 +280,21 @@ async def test_advance_auto_runs_non_redline_pipes_output(
     assert by_no[1].step_input["datasets"][0]["rows"] == [{"dau": 42}]
 
 
-async def test_advance_stops_at_redline(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_advance_stops_at_redline(db: AsyncSession) -> None:
     """红线步骤执行到 reported 后停下，不 accept、不解锁下游。"""
-    _, pid, by_no = await _parent_with_steps(db, [
-        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
-        orch.PlanStep(no=1, title="通知", skill="notify", instruction="发", depends_on=[0]),
-    ])
+    _, pid, by_no = await _parent_with_steps(
+        db,
+        [
+            orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+            orch.PlanStep(no=1, title="通知", skill="notify", instruction="发", depends_on=[0]),
+        ],
+    )
 
     async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
-        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        await legacy_taskcard_workflow.to_reported(_db, step, operator_id, "stub", "ok")
         return ProtocolResult()
 
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
-    snap = await orch.advance(db, pid, operator_id=None)
+    snap = await legacy_taskcard_workflow.advance(db, pid, operator_id=None, step_runner=_fake_run)
     # 取数自动 accept；通知红线停在 reported
     await db.refresh(by_no[0])
     await db.refresh(by_no[1])
@@ -271,46 +304,46 @@ async def test_advance_stops_at_redline(
     assert str(by_no[1].id) in snap["awaiting_human"]
 
 
-async def test_advance_resume_after_human_accept(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_advance_resume_after_human_accept(db: AsyncSession) -> None:
     """红线步被真人 accept 后再 advance → 从停点继续跑完下游。"""
-    _, pid, by_no = await _parent_with_steps(db, [
-        orch.PlanStep(no=0, title="审批", skill="notify", instruction="批", depends_on=[]),
-        orch.PlanStep(no=1, title="交付", skill="deliver", instruction="交", depends_on=[0]),
-    ])
+    _, pid, by_no = await _parent_with_steps(
+        db,
+        [
+            orch.PlanStep(no=0, title="审批", skill="notify", instruction="批", depends_on=[]),
+            orch.PlanStep(no=1, title="交付", skill="deliver", instruction="交", depends_on=[0]),
+        ],
+    )
 
     async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
-        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        await legacy_taskcard_workflow.to_reported(_db, step, operator_id, "stub", "ok")
         return ProtocolResult()
 
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
-    snap1 = await orch.advance(db, pid, operator_id=None)
+    snap1 = await legacy_taskcard_workflow.advance(db, pid, operator_id=None, step_runner=_fake_run)
     assert snap1["done"] is False  # 卡在红线审批步
     # 真人验收红线步
     await task_service.transition(
         db, by_no[0].id, task_flow.ACCEPTED, operator_id=None, note="真人验收"
     )
-    snap2 = await orch.advance(db, pid, operator_id=None)
+    snap2 = await legacy_taskcard_workflow.advance(db, pid, operator_id=None, step_runner=_fake_run)
     await db.refresh(by_no[1])
     assert by_no[1].status == task_flow.ACCEPTED and snap2["done"] is True
 
 
-async def test_advance_failed_step_blocks_downstream(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_advance_failed_step_blocks_downstream(db: AsyncSession) -> None:
     """步骤失败（_run_step 返 None）→ 停在 reported，下游不解锁。"""
-    _, pid, by_no = await _parent_with_steps(db, [
-        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
-        orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
-    ])
+    _, pid, by_no = await _parent_with_steps(
+        db,
+        [
+            orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+            orch.PlanStep(no=1, title="做报", skill="deliver", instruction="做", depends_on=[0]),
+        ],
+    )
 
     async def _fake_run(_db: Any, step: Any, operator_id: Any) -> ProtocolResult | None:
-        await orch._to_reported(_db, step, operator_id, "失败", "err")
+        await legacy_taskcard_workflow.to_reported(_db, step, operator_id, "失败", "err")
         return None  # 失败
 
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
-    snap = await orch.advance(db, pid, operator_id=None)
+    snap = await legacy_taskcard_workflow.advance(db, pid, operator_id=None, step_runner=_fake_run)
     await db.refresh(by_no[1])
     assert by_no[1].status == task_flow.CREATED  # 下游从未启动
     assert snap["done"] is False
@@ -321,6 +354,7 @@ async def test_start_non_composite_returns_none(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """plan 判定单动作 → start 返 None（走原路），不建卡。"""
+
     async def _no_plan(_db: Any, req: str) -> Any:
         return None
 
@@ -336,15 +370,19 @@ async def test_start_non_composite_returns_none(
 async def test_start_short_message_skips_planning(db: AsyncSession) -> None:
     """短消息（问候）不进规划，直接 None。"""
     creator = await _creator(db)
-    assert await orch.start(
-        db, "你好", creator_id=creator, assignee_agent_id=None, operator_id=creator
-    ) is None
+    assert (
+        await orch.start(
+            db, "你好", creator_id=creator, assignee_agent_id=None, operator_id=creator
+        )
+        is None
+    )
 
 
 async def test_start_atomically_submits_without_running(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """复合任务 → 原子建持久化 runtime 并入 outbox，不在请求内执行步骤。"""
+
     async def _plan(_db: Any, req: str) -> Any:
         return [
             orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
@@ -354,8 +392,11 @@ async def test_start_atomically_submits_without_running(
     monkeypatch.setattr(orch, "plan", _plan)
     creator = await _creator(db)
     snap = await orch.start(
-        db, "取昨天数据并通知总监", creator_id=creator,
-        assignee_agent_id=None, operator_id=creator,
+        db,
+        "取昨天数据并通知总监",
+        creator_id=creator,
+        assignee_agent_id=None,
+        operator_id=creator,
     )
     assert snap is not None and snap["total"] == 2
     assert snap["status"] == "queued" and snap["accepted"] == 0
@@ -372,19 +413,22 @@ async def test_resume_if_step_non_step_returns_none(db: AsyncSession) -> None:
 
 
 # ── H4.1 崩溃恢复扫描 ───────────────────────────────────
-async def test_recover_resets_orphan_and_advances(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_recover_resets_orphan_and_advances(db: AsyncSession) -> None:
     """崩溃恢复:executing 父卡下卡在 executing 的孤儿步复位 created，再 advance 跑完。"""
     creator = await _creator(db)
     parent = await task_service.create_task(
         db, title="编排", task_type="orchestration", creator_id=creator
     )
     parent.status = task_flow.EXECUTING  # 模拟崩溃时父卡在执行中
-    cards = await orch.build_steps(db, parent.id, [
-        orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
-        orch.PlanStep(no=1, title="交付", skill="deliver", instruction="做", depends_on=[0]),
-    ], creator_id=creator)
+    cards = await orch.build_steps(
+        db,
+        parent.id,
+        [
+            orch.PlanStep(no=0, title="取数", skill="data_query", instruction="查", depends_on=[]),
+            orch.PlanStep(no=1, title="交付", skill="deliver", instruction="做", depends_on=[0]),
+        ],
+        creator_id=creator,
+    )
     by_no = {c.step_no: c for c in cards}
     by_no[0].status = task_flow.EXECUTING  # 崩溃时步骤0卡在执行中（孤儿）
     await db.commit()
@@ -393,11 +437,17 @@ async def test_recover_resets_orphan_and_advances(
 
     async def _fake_run(_db: Any, step: Any, operator_id: Any) -> Any:
         ran.append(step.title)
-        await orch._to_reported(_db, step, operator_id, "stub", "ok")
+        await legacy_taskcard_workflow.to_reported(_db, step, operator_id, "stub", "ok")
         return ProtocolResult()
 
-    monkeypatch.setattr(orch, "_run_step", _fake_run)
-    res = await orch.recover_incomplete(db)
+    async def _fake_advance(
+        _db: AsyncSession, parent_id: uuid.UUID, *, operator_id: uuid.UUID | None
+    ) -> dict[str, Any]:
+        return await legacy_taskcard_workflow.advance(
+            _db, parent_id, operator_id=operator_id, step_runner=_fake_run
+        )
+
+    res = await legacy_taskcard_workflow.recover_incomplete(db, advance_runner=_fake_advance)
     assert res["orchestrations"] == 1 and res["steps_reset"] == 1
     # 孤儿步复位后重跑，全链跑完
     await db.refresh(by_no[0])
@@ -415,11 +465,11 @@ async def test_recover_ignores_non_executing_parents(db: AsyncSession) -> None:
     )
     done_parent.status = task_flow.ACCEPTED
     await db.commit()
-    res = await orch.recover_incomplete(db)
+    res = await legacy_taskcard_workflow.recover_incomplete(db, advance_runner=orch.advance)
     assert res["orchestrations"] == 0  # accepted 父卡不扫
 
 
 async def test_recover_no_incomplete_is_noop(db: AsyncSession) -> None:
     """无未完成编排 → 空操作。"""
-    res = await orch.recover_incomplete(db)
+    res = await legacy_taskcard_workflow.recover_incomplete(db, advance_runner=orch.advance)
     assert res == {"orchestrations": 0, "steps_reset": 0}

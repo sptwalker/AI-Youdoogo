@@ -7,12 +7,16 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.access_control.entrypoints import operations as access
+from app.contexts.foundations.identity.contracts import Principal, PrincipalType
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.knowledge import KnowledgeBase
 from app.models.resource_grant import ResourceGrant
 from app.models.system import SysDepartment, SysUser
-from app.services import permission_service, resource_grant_service
+from app.services import permission_service
+
+_MISSING_ID = uuid.UUID(int=0)
 
 
 @pytest.fixture
@@ -27,8 +31,22 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def _user(dept_id: uuid.UUID | None, role: str = "member") -> SysUser:
-    return SysUser(username=f"u{uuid.uuid4().hex[:6]}", password_hash="x", role_code=role,
-                   department_id=dept_id)
+    return SysUser(
+        username=f"u{uuid.uuid4().hex[:6]}",
+        password_hash="x",
+        role_code=role,
+        department_id=dept_id,
+    )
+
+
+def _principal(user: SysUser) -> Principal:
+    return Principal(
+        principal_type=PrincipalType.USER,
+        principal_id=user.id or _MISSING_ID,
+        role_code=user.role_code,
+        department_id=user.department_id,
+        is_active=user.is_active,
+    )
 
 
 def test_check_role() -> None:
@@ -38,10 +56,23 @@ def test_check_role() -> None:
         permission_service.check_role(_user(None, "member"), "admin", "executive")
 
 
-async def _grant(db: AsyncSession, *, kb_id: uuid.UUID, gtype: str, gid: uuid.UUID,
-                 expires: datetime | None = None) -> None:
-    db.add(ResourceGrant(resource_type="knowledge_base", resource_id=kb_id,
-                         grantee_type=gtype, grantee_id=gid, expires_at=expires))
+async def _grant(
+    db: AsyncSession,
+    *,
+    kb_id: uuid.UUID,
+    gtype: str,
+    gid: uuid.UUID,
+    expires: datetime | None = None,
+) -> None:
+    db.add(
+        ResourceGrant(
+            resource_type="knowledge_base",
+            resource_id=kb_id,
+            grantee_type=gtype,
+            grantee_id=gid,
+            expires_at=expires,
+        )
+    )
     await db.commit()
 
 
@@ -52,7 +83,12 @@ async def test_granted_kb_direct_user(db: AsyncSession) -> None:
     db.add(kb)
     await db.commit()
     await _grant(db, kb_id=kb.id, gtype="user", gid=user.id)
-    assert await resource_grant_service.granted_kb_ids(db, user) == [kb.id]
+    ids = await access.granted_resource_ids(
+        db,
+        principal=_principal(user),
+        resource_type="knowledge_base",
+    )
+    assert ids == (kb.id,)
 
 
 async def test_granted_kb_department_subtree(db: AsyncSession) -> None:
@@ -63,9 +99,17 @@ async def test_granted_kb_department_subtree(db: AsyncSession) -> None:
     await db.commit()
     # 授权给 dept_a → 该部门 user 命中
     await _grant(db, kb_id=kb.id, gtype="department", gid=dept_a)
-    assert kb.id in await resource_grant_service.granted_kb_ids(db, _user(dept_a))
+    assert kb.id in await access.granted_resource_ids(
+        db,
+        principal=_principal(_user(dept_a)),
+        resource_type="knowledge_base",
+    )
     # 授权给不相关 dept_c → 不命中
-    assert kb.id not in await resource_grant_service.granted_kb_ids(db, _user(dept_c))
+    assert kb.id not in await access.granted_resource_ids(
+        db,
+        principal=_principal(_user(dept_c)),
+        resource_type="knowledge_base",
+    )
 
 
 async def test_granted_kb_expired_excluded(db: AsyncSession) -> None:
@@ -76,7 +120,14 @@ async def test_granted_kb_expired_excluded(db: AsyncSession) -> None:
     await db.commit()
     past = datetime.now(UTC) - timedelta(days=1)
     await _grant(db, kb_id=kb.id, gtype="user", gid=user.id, expires=past)
-    assert await resource_grant_service.granted_kb_ids(db, user) == []
+    assert (
+        await access.granted_resource_ids(
+            db,
+            principal=_principal(user),
+            resource_type="knowledge_base",
+        )
+        == ()
+    )
 
 
 async def test_visible_kb_merges_scope_and_grant(db: AsyncSession) -> None:
@@ -85,8 +136,9 @@ async def test_visible_kb_merges_scope_and_grant(db: AsyncSession) -> None:
     db.add(SysDepartment(id=other_dept, name="B", code="b", path=f"/{other_dept}/"))
     user = _user(None)  # 无部门 → 默认只见公司公共库
     db.add(user)
-    conf = KnowledgeBase(name="机密", code="c", scope="department",
-                         department_id=other_dept, is_confidential=True)
+    conf = KnowledgeBase(
+        name="机密", code="c", scope="department", department_id=other_dept, is_confidential=True
+    )
     db.add(conf)
     await db.commit()
     # 未授权：不可见

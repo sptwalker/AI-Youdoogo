@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 允许以脚本方式直跑
@@ -21,11 +22,26 @@ sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows 
 
 from sqlalchemy import select  # noqa: E402
 
+from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (  # noqa: E402
+    IndexTextCommand,
+)
+from app.contexts.foundations.knowledge.knowledge_indexing.public import (  # noqa: E402
+    index_text,
+    remove_document_index,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (  # noqa: E402
+    KnowledgeHit,
+    SearchKnowledgeQuery,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.public import (  # noqa: E402
+    diagnose_retrieval_arms,
+)
+from app.contexts.foundations.knowledge.wiki_management.public import (  # noqa: E402
+    get_default_knowledge_base,
+)
 from app.core.database import async_session_factory  # noqa: E402
-from app.knowledge import ingest, retrieval  # noqa: E402
 from app.models.system import SysUser  # noqa: E402
 from app.services import config_service  # noqa: E402
-from app.services.knowledge_base_service import get_default_kb  # noqa: E402
 
 # 受控语料：故意造"型号近义、语义相近"的干扰项——向量易混，trgm 能精确区分。
 _CORPUS: list[tuple[str, str]] = [
@@ -42,11 +58,11 @@ _PROBES: list[str] = ["盒子A5 的售价和分辨率", "A7 支持几K", "盒子
 _TOPN = 5
 
 
-def _fmt(hits: list[retrieval.Hit]) -> str:
+def _fmt(hits: Sequence[KnowledgeHit]) -> str:
     if not hits:
         return "    （空）"
     return "\n".join(
-        f"    {i + 1}. {h.file_name}  (dist={h.distance:.3f})  {h.chunk_text[:24]}…"
+        f"    {i + 1}. {h.document_name}  (dist={h.score_distance:.3f})  {h.content[:24]}…"
         for i, h in enumerate(hits)
     )
 
@@ -61,7 +77,7 @@ async def _run() -> int:
         hybrid = await config_service.resolve(db, "retrieval_hybrid_enabled", True)
         print(f"混合检索开关 retrieval_hybrid_enabled = {hybrid}\n")
 
-        kb_id = (await get_default_kb(db)).id
+        kb_id = (await get_default_knowledge_base(db)).id
         uploader = (
             await db.execute(select(SysUser.id).where(SysUser.is_delete.is_(False)).limit(1))
         ).scalar_one_or_none()
@@ -72,24 +88,35 @@ async def _run() -> int:
         try:
             print("① 入库受控语料 …")
             for title, text in _CORPUS:
-                kf = await ingest.ingest_text(
-                    db, title=f"[probe] {title}", text=text,
-                    uploader_id=uploader, knowledge_base_id=kb_id, category="probe",
+                document = await index_text(
+                    db,
+                    IndexTextCommand(
+                        title=f"[probe] {title}",
+                        text=text,
+                        uploader_id=uploader,
+                        knowledge_base_id=kb_id,
+                        category="probe",
+                    ),
                 )
-                file_ids.append(kf.id)
+                file_ids.append(document.id)
             print(f"   已入库 {len(file_ids)} 篇。\n")
 
-            kb_scope = [kb_id]
+            kb_scope = (kb_id,)
             for q in _PROBES:
                 print(f"② 查询：《{q}》")
-                vec = await retrieval._vector_arm(db, q, _TOPN, kb_scope)
-                kw = await retrieval._keyword_arm(db, q, _TOPN, kb_scope)
-                fused = await retrieval.search(db, q, top_k=_TOPN, visible_kb_ids=kb_scope)
-                print("  【向量臂】\n" + _fmt(vec))
-                print("  【关键词臂 pg_trgm】\n" + _fmt(kw))
-                print("  【RRF 融合(最终)】\n" + _fmt(fused))
+                diagnostics = await diagnose_retrieval_arms(
+                    db,
+                    SearchKnowledgeQuery(
+                        query=q,
+                        top_k=_TOPN,
+                        visible_knowledge_base_ids=kb_scope,
+                    ),
+                )
+                print("  【向量臂】\n" + _fmt(diagnostics.vector.hits))
+                print("  【关键词臂 pg_trgm】\n" + _fmt(diagnostics.keyword.hits))
+                print("  【RRF 融合(最终)】\n" + _fmt(diagnostics.fused.hits))
                 # 关键指标：融合首位是否精确命中查询里的型号
-                top = fused[0].chunk_text if fused else ""
+                top = diagnostics.fused.hits[0].content if diagnostics.fused.hits else ""
                 print(f"  → 融合首位命中：{top[:32]}…\n")
             print("提示：看关键词臂是否把'精确型号那篇'顶到前排，而向量臂把近义型号混在一起。")
             return 0
@@ -97,7 +124,7 @@ async def _run() -> int:
             print("\n③ 清理探针文档 …")
             for fid in file_ids:
                 try:
-                    await ingest.delete_file(db, fid)
+                    await remove_document_index(db, fid)
                 except Exception as exc:  # noqa: BLE001 - 清理尽力而为
                     print(f"   清理 {fid} 失败：{exc}")
             print("   完成。")

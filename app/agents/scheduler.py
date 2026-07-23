@@ -73,7 +73,7 @@ async def run_task(
     # executing → reported，产出写回
     result = record.output_content or record.error_msg or "（无产出）"
     # 协作原语（docs/13 §10）：咨询答复与执行注记折进任务结果（真人验收时一并可见）
-    from app.agents import skills
+    import app.agents.skills as skills
 
     proto = await skills.execute_all(
         db,

@@ -12,10 +12,16 @@ import pytest
 import respx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.knowledge import rerank, retrieval
-from app.knowledge.rerank import RerankError
-from app.knowledge.retrieval import Hit
+from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import (
+    rerank_gateway as rerank,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import (
+    sqlalchemy_retrieval as retrieval,
+)
 from app.models import Base
+
+Hit = retrieval.Hit
+RerankError = rerank.RerankError
 
 
 @pytest.fixture

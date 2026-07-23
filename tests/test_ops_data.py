@@ -9,9 +9,9 @@ from openpyxl import Workbook
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.operational_analytics.entrypoints import operations as ops_data
 from app.models import Base
 from app.models.ops_data import OpsDailyMetric
-from app.services.ops_data import get_ops_metrics, ingest_ops_daily_excel
 
 HEADERS = ["日期", "产品", "日活", "新增", "次留"]
 
@@ -46,18 +46,24 @@ async def test_ingest_and_query(db: AsyncSession) -> None:
             ["2026-07-11", "产品B", 2000, None, None],
         ]
     )
-    summary = await ingest_ops_daily_excel(db, content)
+    summary = (await ops_data.ingest_workbook(db, content)).to_dict()
     assert summary["upserted"] == 2 and summary["errors"] == []
 
-    metrics = await get_ops_metrics(db, date(2026, 7, 11))
+    metrics = [
+        snapshot.to_dict() for snapshot in await ops_data.list_daily(db, date(2026, 7, 11))
+    ]
     assert [m["product"] for m in metrics] == ["产品A", "产品B"]
     assert metrics[0]["dau"] == 1234 and metrics[0]["retention_d1"] == 42.5
 
 
 async def test_reupload_is_idempotent_upsert(db: AsyncSession) -> None:
-    await ingest_ops_daily_excel(db, _xlsx([["2026-07-11", "产品A", 100, None, None]]))
-    await ingest_ops_daily_excel(db, _xlsx([["2026-07-11", "产品A", 999, 10, None]]))  # 覆盖
+    await ops_data.ingest_workbook(db, _xlsx([["2026-07-11", "产品A", 100, None, None]]))
+    await ops_data.ingest_workbook(
+        db, _xlsx([["2026-07-11", "产品A", 999, 10, None]])
+    )  # 覆盖
     count = (await db.execute(select(func.count()).select_from(OpsDailyMetric))).scalar_one()
     assert count == 1  # 同 (日期,产品) 未新增，就地更新
-    metrics = await get_ops_metrics(db, date(2026, 7, 11))
+    metrics = [
+        snapshot.to_dict() for snapshot in await ops_data.list_daily(db, date(2026, 7, 11))
+    ]
     assert metrics[0]["dau"] == 999 and metrics[0]["new_users"] == 10

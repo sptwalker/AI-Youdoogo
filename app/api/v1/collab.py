@@ -5,24 +5,35 @@
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
-from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound
+from app.contexts.business.collaboration_requests.application.contracts import (
+    CollaborationAuthorizationResult,
+    CollaborationRequestResult,
+)
+from app.contexts.business.collaboration_requests.application.errors import (
+    CollaborationAuthorizationNotFound,
+    CollaborationRequestNotFound,
+    CollaborationReviewForbidden,
+)
+from app.contexts.business.collaboration_requests.domain.errors import (
+    CollaborationRequestError,
+)
+from app.contexts.business.collaboration_requests.entrypoints import operations
+from app.contexts.foundations.identity.application.contracts import IdentityUserResult
+from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound, RuleViolation
 from app.core.database import get_db
-from app.models.collab import CollabRequest
-from app.models.system import SysDepartment, SysUser
 from app.platform.http_runtime import ok
-from app.services import audit_service, collab_service
 
 router = APIRouter(tags=["collab"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Admin = Annotated[SysUser, Depends(require_roles("admin"))]
+Admin = Annotated[IdentityUserResult, Depends(require_roles("admin"))]
 
 
 class AuthorizeCreate(BaseModel):
@@ -51,21 +62,55 @@ class ReviewRequest(BaseModel):
     note: str | None = None
 
 
+def _authorization_data(item: CollaborationAuthorizationResult) -> dict:
+    return {
+        "id": str(item.id),
+        "source_department_id": str(item.source_department_id),
+        "target_department_id": str(item.target_department_id),
+        "collab_type": item.collab_type,
+        "is_active": item.is_active,
+    }
+
+
+def _request_data(item: CollaborationRequestResult) -> dict:
+    return {
+        "id": str(item.id),
+        "source_department_id": (
+            str(item.source_department_id) if item.source_department_id else None
+        ),
+        "target_department_id": str(item.target_department_id),
+        "title": item.title,
+        "summary": item.summary,
+        "category": item.category,
+        "risk_level": item.risk_level,
+        "status": item.status,
+        "requested_by": str(item.requested_by) if item.requested_by else None,
+        "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
+        "review_note": item.review_note,
+        "create_time": item.create_time.isoformat(),
+    }
+
+
+def _raise_transport_error(exc: CollaborationRequestError) -> NoReturn:
+    if isinstance(exc, (CollaborationAuthorizationNotFound, CollaborationRequestNotFound)):
+        raise ResourceNotFound(str(exc)) from exc
+    if isinstance(exc, CollaborationReviewForbidden):
+        raise PermissionDenied(str(exc)) from exc
+    raise RuleViolation(str(exc)) from exc
+
+
 # ---- 既定工作流授权（admin） ----
 
 @router.post("/collab-authorizations")
 async def create_authorization(body: AuthorizeCreate, db: DB, admin: Admin) -> dict:
     """目标部门预授权源部门某类协作通道。"""
-    a = await collab_service.authorize(
+    a = await operations.authorize(
         db,
         source_department_id=body.source_department_id,
         target_department_id=body.target_department_id,
-        collab_type=body.collab_type, authorized_by=admin.id,
-    )
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="collab.authorize",
-        summary=f"授权跨部门协作 {body.collab_type}",
-        target_type="collab_authorization", target_id=a.id,
+        collab_type=body.collab_type,
+        authorized_by=admin.id,
+        actor_role=admin.role_code,
     )
     return ok({"id": str(a.id)})
 
@@ -78,19 +123,28 @@ async def list_authorizations(
 ) -> dict:
     """既定工作流授权列表。"""
     return ok(
-        await collab_service.list_authorizations(db, target_department_id=target_department_id)
+        [
+            _authorization_data(item)
+            for item in await operations.list_authorizations(
+                db,
+                target_department_id=target_department_id,
+            )
+        ]
     )
 
 
 @router.delete("/collab-authorizations/{auth_id}")
 async def revoke_authorization(auth_id: uuid.UUID, db: DB, admin: Admin) -> dict:
     """撤销既定工作流授权。"""
-    await collab_service.revoke_authorization(db, auth_id)
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="collab.revoke",
-        summary="撤销跨部门协作授权",
-        target_type="collab_authorization", target_id=auth_id,
-    )
+    try:
+        await operations.revoke_authorization(
+            db,
+            auth_id,
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+        )
+    except CollaborationRequestError as exc:
+        _raise_transport_error(exc)
     return ok()
 
 
@@ -99,7 +153,7 @@ async def revoke_authorization(auth_id: uuid.UUID, db: DB, admin: Admin) -> dict
 @router.post("/collab-requests")
 async def create_request(body: RequestCreate, db: DB, user: CurrentUser) -> dict:
     """发起跨部门协作请求入复核队列。"""
-    r = await collab_service.create_request(
+    r = await operations.create_request(
         db,
         target_department_id=body.target_department_id, title=body.title,
         source_department_id=body.source_department_id, summary=body.summary,
@@ -112,9 +166,14 @@ async def create_request(body: RequestCreate, db: DB, user: CurrentUser) -> dict
 async def get_review_queue(db: DB, user: CurrentUser) -> dict:
     """待我复核的跨部门协作请求（目标部门主管=本人；admin 见全部 pending）。"""
     return ok(
-        await collab_service.review_queue(
-            db, supervisor_user_id=user.id, is_admin=user.role_code == "admin"
-        )
+        [
+            _request_data(item)
+            for item in await operations.review_queue(
+                db,
+                supervisor_user_id=user.id,
+                is_admin=user.role_code == "admin",
+            )
+        ]
     )
 
 
@@ -123,19 +182,15 @@ async def review_request(
     request_id: uuid.UUID, body: ReviewRequest, db: DB, user: CurrentUser
 ) -> dict:
     """复核 approve/reject（仅目标部门主管或 admin；红线：仅分发闸门）。"""
-    r = await db.get(CollabRequest, request_id)
-    if r is None or r.is_delete:
-        raise ResourceNotFound("协作请求不存在")
-    if user.role_code != "admin":
-        dept = await db.get(SysDepartment, r.target_department_id)
-        if dept is None or dept.supervisor_user_id != user.id:
-            raise PermissionDenied("仅目标部门主管或管理员可复核")
-    r = await collab_service.review_request(
-        db, request_id, decision=body.decision, reviewer_id=user.id, note=body.note
-    )
-    await audit_service.audit(
-        db, actor_id=user.id, actor_role=user.role_code, action="collab.review",
-        summary=f"复核跨部门协作 {r.title[:40]} → {r.status}",
-        target_type="collab_request", target_id=r.id,
-    )
+    try:
+        r = await operations.review_request_authorized(
+            db,
+            request_id,
+            decision=body.decision,
+            reviewer_id=user.id,
+            reviewer_role=user.role_code,
+            note=body.note,
+        )
+    except CollaborationRequestError as exc:
+        _raise_transport_error(exc)
     return ok({"id": str(r.id), "status": r.status})

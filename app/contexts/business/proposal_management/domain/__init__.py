@@ -8,6 +8,13 @@ from app.contexts.business.proposal_management.domain.errors import (
     ProposalResearchNotAllowed,
     ProposalReviewNotAllowed,
 )
+from app.contexts.business.proposal_management.domain.models import (
+    Proposal,
+    ProposalDecision,
+    ProposalReview,
+    ProposalReviewType,
+    ProposalStatus,
+)
 
 __all__ = [
     "InvalidProposalDecision",
@@ -16,4 +23,9 @@ __all__ = [
     "ProposalNotApproved",
     "ProposalResearchNotAllowed",
     "ProposalReviewNotAllowed",
+    "Proposal",
+    "ProposalDecision",
+    "ProposalReview",
+    "ProposalReviewType",
+    "ProposalStatus",
 ]

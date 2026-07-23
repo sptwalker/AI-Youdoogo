@@ -27,6 +27,7 @@ def utcnow() -> datetime:
 async def enqueue(
     db: AsyncSession,
     *,
+    event_id: uuid.UUID | None = None,
     aggregate_type: str,
     aggregate_id: uuid.UUID,
     event_type: str,
@@ -42,6 +43,7 @@ async def enqueue(
     if existing is not None:
         return existing
     event = OutboxEvent(
+        id=event_id or uuid.uuid4(),
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
         event_type=event_type,

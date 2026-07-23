@@ -1,0 +1,1 @@
+"""Published Capability Catalog contracts."""

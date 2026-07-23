@@ -1,83 +1,45 @@
-"""协作空间业务逻辑（docs/13 F3'）：频道 CRUD + 消息流 + @Agent 触发 + 升格。
-
-@Agent 成本护栏五件套（docs/13 决策⑦）：
-1. 无 @ 不调 AI；2. 显式点名触发一次；3. 单条 fan-out ≤3 且去重；
-4. 禁 AI 互@（只有真人消息触发 AI，AI 回复 mentioned=[] 不回环）；
-5. 预算走 run_agent 内既有 record_usage 日预算护栏。
-红线：AI 发言仅参考；升格产出（提案/任务）仍走既有真人确认闸门。
-"""
+"""One-way compatibility facade for the Group Messaging bounded context."""
 
 from __future__ import annotations
 
-import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent, run_agent_stream
-from app.agents.contracts import ExecutionContext
-from app.agents.skills import execute_all, fold_notes
-from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
-from app.core.sse import Event
-from app.models.agent import AgentRole, AgentTaskRecord
-from app.models.discussion import (
-    MEMBER_HUMAN,
-    SPEAKER_AI,
-    SPEAKER_HUMAN,
-    ChannelMember,
-    DiscussionChannel,
-    DiscussionMessage,
+from app.contexts.business.group_messaging.application.contracts import (
+    DISBAND_ARCHIVE_EVENT as _DISBAND_ARCHIVE_EVENT,
 )
-from app.services import outbox_service, proposal_service, realtime_service, task_service
+from app.contexts.business.group_messaging.application.contracts import (
+    ChannelResult,
+    archive_file_id,
+)
+from app.contexts.business.group_messaging.domain.models import (
+    MAX_FANOUT as _MAX_FANOUT,
+)
+from app.contexts.business.group_messaging.domain.models import (
+    deduplicate_mentions,
+)
+from app.contexts.business.group_messaging.entrypoints import operations
+from app.core.sse import Event
 
-logger = logging.getLogger(__name__)
-
-MAX_FANOUT = 3  # 护栏3：单条消息最多触发 3 个 AI
-_CONTEXT_N = 20  # 拼给 AI 的近期消息条数
-_PROMOTE_TARGETS = ("proposal", "task")
-DISBAND_ARCHIVE_EVENT = "discussion.channel.archive"
-_ARCHIVE_FILE_NAMESPACE = uuid.UUID("1e08b822-57c4-45ab-86f9-b0f494d5aba6")
+DISBAND_ARCHIVE_EVENT = _DISBAND_ARCHIVE_EVENT
+MAX_FANOUT = _MAX_FANOUT
 
 
 def _dedup(ids: list[uuid.UUID]) -> list[uuid.UUID]:
-    """保序去重（护栏3）。"""
-    seen: list[uuid.UUID] = []
-    for i in ids:
-        if i not in seen:
-            seen.append(i)
-    return seen
+    """Retain the legacy helper while delegating the guardrail to the Domain."""
+    return list(deduplicate_mentions(tuple(ids)))
 
 
-def _channel_dict(c: DiscussionChannel) -> dict[str, Any]:
-    return {
-        "id": str(c.id), "name": c.name,
-        "department_id": str(c.department_id) if c.department_id else None,
-        "default_agent_id": str(c.default_agent_id) if c.default_agent_id else None,
-        "creator_id": str(c.creator_id) if c.creator_id else None,
-        "is_archived": c.is_archived, "create_time": c.create_time.isoformat(),
-    }
+def _archive_file_id(channel_id: uuid.UUID) -> uuid.UUID:
+    """Retain the deterministic legacy helper for worker and test compatibility."""
+    return archive_file_id(channel_id)
 
 
-def _msg_dict(m: DiscussionMessage) -> dict[str, Any]:
-    return {
-        "id": str(m.id), "channel_id": str(m.channel_id), "speaker_type": m.speaker_type,
-        "speaker_id": str(m.speaker_id) if m.speaker_id else None, "speaker_name": m.speaker_name,
-        "content": m.content, "mentioned_agent_ids": m.mentioned_agent_ids,
-        "ai_source_record_id": str(m.ai_source_record_id) if m.ai_source_record_id else None,
-        "ref_type": m.ref_type, "ref_id": str(m.ref_id) if m.ref_id else None,
-        "attachments": m.attachments or [],
-        "create_time": m.create_time.isoformat(),
-    }
-
-
-async def get_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:
-    c = await db.get(DiscussionChannel, channel_id)
-    if c is None or c.is_delete:
-        raise ResourceNotFound("讨论频道不存在")
-    return c
+async def get_channel(db: AsyncSession, channel_id: uuid.UUID) -> ChannelResult:
+    return await operations.get_channel(db, channel_id)
 
 
 async def create_channel(
@@ -89,276 +51,83 @@ async def create_channel(
     creator_name: str = "",
     default_agent_id: uuid.UUID | None = None,
     members: list[dict[str, Any]] | None = None,
-) -> DiscussionChannel:
-    c = DiscussionChannel(
-        name=name, department_id=department_id,
-        creator_id=creator_id, default_agent_id=default_agent_id,
+) -> ChannelResult:
+    return await operations.create_channel(
+        db,
+        name=name,
+        department_id=department_id,
+        creator_id=creator_id,
+        creator_name=creator_name,
+        default_agent_id=default_agent_id,
+        members=members,
     )
-    db.add(c)
-    await db.commit()
-    await db.refresh(c)
-    # 创建者自动入群（I4）+ 可选初始成员（真人+AI 混合）
-    init: list[dict[str, Any]] = list(members or [])
-    if creator_id is not None:
-        init.append({
-            "member_type": MEMBER_HUMAN, "member_id": creator_id, "member_name": creator_name,
-        })
-    if init:
-        await add_members(db, c.id, init)
-    return c
 
 
 async def list_channels(
     db: AsyncSession, *, department_id: uuid.UUID | None = None
 ) -> list[dict[str, Any]]:
-    stmt = select(DiscussionChannel).where(DiscussionChannel.is_delete.is_(False))
-    if department_id is not None:
-        stmt = stmt.where(DiscussionChannel.department_id == department_id)
-    stmt = stmt.order_by(DiscussionChannel.create_time)
-    return [_channel_dict(c) for c in (await db.execute(stmt)).scalars()]
+    return await operations.list_channels(db, department_id=department_id)
 
 
 async def all_channel_ids(db: AsyncSession) -> list[str]:
-    """全部未删除频道 id（供实时订阅，I3；I4 起按群成员收窄用 my_channel_ids）。"""
-    stmt = select(DiscussionChannel.id).where(DiscussionChannel.is_delete.is_(False))
-    return [str(i) for i in (await db.execute(stmt)).scalars()]
+    return await operations.all_channel_ids(db)
 
 
-# ── 群成员（I4，docs/18）────────────────────────────────
 async def add_members(
     db: AsyncSession, channel_id: uuid.UUID, members: list[dict[str, Any]]
 ) -> int:
-    """批量加成员（真人+AI 混合）。members: [{member_type, member_id, member_name}]。幂等。"""
-    await get_channel(db, channel_id)  # 校验频道存在
-    added = 0
-    for m in members:
-        mtype = m.get("member_type")
-        mid = m.get("member_id")
-        if mtype not in (MEMBER_HUMAN, "ai") or not mid:
-            continue
-        mid_uuid = mid if isinstance(mid, uuid.UUID) else uuid.UUID(str(mid))
-        exists = (
-            await db.execute(
-                select(ChannelMember).where(
-                    ChannelMember.channel_id == channel_id,
-                    ChannelMember.member_type == mtype,
-                    ChannelMember.member_id == mid_uuid,
-                    ChannelMember.is_delete.is_(False),
-                )
-            )
-        ).scalar_one_or_none()
-        if exists is None:
-            db.add(ChannelMember(
-                channel_id=channel_id, member_type=mtype, member_id=mid_uuid,
-                member_name=(m.get("member_name") or ""),
-            ))
-            added += 1
-    await db.commit()
-    return added
+    return await operations.add_members(db, channel_id, members)
 
 
 async def remove_member(
-    db: AsyncSession, channel_id: uuid.UUID, member_type: str, member_id: uuid.UUID
+    db: AsyncSession,
+    channel_id: uuid.UUID,
+    member_type: str,
+    member_id: uuid.UUID,
 ) -> None:
-    """移除一个成员（软删）。"""
-    m = (
-        await db.execute(
-            select(ChannelMember).where(
-                ChannelMember.channel_id == channel_id,
-                ChannelMember.member_type == member_type,
-                ChannelMember.member_id == member_id,
-                ChannelMember.is_delete.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if m is not None:
-        m.is_delete = True
-        await db.commit()
+    await operations.remove_member(db, channel_id, member_type, member_id)
 
 
-async def list_members(db: AsyncSession, channel_id: uuid.UUID) -> list[dict[str, Any]]:
-    """群成员名单。"""
-    stmt = select(ChannelMember).where(
-        ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
-    )
-    return [
-        {
-            "member_type": m.member_type, "member_id": str(m.member_id),
-            "member_name": m.member_name,
-        }
-        for m in (await db.execute(stmt)).scalars()
-    ]
+async def list_members(db: AsyncSession, channel_id: uuid.UUID) -> list[dict[str, str]]:
+    return await operations.list_members(db, channel_id)
 
 
 async def my_channel_ids(db: AsyncSession, user_id: uuid.UUID) -> list[str]:
-    """某真人所在的群 id（成员表 human 身份）。供实时订阅收窄 + 群列表。"""
-    stmt = select(ChannelMember.channel_id).where(
-        ChannelMember.member_type == MEMBER_HUMAN, ChannelMember.member_id == user_id,
-        ChannelMember.is_delete.is_(False),
-    )
-    return [str(i) for i in (await db.execute(stmt)).scalars()]
+    return await operations.my_channel_ids(db, user_id)
 
 
 async def is_member(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    """某真人是否群成员（读写权限守卫）。"""
-    row = (
-        await db.execute(
-            select(ChannelMember.id).where(
-                ChannelMember.channel_id == channel_id,
-                ChannelMember.member_type == MEMBER_HUMAN,
-                ChannelMember.member_id == user_id,
-                ChannelMember.is_delete.is_(False),
-            )
-        )
-    ).first()
-    return row is not None
+    return await operations.is_member(db, channel_id, user_id)
 
 
 async def is_owner(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    """某真人是否群主（= 创建者）。群主可解散群/踢人。"""
-    c = await get_channel(db, channel_id)
-    return c.creator_id is not None and c.creator_id == user_id
+    return await operations.is_owner(db, channel_id, user_id)
 
 
 async def disband_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
-    """解散群并在同一事务写入持久化归档事件，归档失败不影响解散结果。"""
-    try:
-        c = await get_channel(db, channel_id)
-        members = await db.execute(
-            select(ChannelMember).where(
-                ChannelMember.channel_id == channel_id, ChannelMember.is_delete.is_(False)
-            )
-        )
-        for member in members.scalars():
-            member.is_delete = True
-        c.is_delete = True
-        await outbox_service.enqueue(
-            db,
-            aggregate_type="discussion_channel",
-            aggregate_id=channel_id,
-            event_type=DISBAND_ARCHIVE_EVENT,
-            dedupe_key=f"discussion-channel:{channel_id}:archive:v1",
-            payload={"channel_id": str(channel_id)},
-        )
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
+    await operations.disband_channel(db, channel_id)
 
 
 async def archive_disbanded_channel(db: AsyncSession, channel_id: uuid.UUID) -> None:
-    """worker 入口：严格归档已解散群；异常交给 outbox 记录并重试。"""
-    channel = await db.get(DiscussionChannel, channel_id)
-    if channel is None:
-        return
-    await _archive_to_kb(db, channel, raise_on_error=True)
+    await operations.archive_disbanded_channel(db, channel_id)
 
 
-# ── 未读计数（I5，docs/18）──────────────────────────────
 async def mark_read(db: AsyncSession, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
-    """把某真人在某群的未读水位推到当前（进群/读消息时调）。"""
-    from datetime import UTC, datetime
-
-    m = (
-        await db.execute(
-            select(ChannelMember).where(
-                ChannelMember.channel_id == channel_id,
-                ChannelMember.member_type == MEMBER_HUMAN,
-                ChannelMember.member_id == user_id,
-                ChannelMember.is_delete.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if m is not None:
-        m.last_read_at = datetime.now(UTC)
-        await db.commit()
+    await operations.mark_read(db, channel_id, user_id)
 
 
-async def my_channels_with_unread(
-    db: AsyncSession, user_id: uuid.UUID
-) -> list[dict[str, Any]]:
-    """我的群列表 + 每群未读数（I5）。未读=群内晚于 last_read_at 的消息数（不含自己发的）。"""
-    from sqlalchemy import func
-
-    stmt = select(ChannelMember, DiscussionChannel).join(
-        DiscussionChannel, DiscussionChannel.id == ChannelMember.channel_id
-    ).where(
-        ChannelMember.member_type == MEMBER_HUMAN, ChannelMember.member_id == user_id,
-        ChannelMember.is_delete.is_(False), DiscussionChannel.is_delete.is_(False),
-    ).order_by(DiscussionChannel.create_time.desc())
-    rows = (await db.execute(stmt)).all()
-    out: list[dict[str, Any]] = []
-    for member, channel in rows:
-        cond = [
-            DiscussionMessage.channel_id == channel.id,
-            DiscussionMessage.speaker_id != user_id,  # 不算自己发的
-        ]
-        if member.last_read_at is not None:
-            cond.append(DiscussionMessage.create_time > member.last_read_at)
-        unread = int((await db.execute(
-            select(func.count()).select_from(DiscussionMessage).where(*cond)
-        )).scalar_one())
-        out.append({**_channel_dict(channel), "unread": unread})
-    return out
+async def my_channels_with_unread(db: AsyncSession, user_id: uuid.UUID) -> list[dict[str, Any]]:
+    return await operations.my_channels_with_unread(db, user_id)
 
 
-async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> DiscussionChannel:
-    c = await get_channel(db, channel_id)
-    c.is_archived = True
-    await db.commit()
-    await db.refresh(c)
-    # 群聊内容自动入库（I7，docs/18）：归档时把聊天记录提炼进公司/部门 KB（复用 H3.2）。
-    await _archive_to_kb(db, c)
-    return c
-
-
-def _archive_file_id(channel_id: uuid.UUID) -> uuid.UUID:
-    """一个频道对应一个确定性知识文件，确保 outbox 重放不会重复入库。"""
-    return uuid.uuid5(_ARCHIVE_FILE_NAMESPACE, str(channel_id))
-
-
-async def _archive_to_kb(
-    db: AsyncSession,
-    channel: DiscussionChannel,
-    *,
-    raise_on_error: bool = False,
-) -> None:
-    """把群聊提炼入知识库；worker 模式抛错重试，人工归档保持原有容错语义。"""
-    try:
-        from app.knowledge.ingest import ingest_text
-        from app.services import knowledge_base_service, memory_service
-
-        if channel.creator_id is None:
-            return  # KB 需归属真人，无创建人则跳过
-        msgs = await list_messages(db, channel.id, limit=500)
-        if not msgs:
-            return
-        transcript = "\n".join(f"{m['speaker_name']}：{m['content']}" for m in msgs)
-        distilled = await memory_service.distill_conversation(db, transcript)
-        kb = await knowledge_base_service.get_default_kb(db)
-        await ingest_text(
-            db, title=f"群聊存档·{channel.name}", text=distilled or transcript,
-            uploader_id=channel.creator_id, knowledge_base_id=kb.id, category="discussion",
-            file_id=_archive_file_id(channel.id),
-        )
-    except Exception:  # noqa: BLE001 - 人工归档兼容容错；worker 模式交由 outbox 重试
-        logger.warning("群聊归档入库失败 channel=%s", channel.id, exc_info=True)
-        if raise_on_error:
-            raise
+async def archive_channel(db: AsyncSession, channel_id: uuid.UUID) -> ChannelResult:
+    return await operations.archive_channel(db, channel_id)
 
 
 async def list_messages(
     db: AsyncSession, channel_id: uuid.UUID, *, limit: int = 100
 ) -> list[dict[str, Any]]:
-    """频道最近 limit 条消息（按时间正序返回）。"""
-    stmt = (
-        select(DiscussionMessage)
-        .where(DiscussionMessage.channel_id == channel_id)
-        .order_by(DiscussionMessage.create_time.desc())  # 先取最近 limit 条
-        .limit(limit)
-    )
-    rows = list((await db.execute(stmt)).scalars())
-    return [_msg_dict(m) for m in reversed(rows)]  # 再倒回正序展示/喂 AI
+    return await operations.list_messages(db, channel_id, limit=limit)
 
 
 async def post_message_stream(
@@ -371,98 +140,16 @@ async def post_message_stream(
     mentioned_agent_ids: list[uuid.UUID],
     attachments: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[Event]:
-    """真人发言；@ 的 AI 顾问逐个流式回复（成本护栏五件套不变）。
-
-    SSE 事件流：message_end(真人消息) → 每个被 @ 的 AI 依次
-    message_start → delta* → message_end(落库消息)。attachments 为消息附件（I6）。
-    """
-    channel = await get_channel(db, channel_id)
-    if channel.is_archived:
-        raise RuleViolation("频道已归档，不可发言")
-
-    human = DiscussionMessage(
-        channel_id=channel_id, speaker_type=SPEAKER_HUMAN, speaker_id=speaker_id,
-        speaker_name=speaker_name, content=content,
-        mentioned_agent_ids=[str(a) for a in mentioned_agent_ids],
-        attachments=attachments or [],
-    )
-    db.add(human)
-    await db.commit()
-    await db.refresh(human)
-    human_dict = _msg_dict(human)
-    yield ("message_end", human_dict)
-    # 实时广播（I3）：把真人消息推给该群所有在线订阅者（跨 worker）
-    await realtime_service.publish(str(channel_id), "message", human_dict)
-
-    targets = _dedup(mentioned_agent_ids)[:MAX_FANOUT]  # 护栏 1(空则不进循环)/2/3
-    # 频道近期上下文取一次（含刚发的这条），循环内复用——避免每个 @agent 重查（N+1）
-    ctx = "（暂无发言）"
-    if targets:
-        history = await list_messages(db, channel_id, limit=_CONTEXT_N)
-        ctx = "\n".join(f"{h['speaker_name']}：{h['content']}" for h in history) or ctx
-    for agent_id in targets:
-        role = await db.get(AgentRole, agent_id)
-        if role is None or role.is_delete or not role.is_active:
-            continue  # 坏 @ 不阻断整条发言
-        user_message = (
-            f"你在企业协作频道「{channel.name}」中被 @ 点名。\n\n"
-            f"频道近期讨论：\n{ctx}\n\n"
-            f"请以你的角色身份，就上文给出一段简明的参考意见/建议（仅供真人参考）。"
-        )
-        yield ("message_start", {"speaker_agent_id": str(role.id), "speaker_name": role.name})
-        record: AgentTaskRecord | None = None
-        async for item in run_agent_stream(
-            db, role, task_type="discussion_reply",
-            input_summary=f"讨论回复：{content[:40]}",
-            user_message=user_message, user_id=speaker_id,
-        ):
-            if isinstance(item, AgentTaskRecord):
-                record = item
-            else:
-                yield ("delta", {"text": item})
-        assert record is not None  # run_agent_stream 末项必为记录
-        reply = record.output_content or record.error_msg or "（无产出）"
-        # 协作原语（docs/13 §10）：先执行指令、注记折进正文，再落库
-        proto = await execute_all(
-            db,
-            role,
-            reply,
-            user_id=speaker_id,
-            execution_context=ExecutionContext(
-                user_id=speaker_id,
-                agent_runner=run_agent,
-            ),
-        )
-        reply = fold_notes(reply, proto)
-        ai = DiscussionMessage(
-            channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=role.id,
-            speaker_name=role.name,
-            content=reply,
-            ai_source_record_id=record.id, mentioned_agent_ids=[],  # 护栏4：AI 不 @人，不回环
-        )
-        db.add(ai)
-        await db.commit()
-        await db.refresh(ai)
-        ai_dict = _msg_dict(ai)
-        yield ("message_end", ai_dict)
-        await realtime_service.publish(str(channel_id), "message", ai_dict)  # 广播 AI 回复
-        # 被咨询 AI 的答复作为独立消息追加（带留痕溯源，不 @人）
-        for consulted, rec in proto.consult_replies:
-            answer = rec.output_content or rec.error_msg or "（无回应）"
-            yield (
-                "message_start",
-                {"speaker_agent_id": str(consulted.id), "speaker_name": consulted.name},
-            )
-            yield ("delta", {"text": answer})
-            c_msg = DiscussionMessage(
-                channel_id=channel_id, speaker_type=SPEAKER_AI, speaker_id=consulted.id,
-                speaker_name=consulted.name, content=answer,
-                ai_source_record_id=rec.id, mentioned_agent_ids=[],
-            )
-            db.add(c_msg)
-            await db.commit()
-            await db.refresh(c_msg)
-            yield ("message_end", _msg_dict(c_msg))
+    async for event in operations.post_message_stream(
+        db,
+        channel_id,
+        speaker_id=speaker_id,
+        speaker_name=speaker_name,
+        content=content,
+        mentioned_agent_ids=mentioned_agent_ids,
+        attachments=attachments,
+    ):
+        yield event
 
 
 async def promote_message(
@@ -471,31 +158,10 @@ async def promote_message(
     *,
     target: str,
     creator_id: uuid.UUID,
-) -> dict[str, Any]:
-    """把一条讨论消息升格为提案/任务，回填 ref 溯源（红线：产出仍走真人确认）。"""
-    if target not in _PROMOTE_TARGETS:
-        raise RuleViolation(f"target 仅支持 {'/'.join(_PROMOTE_TARGETS)}")
-    msg = await db.get(DiscussionMessage, message_id)
-    if msg is None or msg.is_delete:
-        raise ResourceNotFound("消息不存在")
-    if msg.ref_id is not None:
-        raise RuleViolation("该消息已升格过")
-
-    title = msg.content[:60] or "讨论升格"
-    if target == "proposal":
-        p = await proposal_service.create_proposal(
-            db, title=title, background=msg.content, plan="（讨论升格，方案待补充）",
-            creator_id=creator_id,
-        )
-        ref_id = p.id
-    else:  # task
-        t = await task_service.create_task(
-            db, title=title, task_type="manual", creator_id=creator_id,
-            payload={"from_message_id": str(msg.id)},
-        )
-        ref_id = t.id
-
-    msg.ref_type = target
-    msg.ref_id = ref_id
-    await db.commit()
-    return {"ref_type": target, "ref_id": str(ref_id)}
+) -> dict[str, str]:
+    return await operations.promote_message(
+        db,
+        message_id,
+        target=target,
+        creator_id=creator_id,
+    )

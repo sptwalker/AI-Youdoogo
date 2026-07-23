@@ -1,40 +1,21 @@
-"""智能体角色配置管理：新增部门智能体 = 建一行 agent_role（零新代码）。
-
-验证 docs/06 阶段3「第二部门 Agent 以显著低于首个的工作量上线」：
-新角色配好 prompt_template + model_role 即可被 scheduler/run_agent 通用驱动。
-"""
+"""Compatibility facade for Expert Management lifecycle and roster."""
 
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound, RuleViolation
-from app.models.agent import TIER_DIRECTOR, TIER_EXEC, TIER_MEMBER, AgentRole
+from app.contexts.foundations.workforce.expert_management.domain.models import (
+    VALID_MODEL_ROLES,
+    VALID_TIERS,
+)
+from app.contexts.foundations.workforce.expert_management.entrypoints import operations
+from app.contexts.foundations.workforce.expert_management.entrypoints.legacy import legacy_view
 
-VALID_MODEL_ROLES = ("daily", "reasoning")
-VALID_TIERS = (TIER_EXEC, TIER_DIRECTOR, TIER_MEMBER)
-
-
-def _check_model_role(model_role: str) -> None:
-    if model_role not in VALID_MODEL_ROLES:
-        raise RuleViolation(f"model_role 仅支持 {'/'.join(VALID_MODEL_ROLES)}")
-
-
-def _check_tier(tier: str) -> None:
-    if tier not in VALID_TIERS:
-        raise RuleViolation(f"tier 仅支持 {'/'.join(VALID_TIERS)}")
-
-
-async def _refresh_env(db: AsyncSession) -> None:
-    """AI 员工变更后刷新环境快照（docs/13 §9）。局部 import 防循环依赖；内部吞异常。"""
-    from app.services import environment_service
-
-    await environment_service.refresh_env_doc(db)
+if TYPE_CHECKING:
+    from app.models.agent import AgentRole
 
 
 async def create_agent_role(
@@ -47,27 +28,24 @@ async def create_agent_role(
     department_id: uuid.UUID | None = None,
     permission_scope: dict[str, Any] | None = None,
     tools: list[Any] | None = None,
-    tier: str = TIER_MEMBER,
+    tier: str = "member",
     title: str = "",
     report_to_id: uuid.UUID | None = None,
 ) -> AgentRole:
-    """新增一个智能体员工（name 唯一）。"""
-    _check_model_role(model_role)
-    _check_tier(tier)
-    role = AgentRole(
-        name=name, prompt_template=prompt_template, duty=duty, model_role=model_role,
-        department_id=department_id, permission_scope=permission_scope or {}, tools=tools or [],
-        tier=tier, title=title, report_to_id=report_to_id,
+    snapshot = await operations.create_expert(
+        db,
+        name=name,
+        prompt_template=prompt_template,
+        duty=duty,
+        model_role=model_role,
+        department_id=department_id,
+        permission_scope=permission_scope or {},
+        tools=tools or [],
+        tier=tier,
+        title=title,
+        report_to_id=report_to_id,
     )
-    db.add(role)
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise ConflictDetected("角色名或编码已存在") from exc
-    await db.refresh(role)
-    await _refresh_env(db)
-    return role
+    return cast("AgentRole", legacy_view(snapshot))
 
 
 async def update_agent_role(
@@ -86,60 +64,38 @@ async def update_agent_role(
     report_to_id: uuid.UUID | None = None,
     department_id: uuid.UUID | None = None,
 ) -> AgentRole:
-    """更新智能体员工：仅更新提供的字段（含姓名，真人主管可自定义下属 AI 名称）。"""
-    role = await db.get(AgentRole, role_id)
-    if role is None or role.is_delete:
-        raise ResourceNotFound("智能体员工不存在")
-    if model_role is not None:
-        _check_model_role(model_role)
-        role.model_role = model_role
-    if tier is not None:
-        _check_tier(tier)
-        role.tier = tier
-    if name is not None:
-        role.name = name
-    if prompt_template:  # 忽略空串，避免编辑其它字段时把提示词覆盖清空
-        role.prompt_template = prompt_template
-    if duty is not None:
-        role.duty = duty
-    if is_active is not None:
-        role.is_active = is_active
-    if permission_scope is not None:
-        role.permission_scope = permission_scope
-    if tools is not None:
-        role.tools = tools
-    if title is not None:
-        role.title = title
-    if report_to_id is not None:
-        role.report_to_id = report_to_id
-    if department_id is not None:
-        role.department_id = department_id
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise ConflictDetected("角色名已被占用") from exc
-    await db.refresh(role)
-    await _refresh_env(db)
-    return role
+    snapshot = await operations.update_expert(
+        db,
+        expert_id=role_id,
+        name=name,
+        prompt_template=prompt_template,
+        duty=duty,
+        model_role=model_role,
+        is_active=is_active,
+        permission_scope=permission_scope,
+        tools=tools,
+        title=title,
+        tier=tier,
+        report_to_id=report_to_id,
+        department_id=department_id,
+    )
+    return cast("AgentRole", legacy_view(snapshot))
 
 
 async def delete_agent_role(db: AsyncSession, role_id: uuid.UUID) -> None:
-    """软删智能体员工。骨架种子（is_seed）也可删——is_seed 仅作模板位标记，
-    一键初始化可按需补回；删除权交给管理员，保持全体一致可删可调。"""
-    role = await db.get(AgentRole, role_id)
-    if role is None or role.is_delete:
-        raise ResourceNotFound("智能体员工不存在")
-    role.is_delete = True
-    await db.commit()
-    await _refresh_env(db)
+    await operations.delete_expert(db, role_id)
 
 
 async def list_agent_roles(db: AsyncSession) -> list[AgentRole]:
-    """列出全部未删除的组织智能体角色（排除真人专属助理 owner_user_id）。"""
-    stmt = (
-        select(AgentRole)
-        .where(AgentRole.is_delete.is_(False), AgentRole.owner_user_id.is_(None))
-        .order_by(AgentRole.create_time)
-    )
-    return list((await db.execute(stmt)).scalars())
+    snapshots = await operations.list_roster(db)
+    return cast("list[AgentRole]", [legacy_view(snapshot) for snapshot in snapshots])
+
+
+__all__ = [
+    "VALID_MODEL_ROLES",
+    "VALID_TIERS",
+    "create_agent_role",
+    "delete_agent_role",
+    "list_agent_roles",
+    "update_agent_role",
+]

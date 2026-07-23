@@ -9,12 +9,14 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.foundations.access_control.contracts import RolePolicyRequest
+from app.contexts.foundations.access_control.entrypoints import policy
+from app.contexts.foundations.identity.application.contracts import IdentityUserResult
+from app.contexts.foundations.identity.contracts import Principal, PrincipalType
+from app.contexts.foundations.identity.public import get_user_by_id
 from app.contexts.shared_kernel import AuthenticationFailed, PermissionDenied
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.models.system import SysUser
-from app.services import permission_service
-from app.services.auth_service import get_user_by_id
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -22,7 +24,7 @@ _bearer = HTTPBearer(auto_error=False)
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> SysUser:
+) -> IdentityUserResult:
     """解析 Bearer 令牌并加载用户（实时查库，停用/删除立即失效）。
 
     Raises:
@@ -35,7 +37,7 @@ async def get_current_user(
         user_id = uuid.UUID(payload["sub"])
     except (pyjwt.InvalidTokenError, KeyError, ValueError) as exc:
         raise AuthenticationFailed("令牌无效或已过期") from exc
-    user = await get_user_by_id(db, user_id)
+    user = await get_user_by_id(db, user_id=user_id)
     if user is None:
         raise AuthenticationFailed("令牌无效或已过期")
     if not user.is_active:
@@ -43,10 +45,10 @@ async def get_current_user(
     return user
 
 
-CurrentUser = Annotated[SysUser, Depends(get_current_user)]
+CurrentUser = Annotated[IdentityUserResult, Depends(get_current_user)]
 
 
-async def require_human(user: CurrentUser) -> SysUser:
+async def require_human(user: CurrentUser) -> IdentityUserResult:
     """生效动作红线守卫（纵深防御）：必须已认证真人触发。
 
     AI 员工经 run_agent 内部运行、不持 JWT，故任何进入本依赖的请求天然是真人；
@@ -55,17 +57,30 @@ async def require_human(user: CurrentUser) -> SysUser:
     return user
 
 
-HumanUser = Annotated[SysUser, Depends(require_human)]
+HumanUser = Annotated[IdentityUserResult, Depends(require_human)]
 
 
-def require_roles(*roles: str) -> Callable[..., Coroutine[Any, Any, SysUser]]:
+def require_roles(*roles: str) -> Callable[..., Coroutine[Any, Any, IdentityUserResult]]:
     """角色守卫依赖工厂：require_roles("admin") / require_roles("admin", "executive")。
 
     判定收敛到 permission_service.check_role（单一角色判定权威，F4b）。
     """
 
-    async def _guard(user: CurrentUser) -> SysUser:
-        permission_service.check_role(user, *roles)
+    async def _guard(user: CurrentUser) -> IdentityUserResult:
+        decision = policy.decide_role(
+            RolePolicyRequest(
+                principal=Principal(
+                    principal_type=PrincipalType.USER,
+                    principal_id=user.id,
+                    role_code=user.role_code,
+                    department_id=user.department_id,
+                    is_active=user.is_active,
+                ),
+                allowed_roles=tuple(roles),
+            )
+        )
+        if not decision.allowed:
+            raise PermissionDenied(decision.reason)
         return user
 
     return _guard

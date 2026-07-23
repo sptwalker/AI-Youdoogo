@@ -7,6 +7,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.governance.ai_quality import public as ai_quality
+from app.contexts.foundations.governance.ai_quality.infrastructure import composition
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -85,3 +87,49 @@ async def test_optimize_prompt_no_low_scores(
     )  # 高分不入优化样本
     with pytest.raises(ApplicationError, match="无需优化"):
         await feedback_service.optimize_prompt(session, role_id)
+
+
+async def test_public_feedback_operations(
+    ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID],
+) -> None:
+    session, role_id, record_id = ctx
+    rater_id = uuid.uuid4()
+
+    result = await ai_quality.record_feedback(
+        session,
+        ai_quality.RecordFeedbackCommand(
+            task_record_id=record_id,
+            rater_id=rater_id,
+            score=2,
+            comment="缺来源",
+        ),
+    )
+    samples = await ai_quality.list_low_score_samples(session, role_id)
+
+    assert result.task_record_id == record_id
+    assert result.rater_id == rater_id
+    assert result.score == 2
+    assert samples == (ai_quality.LowScoreSample("日报正文……", 2, "缺来源"),)
+
+
+async def test_public_prompt_improvement_operation(
+    ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, role_id, record_id = ctx
+    monkeypatch.setattr(composition, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    await ai_quality.record_feedback(
+        session,
+        ai_quality.RecordFeedbackCommand(
+            task_record_id=record_id,
+            rater_id=uuid.uuid4(),
+            score=2,
+            comment="缺来源标注",
+        ),
+    )
+
+    suggestion = await ai_quality.suggest_prompt_improvement(session, role_id)
+
+    assert suggestion.based_on_samples == 1
+    assert suggestion.current_prompt == "你是运营AI总监。"
+    assert "改进后的提示词" in suggestion.suggested_prompt

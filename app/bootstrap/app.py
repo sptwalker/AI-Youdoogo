@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.bootstrap.error_wiring import register_application_error_handlers
 from app.bootstrap.lifecycle import lifespan
+from app.bootstrap.observability import readiness, render_metrics
 from app.bootstrap.wiring import register_routes
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
@@ -31,20 +32,16 @@ def _register_operational_routes(app: FastAPI, settings: Settings) -> None:
     @app.get("/api/v1/health/ready")
     async def health_ready() -> Response:
         """Report database and active-provider readiness."""
-        from app.services import metrics_service
-
         async with async_session_factory() as db:
-            is_ready, detail = await metrics_service.readiness(db)
+            is_ready, detail = await readiness(db)
         body = ok(detail) if is_ready else {"code": 1, "msg": "not ready", "data": detail}
         return JSONResponse(body, status_code=200 if is_ready else 503)
 
     @app.get("/api/v1/metrics")
     async def metrics() -> Response:
         """Render process-independent Prometheus metrics from persistent state."""
-        from app.services import metrics_service
-
         async with async_session_factory() as db:
-            text_body = await metrics_service.render_metrics(db)
+            text_body = await render_metrics(db)
         return PlainTextResponse(text_body, media_type="text/plain; version=0.0.4")
 
     @app.get("/api/v1/health/deps")

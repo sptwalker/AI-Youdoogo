@@ -203,8 +203,13 @@ async def test_terminal_archive_failure_is_observable_in_outbox(
 async def test_archive_replay_reuses_deterministic_knowledge_file(
     maker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from app.contexts.foundations.knowledge.organizational_memory import (
+        public as organizational_memory,
+    )
+    from app.contexts.foundations.knowledge.organizational_memory.contracts import (
+        MemoryDraft,
+    )
     from app.knowledge import ingest as ingest_module
-    from app.services import memory_service
 
     async with maker() as db:
         user = SysUser(username="archive-owner", password_hash="x", role_code="admin")
@@ -216,9 +221,7 @@ async def test_archive_replay_reuses_deterministic_knowledge_file(
         )
         db.add_all([user, kb])
         await db.commit()
-        channel = await discussion_service.create_channel(
-            db, name="幂等群", creator_id=user.id
-        )
+        channel = await discussion_service.create_channel(db, name="幂等群", creator_id=user.id)
         db.add(
             DiscussionMessage(
                 channel_id=channel.id,
@@ -230,23 +233,27 @@ async def test_archive_replay_reuses_deterministic_knowledge_file(
         )
         await db.commit()
 
-        async def _distill(_db: AsyncSession, _transcript: str, **kwargs: object) -> str:
-            return "## 摘要\n形成唯一归档"
+        async def _distill(_db: AsyncSession, command: object, **kwargs: object) -> MemoryDraft:
+            return MemoryDraft(
+                content="## 摘要\n形成唯一归档",
+                source_type="discussion_channel",
+                source_id=command.source_id,
+            )
 
         async def _embed(texts: list[str]) -> list[list[float]]:
             return [[0.0] * 1024 for _ in texts]
 
-        monkeypatch.setattr(memory_service, "distill_conversation", _distill)
+        monkeypatch.setattr(organizational_memory, "distill_conversation", _distill)
         monkeypatch.setattr(ingest_module, "embed_texts", _embed)
 
         await discussion_service.archive_disbanded_channel(db, channel.id)
         await discussion_service.archive_disbanded_channel(db, channel.id)
 
         files = (
-            await db.execute(
-                select(KnowledgeFile).where(KnowledgeFile.category == "discussion")
-            )
-        ).scalars().all()
+            (await db.execute(select(KnowledgeFile).where(KnowledgeFile.category == "discussion")))
+            .scalars()
+            .all()
+        )
         vector_count = (
             await db.execute(select(func.count()).select_from(KnowledgeVector))
         ).scalar_one()

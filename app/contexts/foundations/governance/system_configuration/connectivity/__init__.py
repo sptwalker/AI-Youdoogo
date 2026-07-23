@@ -1,0 +1,1 @@
+"""External dependency connectivity checks."""

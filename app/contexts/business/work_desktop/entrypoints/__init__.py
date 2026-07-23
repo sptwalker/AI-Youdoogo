@@ -1,0 +1,1 @@
+"""Work Desktop entrypoints."""

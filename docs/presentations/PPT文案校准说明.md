@@ -24,7 +24,7 @@
 ## 主要事实源
 
 - 架构与边界：`docs/20-DDD领域边界与分层架构规范.md`
-- 运营分析：`app/agents/ops.py`、`app/services/ops_data.py`、`app/services/anomaly.py`
-- 提案管理：`app/services/proposal_service.py`
-- 会议管理：`app/services/meeting_service.py`、`app/services/meeting_ai_actions.py`
+- 运营分析：`app/agents/ops.py`、`app/contexts/business/operational_analytics/entrypoints/agent_operations.py`
+- 提案管理：`app/contexts/business/proposal_management/entrypoints/operations.py`
+- 会议管理：`app/contexts/business/meeting_management/entrypoints/operations.py`
 - 任务状态机：`app/services/task_flow.py`

@@ -1,41 +1,68 @@
-"""跨部门协作治理业务逻辑（docs/13 §2.2 · F4c，只做结构）。
-
-风险分级 + 既定工作流授权 + 主管复核队列。红线：复核=分发闸门；生效永远真人验收。
-自动编排链（AI产出请求→匹配授权/风险→自动分发→回流→事后复核）留未来业务工作流阶段。
-"""
+"""One-way compatibility facade for Collaboration Requests."""
 
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.business.collaboration_requests.application.contracts import (
+    CollaborationAuthorizationResult,
+    CollaborationRequestResult,
+)
+from app.contexts.business.collaboration_requests.application.errors import (
+    CollaborationAuthorizationNotFound,
+    CollaborationRequestNotFound,
+)
+from app.contexts.business.collaboration_requests.domain.errors import (
+    CollaborationReviewNotAllowed,
+    InvalidReviewDecision,
+)
+from app.contexts.business.collaboration_requests.domain.models import classify_risk
+from app.contexts.business.collaboration_requests.entrypoints import operations
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
-from app.models.collab import (
-    REQ_APPROVED,
-    REQ_PENDING,
-    REQ_REJECTED,
-    RISK_HIGH,
-    RISK_LOW,
-    CollabAuthorization,
-    CollabRequest,
-)
-from app.models.system import SysDepartment
 
-# 红线类别恒高风险（资金/预算、人事、项目立项-调整、重大业务调整）
-_HIGH_RISK_CATEGORIES = frozenset(
-    {"finance", "budget", "hr", "project", "major_change"}
-)
+__all__ = [
+    "authorize",
+    "classify_risk",
+    "create_request",
+    "has_authorization",
+    "list_authorizations",
+    "review_queue",
+    "review_request",
+    "revoke_authorization",
+]
 
 
-def classify_risk(category: str | None) -> str:
-    """风险默认分类：红线类别恒高；分析/草拟/取数/报告/预研等只产草稿的默认低。"""
-    return RISK_HIGH if category in _HIGH_RISK_CATEGORIES else RISK_LOW
+def _authorization_dict(item: CollaborationAuthorizationResult) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "source_department_id": str(item.source_department_id),
+        "target_department_id": str(item.target_department_id),
+        "collab_type": item.collab_type,
+        "is_active": item.is_active,
+    }
 
 
-# ---- 既定工作流授权 ----
+def _request_dict(item: CollaborationRequestResult) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "source_department_id": (
+            str(item.source_department_id) if item.source_department_id else None
+        ),
+        "target_department_id": str(item.target_department_id),
+        "title": item.title,
+        "summary": item.summary,
+        "category": item.category,
+        "risk_level": item.risk_level,
+        "status": item.status,
+        "requested_by": str(item.requested_by) if item.requested_by else None,
+        "reviewed_by": str(item.reviewed_by) if item.reviewed_by else None,
+        "review_note": item.review_note,
+        "create_time": item.create_time.isoformat(),
+    }
+
 
 async def authorize(
     db: AsyncSession,
@@ -44,42 +71,31 @@ async def authorize(
     target_department_id: uuid.UUID,
     collab_type: str,
     authorized_by: uuid.UUID | None,
-) -> CollabAuthorization:
-    """目标部门预授权源部门某类协作通道。"""
-    a = CollabAuthorization(
+) -> CollaborationAuthorizationResult:
+    return await operations.authorize(
+        db,
         source_department_id=source_department_id,
         target_department_id=target_department_id,
-        collab_type=collab_type, authorized_by=authorized_by,
+        collab_type=collab_type,
+        authorized_by=authorized_by,
     )
-    db.add(a)
-    await db.commit()
-    await db.refresh(a)
-    return a
 
 
 async def revoke_authorization(db: AsyncSession, auth_id: uuid.UUID) -> None:
-    a = await db.get(CollabAuthorization, auth_id)
-    if a is None or a.is_delete:
-        raise ResourceNotFound("授权不存在")
-    a.is_delete = True
-    await db.commit()
+    try:
+        await operations.revoke_authorization(db, auth_id)
+    except CollaborationAuthorizationNotFound as exc:
+        raise ResourceNotFound(str(exc)) from exc
 
 
 async def list_authorizations(
     db: AsyncSession, *, target_department_id: uuid.UUID | None = None
 ) -> list[dict[str, Any]]:
-    stmt = select(CollabAuthorization).where(CollabAuthorization.is_delete.is_(False))
-    if target_department_id is not None:
-        stmt = stmt.where(CollabAuthorization.target_department_id == target_department_id)
-    stmt = stmt.order_by(CollabAuthorization.create_time.desc())
-    return [
-        {
-            "id": str(a.id), "source_department_id": str(a.source_department_id),
-            "target_department_id": str(a.target_department_id),
-            "collab_type": a.collab_type, "is_active": a.is_active,
-        }
-        for a in (await db.execute(stmt)).scalars()
-    ]
+    items = await operations.list_authorizations(
+        db,
+        target_department_id=target_department_id,
+    )
+    return [_authorization_dict(item) for item in items]
 
 
 async def has_authorization(
@@ -89,30 +105,12 @@ async def has_authorization(
     target_department_id: uuid.UUID,
     collab_type: str,
 ) -> bool:
-    """是否存在既定工作流授权（结构判定；自动分发链留未来）。"""
-    stmt = select(CollabAuthorization.id).where(
-        CollabAuthorization.source_department_id == source_department_id,
-        CollabAuthorization.target_department_id == target_department_id,
-        CollabAuthorization.collab_type == collab_type,
-        CollabAuthorization.is_active.is_(True),
-        CollabAuthorization.is_delete.is_(False),
+    return await operations.has_authorization(
+        db,
+        source_department_id=source_department_id,
+        target_department_id=target_department_id,
+        collab_type=collab_type,
     )
-    return (await db.execute(stmt)).first() is not None
-
-
-# ---- 主管复核队列 ----
-
-def _req_dict(r: CollabRequest) -> dict[str, Any]:
-    return {
-        "id": str(r.id),
-        "source_department_id": str(r.source_department_id) if r.source_department_id else None,
-        "target_department_id": str(r.target_department_id),
-        "title": r.title, "summary": r.summary, "category": r.category,
-        "risk_level": r.risk_level, "status": r.status,
-        "requested_by": str(r.requested_by) if r.requested_by else None,
-        "reviewed_by": str(r.reviewed_by) if r.reviewed_by else None,
-        "review_note": r.review_note, "create_time": r.create_time.isoformat(),
-    }
 
 
 async def create_request(
@@ -126,44 +124,32 @@ async def create_request(
     risk_level: str | None = None,
     requested_by: uuid.UUID | None = None,
     idempotency_key: str | None = None,
-) -> CollabRequest:
-    """发起跨部门协作请求入复核队列（risk_level 省略时按 category 自动分级）。"""
-    if idempotency_key:
-        existing = (
-            await db.execute(
-                select(CollabRequest).where(
-                    CollabRequest.idempotency_key == idempotency_key,
-                    CollabRequest.is_delete.is_(False),
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing
-    r = CollabRequest(
-        source_department_id=source_department_id,
+) -> CollaborationRequestResult:
+    return await operations.create_request(
+        db,
         target_department_id=target_department_id,
-        title=title, summary=summary, category=category,
-        risk_level=risk_level or classify_risk(category),
+        title=title,
+        source_department_id=source_department_id,
+        summary=summary,
+        category=category,
+        risk_level=risk_level,
         requested_by=requested_by,
         idempotency_key=idempotency_key,
     )
-    db.add(r)
-    await db.commit()
-    await db.refresh(r)
-    return r
 
 
 async def review_queue(
-    db: AsyncSession, *, supervisor_user_id: uuid.UUID, is_admin: bool = False
+    db: AsyncSession,
+    *,
+    supervisor_user_id: uuid.UUID,
+    is_admin: bool = False,
 ) -> list[dict[str, Any]]:
-    """某真人主管的待复核队列：目标部门主管=本人的 pending 请求；admin 见全部 pending。"""
-    stmt = select(CollabRequest).where(CollabRequest.status == REQ_PENDING)
-    if not is_admin:
-        stmt = stmt.join(
-            SysDepartment, SysDepartment.id == CollabRequest.target_department_id
-        ).where(SysDepartment.supervisor_user_id == supervisor_user_id)
-    stmt = stmt.order_by(CollabRequest.create_time)
-    return [_req_dict(r) for r in (await db.execute(stmt)).scalars()]
+    items = await operations.review_queue(
+        db,
+        supervisor_user_id=supervisor_user_id,
+        is_admin=is_admin,
+    )
+    return [_request_dict(item) for item in items]
 
 
 async def review_request(
@@ -173,18 +159,16 @@ async def review_request(
     decision: str,
     reviewer_id: uuid.UUID,
     note: str | None = None,
-) -> CollabRequest:
-    """主管复核：approve/reject（红线：只是分发闸门，产出生效仍走真人验收）。"""
-    if decision not in ("approve", "reject"):
-        raise RuleViolation("decision 仅支持 approve/reject")
-    r = await db.get(CollabRequest, request_id)
-    if r is None or r.is_delete:
-        raise ResourceNotFound("协作请求不存在")
-    if r.status != REQ_PENDING:
-        raise RuleViolation(f"请求当前状态 {r.status}，不可复核")
-    r.status = REQ_APPROVED if decision == "approve" else REQ_REJECTED
-    r.reviewed_by = reviewer_id
-    r.review_note = note
-    await db.commit()
-    await db.refresh(r)
-    return r
+) -> CollaborationRequestResult:
+    try:
+        return await operations.review_request(
+            db,
+            request_id,
+            decision=decision,
+            reviewer_id=reviewer_id,
+            note=note,
+        )
+    except CollaborationRequestNotFound as exc:
+        raise ResourceNotFound(str(exc)) from exc
+    except (CollaborationReviewNotAllowed, InvalidReviewDecision) as exc:
+        raise RuleViolation(str(exc)) from exc

@@ -4,19 +4,48 @@
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.foundations.access_control.entrypoints.operations import (
+    visible_knowledge_ids,
+)
+from app.contexts.foundations.governance.audit_trail.public import (
+    AppendAuditRecordCommand,
+    append_audit_record,
+)
+from app.contexts.foundations.identity.contracts import Principal, PrincipalType
+from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
+    IndexFeishuDocumentCommand,
+    IndexFileCommand,
+    IndexTextCommand,
+)
+from app.contexts.foundations.knowledge.knowledge_indexing.public import (
+    index_feishu_document,
+    index_file,
+    list_documents,
+    move_document,
+    remove_document_index,
+)
+from app.contexts.foundations.knowledge.knowledge_indexing.public import (
+    index_text as index_text_document,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
+    AnswerKnowledgeQuery,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.public import (
+    answer_knowledge,
+)
+from app.contexts.foundations.knowledge.wiki_management.public import (
+    get_default_knowledge_base,
+    get_knowledge_base,
+)
 from app.contexts.shared_kernel import RuleViolation
 from app.core.database import get_db
-from app.knowledge import ingest, retrieval
-from app.models.knowledge import KnowledgeFile
-from app.models.system import SysUser
 from app.platform.http_runtime import ok
 from app.schemas.knowledge import (
     AskRequest,
@@ -25,13 +54,11 @@ from app.schemas.knowledge import (
     FileOut,
     TextIngestRequest,
 )
-from app.services import audit_service, permission_service
-from app.services.knowledge_base_service import get_default_kb, get_kb
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
+Manager = Annotated[Any, Depends(require_roles("admin", "executive"))]
 
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB 上限，防大文件读入内存 OOM（nginx 另有 50m 兜底）
 
@@ -39,8 +66,8 @@ _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB 上限，防大文件读入内存 O
 async def _resolve_kb_id(db: AsyncSession, provided: uuid.UUID | None) -> uuid.UUID:
     """缺省落公司公共库；显式传入则校验存在（不存在→404，避免 FK 违例 500）。"""
     if provided is None:
-        return (await get_default_kb(db)).id
-    return (await get_kb(db, provided)).id
+        return (await get_default_knowledge_base(db)).id
+    return (await get_knowledge_base(db, provided)).id
 
 
 @router.post("/files")
@@ -62,14 +89,16 @@ async def upload_file(
             f"文件过大（>{_MAX_UPLOAD_BYTES // 1024 // 1024}MB），请压缩或拆分后上传"
         )
     kb_id = await _resolve_kb_id(db, knowledge_base_id)
-    kf = await ingest.ingest_file(
+    kf = await index_file(
         db,
-        file_name=file.filename or "未命名",
-        content=content,
-        mime_type=file.content_type,
-        uploader_id=manager.id,
-        knowledge_base_id=kb_id,
-        category=category,
+        IndexFileCommand(
+            file_name=file.filename or "未命名",
+            content=content,
+            mime_type=file.content_type,
+            uploader_id=manager.id,
+            knowledge_base_id=kb_id,
+            category=category,
+        ),
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
@@ -78,9 +107,15 @@ async def upload_file(
 async def ingest_text(body: TextIngestRequest, db: DB, manager: Manager) -> dict:
     """粘贴正文入库。缺省入公司公共库。"""
     kb_id = await _resolve_kb_id(db, body.knowledge_base_id)
-    kf = await ingest.ingest_text(
-        db, title=body.title, text=body.text, uploader_id=manager.id,
-        knowledge_base_id=kb_id, category=body.category,
+    kf = await index_text_document(
+        db,
+        IndexTextCommand(
+            title=body.title,
+            text=body.text,
+            uploader_id=manager.id,
+            knowledge_base_id=kb_id,
+            category=body.category,
+        ),
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
@@ -89,9 +124,14 @@ async def ingest_text(body: TextIngestRequest, db: DB, manager: Manager) -> dict
 async def ingest_feishu(body: FeishuIngestRequest, db: DB, manager: Manager) -> dict:
     """拉取飞书云文档入库。缺省入公司公共库。"""
     kb_id = await _resolve_kb_id(db, body.knowledge_base_id)
-    kf = await ingest.ingest_feishu_doc(
-        db, document_id=body.document_id, uploader_id=manager.id,
-        knowledge_base_id=kb_id, category=body.category,
+    kf = await index_feishu_document(
+        db,
+        IndexFeishuDocumentCommand(
+            document_id=body.document_id,
+            uploader_id=manager.id,
+            knowledge_base_id=kb_id,
+            category=body.category,
+        ),
     )
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
@@ -103,20 +143,14 @@ async def list_files(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
     """文档列表（未删除，按上传时间倒序，默认最多 100 条）。"""
-    stmt = (
-        select(KnowledgeFile)
-        .where(KnowledgeFile.is_delete.is_(False))
-        .order_by(KnowledgeFile.create_time.desc())
-        .limit(limit)
-    )
-    files = list((await db.execute(stmt)).scalars())
+    files = await list_documents(db, limit=limit)
     return ok([FileOut.model_validate(f).model_dump(mode="json") for f in files])
 
 
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: uuid.UUID, db: DB, _: Manager) -> dict:
     """删除文档（软删文件 + 回收其向量）。"""
-    await ingest.delete_file(db, file_id)
+    await remove_document_index(db, file_id)
     return ok()
 
 
@@ -129,21 +163,48 @@ class MoveFileRequest(BaseModel):
 @router.patch("/files/{file_id}/move")
 async def move_file(file_id: uuid.UUID, body: MoveFileRequest, db: DB, _: Manager) -> dict:
     """把文档移到另一个知识库（改归属库）。"""
-    kf = await ingest.move_file(db, file_id, body.knowledge_base_id)
+    kf = await move_document(db, file_id, body.knowledge_base_id)
     return ok(FileOut.model_validate(kf).model_dump(mode="json"))
 
 
 @router.post("/ask")
 async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
     """知识库问答（带来源溯源）。按请求用户可见范围隔离检索（契约② scope ∪ grant）。"""
-    ids = await permission_service.visible_kb_ids(db, user)
+    principal = Principal(
+        principal_type=PrincipalType.USER,
+        principal_id=user.id,
+        role_code=user.role_code,
+        department_id=user.department_id,
+        is_active=user.is_active,
+    )
+    ids = await visible_knowledge_ids(db, principal=principal)
     # 红线监督（决策⑥）：admin 全库可见=跨部门检索，每次落审计
     if user.role_code == "admin":
-        await audit_service.audit(
-            db, actor_id=user.id, actor_role=user.role_code,
-            action="knowledge.cross_dept_search", summary=f"跨部门检索：{body.query[:60]}",
+        await append_audit_record(
+            db,
+            AppendAuditRecordCommand(
+                actor_id=user.id,
+                actor_role=user.role_code,
+                action="knowledge.cross_dept_search",
+                summary=f"跨部门检索：{body.query[:60]}",
+            )
         )
-    result = await retrieval.answer(
-        db, body.query, body.top_k, user_id=user.id, visible_kb_ids=ids
+    result = await answer_knowledge(
+        db,
+        AnswerKnowledgeQuery(
+            query=body.query,
+            top_k=body.top_k,
+            principal_id=user.id,
+            visible_knowledge_base_ids=tuple(ids),
+        ),
     )
-    return ok(AskResponse(**result).model_dump(mode="json"))
+    sources = [
+        {
+            "index": citation.index,
+            "file_id": str(citation.document_id),
+            "file_name": citation.document_name,
+            "chunk_index": citation.chunk_index,
+        }
+        for citation in result.citations
+    ]
+    return ok(AskResponse(answer=result.answer, sources=sources).model_dump(mode="json"))

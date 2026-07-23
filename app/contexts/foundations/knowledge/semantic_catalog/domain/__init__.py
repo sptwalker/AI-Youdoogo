@@ -1,0 +1,1 @@
+"""Semantic Catalog domain policy."""

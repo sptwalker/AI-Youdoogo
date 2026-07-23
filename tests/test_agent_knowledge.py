@@ -9,8 +9,12 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base
-from app.knowledge import retrieval
-from app.knowledge.scope import resolve_agent_visible_kb_ids
+from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import (
+    sqlalchemy_retrieval as retrieval,
+)
+from app.contexts.foundations.knowledge.wiki_management.public import (
+    agent_visible_knowledge_base_ids,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.knowledge import KnowledgeBase
@@ -48,7 +52,9 @@ async def test_agent_visible_company_and_own_dept(db: AsyncSession) -> None:
     db.add_all([kb_co, kb_a, kb_b, kb_p])
     await db.commit()
 
-    ids = await resolve_agent_visible_kb_ids(db, department_id=dept_a, owner_agent_id=agent_id)
+    ids = await agent_visible_knowledge_base_ids(
+        db, department_id=dept_a, owner_agent_id=agent_id
+    )
     assert kb_co.id in ids and kb_a.id in ids and kb_p.id in ids
     assert kb_b.id not in ids  # 他部门库对本部门 AI 不可见
 

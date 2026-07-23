@@ -12,6 +12,7 @@ from app.services.workflow_repository import (
 from app.services.workflow_state import (
     StepClaimResult,
     accept_human_step,
+    apply_task_decision,
     claim_step,
     claim_step_result,
     complete_step,
@@ -25,6 +26,7 @@ __all__ = [
     "PlanStepLike",
     "StepClaimResult",
     "accept_human_step",
+    "apply_task_decision",
     "append_event",
     "claim_step",
     "claim_step_result",

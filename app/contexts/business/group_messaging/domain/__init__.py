@@ -1,0 +1,1 @@
+"""Group Messaging domain model."""

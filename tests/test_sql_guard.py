@@ -2,7 +2,10 @@
 
 import pytest
 
-from app.services.sql_guard import SqlRejected, check_sql
+from app.contexts.foundations.integration.governed_data_query import (
+    SqlRejected,
+    check_sql,
+)
 
 _VIEWS = {"v_event_4", "v_event_5"}
 
@@ -34,8 +37,10 @@ def test_small_limit_kept() -> None:
 
 
 def test_real_td_metric_query_passes() -> None:
-    sql = ('select "$part_event" ev, count(distinct "#user_id") dau '
-           "from v_event_4 where \"$part_date\"='2026-07-15' group by 1")
+    sql = (
+        'select "$part_event" ev, count(distinct "#user_id") dau '
+        "from v_event_4 where \"$part_date\"='2026-07-15' group by 1"
+    )
     out = _ok(sql)
     assert "v_event_4" in out and "LIMIT" in out.upper()
 
@@ -75,23 +80,27 @@ def test_partition_injected_with_existing_event_filter() -> None:
 
 
 # ── 拒绝:写/命令 ────────────────────────────────────────
-@pytest.mark.parametrize("sql", [
-    "DROP TABLE v_event_4",
-    "INSERT INTO v_event_4 VALUES (1)",
-    "UPDATE v_event_4 SET x=1",
-    "DELETE FROM v_event_4",
-    "CREATE TABLE t (a int)",
-    "ALTER TABLE v_event_4 ADD COLUMN c int",
-    "CALL some_proc()",
-])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DROP TABLE v_event_4",
+        "INSERT INTO v_event_4 VALUES (1)",
+        "UPDATE v_event_4 SET x=1",
+        "DELETE FROM v_event_4",
+        "CREATE TABLE t (a int)",
+        "ALTER TABLE v_event_4 ADD COLUMN c int",
+        "CALL some_proc()",
+    ],
+)
 def test_non_select_rejected(sql: str) -> None:
     assert _rejected(sql)
 
 
 # ── 拒绝:注入 / 越权 / 空 ───────────────────────────────
 def test_multi_statement_rejected() -> None:
-    assert "多语句" in _rejected("SELECT 1 FROM v_event_4; DROP TABLE v_event_4") or \
-        _rejected("SELECT 1 FROM v_event_4; DROP TABLE v_event_4")
+    assert "多语句" in _rejected("SELECT 1 FROM v_event_4; DROP TABLE v_event_4") or _rejected(
+        "SELECT 1 FROM v_event_4; DROP TABLE v_event_4"
+    )
 
 
 def test_unlisted_table_rejected() -> None:

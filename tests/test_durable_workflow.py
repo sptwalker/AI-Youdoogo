@@ -8,13 +8,23 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
+    SQLAlchemyTaskManagementAdapter,
+    task_decision_from_payload,
+)
+from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
+    WORKFLOW_PROGRESSED_V1,
+)
+from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
+    workflow_progress_from_payload,
+)
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.system import SysUser
-from app.models.task import TaskCard
+from app.models.task import TaskCard, TaskCardLog
 from app.models.workflow import (
     OUTBOX_DONE,
     OUTBOX_PENDING,
@@ -247,6 +257,122 @@ async def test_claim_result_distinguishes_busy_and_terminal(
             db, step.id, worker_id="worker-b", lease_seconds=60
         )
         assert terminal.status == "terminal"
+
+
+async def test_stale_finalize_is_rejected_by_claimed_version(
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with maker() as db:
+        user, _ = await _seed(db)
+        run = await _create_run(db, user)
+        step = (await workflow_service.list_steps(db, run.id))[0]
+        claimed = await workflow_service.claim_step(
+            db, step.id, worker_id="worker-a", lease_seconds=60
+        )
+        assert claimed is not None
+        await db.commit()
+        claimed_version = claimed.version
+        await db.execute(
+            update(WorkflowStep)
+            .where(WorkflowStep.id == claimed.id)
+            .values(
+                version=claimed_version + 1,
+                attempt=claimed.attempt + 1,
+                lease_owner="worker-b",
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+
+        assert not await workflow_service.complete_step(
+            db,
+            claimed,
+            worker_id="worker-a",
+            output_data={},
+            result_content="stale",
+            succeeded=True,
+        )
+
+
+async def test_workflow_projection_replay_is_idempotent(
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with maker() as db:
+        user, _ = await _seed(db)
+        run = await _create_run(db, user)
+        event = (
+            await db.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == WORKFLOW_PROGRESSED_V1,
+                    OutboxEvent.aggregate_id == run.id,
+                )
+            )
+        ).scalars().first()
+        assert event is not None
+        before = (
+            await db.execute(
+                select(func.count()).select_from(TaskCardLog)
+            )
+        ).scalar_one()
+        adapter = SQLAlchemyTaskManagementAdapter(db)
+        assert not await adapter.apply(workflow_progress_from_payload(event.payload))
+        assert not await adapter.apply(workflow_progress_from_payload(event.payload))
+        after = (
+            await db.execute(
+                select(func.count()).select_from(TaskCardLog)
+            )
+        ).scalar_one()
+        assert after == before
+
+
+async def test_duplicate_task_decision_resumes_workflow_once(
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with maker() as db:
+        user, _ = await _seed(db)
+        run = await _create_run(db, user, first_red_line=True)
+        step = (await workflow_service.list_steps(db, run.id))[0]
+        claimed = await workflow_service.claim_step(
+            db, step.id, worker_id="worker", lease_seconds=60
+        )
+        assert claimed is not None
+        assert await workflow_service.complete_step(
+            db,
+            claimed,
+            worker_id="worker",
+            output_data={},
+            result_content="draft",
+            succeeded=True,
+        )
+        await db.commit()
+        card = await task_service.get_task(db, step.task_card_id)  # type: ignore[arg-type]
+        await task_service.transition(
+            db, card.id, task_flow.ACCEPTED, operator_id=user.id, note="真人验收"
+        )
+        decision_outbox = (
+            await db.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "task.decision-recorded.v1"
+                )
+            )
+        ).scalar_one()
+        decision = task_decision_from_payload(decision_outbox.payload)
+
+        first = await workflow_service.apply_task_decision(db, decision)
+        second = await workflow_service.apply_task_decision(db, decision)
+
+        assert first is not None and second is None
+        human_events = list(
+            (
+                await db.execute(
+                    select(WorkflowEvent).where(
+                        WorkflowEvent.workflow_step_id == step.id,
+                        WorkflowEvent.event_type == "step.human_accepted",
+                    )
+                )
+            ).scalars()
+        )
+        assert len(human_events) == 1
 
 
 async def test_human_accept_enqueues_resume_without_running_downstream(

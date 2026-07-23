@@ -5,22 +5,25 @@
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.foundations.governance.audit_trail.public import (
+    AppendAuditRecordCommand,
+    append_audit_record,
+)
+from app.contexts.foundations.knowledge.semantic_catalog import public as semantic_catalog
 from app.core.database import get_db
-from app.models.system import SysUser
 from app.platform.http_runtime import ok
-from app.services import audit_service, semantic_service
 
 router = APIRouter(prefix="/semantic-terms", tags=["semantic"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Admin = Annotated[SysUser, Depends(require_roles("admin"))]
+Admin = Annotated[Any, Depends(require_roles("admin"))]
 
 
 class TermCreate(BaseModel):
@@ -52,17 +55,24 @@ class TermUpdate(BaseModel):
 @router.get("")
 async def list_terms(db: DB, _: CurrentUser) -> dict:
     """术语字典列表（未删除，按类型+规范名）。"""
-    return ok(await semantic_service.list_terms(db))
+    return ok([term.to_dict() for term in await semantic_catalog.list_terms(db)])
 
 
 @router.post("")
 async def create_term(body: TermCreate, db: DB, admin: Admin) -> dict:
     """新建术语 → 落审计。"""
-    term = await semantic_service.create_term(db, body.model_dump())
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="semantic.create",
-        summary=f"新建术语：{body.canonical_name}",
-        target_type="semantic_term", target_id=uuid.UUID(term["id"]),
+    snapshot = await semantic_catalog.create_term(db, body.model_dump())
+    term = snapshot.to_dict()
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="semantic.create",
+            summary=f"新建术语：{body.canonical_name}",
+            target_type="semantic_term",
+            target_id=snapshot.id,
+        )
     )
     return ok(term)
 
@@ -70,13 +80,20 @@ async def create_term(body: TermCreate, db: DB, admin: Admin) -> dict:
 @router.put("/{term_id}")
 async def update_term(term_id: uuid.UUID, body: TermUpdate, db: DB, admin: Admin) -> dict:
     """改术语（仅传字段）→ 落审计。"""
-    term = await semantic_service.update_term(
+    snapshot = await semantic_catalog.update_term(
         db, term_id, body.model_dump(exclude_unset=True)
     )
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="semantic.update",
-        summary=f"改术语：{term['canonical_name']}",
-        target_type="semantic_term", target_id=term_id,
+    term = snapshot.to_dict()
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="semantic.update",
+            summary=f"改术语：{term['canonical_name']}",
+            target_type="semantic_term",
+            target_id=term_id,
+        )
     )
     return ok(term)
 
@@ -84,9 +101,16 @@ async def update_term(term_id: uuid.UUID, body: TermUpdate, db: DB, admin: Admin
 @router.delete("/{term_id}")
 async def delete_term(term_id: uuid.UUID, db: DB, admin: Admin) -> dict:
     """删术语（软删）→ 落审计。"""
-    await semantic_service.delete_term(db, term_id)
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="semantic.delete",
-        summary="删除术语", target_type="semantic_term", target_id=term_id,
+    await semantic_catalog.delete_term(db, term_id)
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="semantic.delete",
+            summary="删除术语",
+            target_type="semantic_term",
+            target_id=term_id,
+        )
     )
     return ok()

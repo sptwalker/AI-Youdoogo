@@ -6,12 +6,13 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.work_desktop import public as work_desktop
 from app.models import Base
 from app.models.meeting import MeetingResolution
 from app.models.proposal import APPROVED, REVIEWED, ProposalCard
 from app.models.system import SysDepartment, SysUser
 from app.models.task import TaskCard
-from app.services import collab_service, desktop_service
+from app.services import collab_service
 from app.services.task_flow import ACCEPTED, REPORTED
 
 
@@ -30,6 +31,15 @@ def _user(role: str) -> SysUser:
     return SysUser(username=f"u{uuid.uuid4().hex[:6]}", password_hash="x", role_code=role)
 
 
+def _principal(user: SysUser) -> work_desktop.DesktopPrincipal:
+    return work_desktop.DesktopPrincipal(
+        id=user.id,
+        display_name=user.real_name or user.username,
+        role_code=user.role_code,
+        department_id=user.department_id,
+    )
+
+
 def _kinds(desktop: dict) -> set[str]:
     return {p["kind"] for p in desktop["pending"]}
 
@@ -42,9 +52,9 @@ async def test_task_scoped_per_user(db: AsyncSession) -> None:
     db.add(TaskCard(title="A的任务", task_type="manual", status=REPORTED, creator_id=a.id))
     await db.commit()
 
-    a_desk = await desktop_service.get_desktop(db, a)
-    b_desk = await desktop_service.get_desktop(db, b)
-    admin_desk = await desktop_service.get_desktop(db, admin)
+    a_desk = await work_desktop.get_desktop(db, _principal(a))
+    b_desk = await work_desktop.get_desktop(db, _principal(b))
+    admin_desk = await work_desktop.get_desktop(db, _principal(admin))
     a_task_ids = [p["id"] for p in a_desk["pending"] if p["kind"] == "task"]
     assert len(a_task_ids) == 1  # A 见自己创建的
     assert not [p for p in b_desk["pending"] if p["kind"] == "task"]  # B 不见
@@ -56,13 +66,22 @@ async def test_proposal_resolution_only_managers(db: AsyncSession) -> None:
     member, execu = _user("member"), _user("executive")
     db.add_all([member, execu])
     await db.commit()
-    db.add(ProposalCard(code="P1", title="提案", background="b", plan="p",
-                        status=REVIEWED, creator_id=member.id))
+    db.add(
+        ProposalCard(
+            code="P1", title="提案", background="b", plan="p", status=REVIEWED, creator_id=member.id
+        )
+    )
     db.add(MeetingResolution(meeting_id=uuid.uuid4(), content="决议", is_confirmed=False))
     await db.commit()
 
-    assert _kinds(await desktop_service.get_desktop(db, execu)) >= {"proposal", "resolution"}
-    assert not _kinds(await desktop_service.get_desktop(db, member)) & {"proposal", "resolution"}
+    assert _kinds(await work_desktop.get_desktop(db, _principal(execu))) >= {
+        "proposal",
+        "resolution",
+    }
+    assert not _kinds(await work_desktop.get_desktop(db, _principal(member))) & {
+        "proposal",
+        "resolution",
+    }
 
 
 async def test_collab_scoped_by_supervisor(db: AsyncSession) -> None:
@@ -75,8 +94,8 @@ async def test_collab_scoped_by_supervisor(db: AsyncSession) -> None:
     await db.commit()
     await collab_service.create_request(db, target_department_id=dept.id, title="跨部门请求")
 
-    assert "collab" in _kinds(await desktop_service.get_desktop(db, boss))
-    assert "collab" not in _kinds(await desktop_service.get_desktop(db, other))
+    assert "collab" in _kinds(await work_desktop.get_desktop(db, _principal(boss)))
+    assert "collab" not in _kinds(await work_desktop.get_desktop(db, _principal(other)))
 
 
 async def test_settled_not_pending_and_my_tasks(db: AsyncSession) -> None:
@@ -88,7 +107,7 @@ async def test_settled_not_pending_and_my_tasks(db: AsyncSession) -> None:
     db.add(TaskCard(title="进行中", task_type="manual", status=REPORTED, creator_id=a.id))
     await db.commit()
 
-    desk = await desktop_service.get_desktop(db, a)
+    desk = await work_desktop.get_desktop(db, _principal(a))
     assert [p["title"] for p in desk["pending"] if p["kind"] == "task"] == ["进行中"]
     assert [t["title"] for t in desk["my_tasks"]] == ["进行中"]  # 终态 accepted 被排除
 
@@ -97,7 +116,15 @@ async def test_approved_proposal_not_pending(db: AsyncSession) -> None:
     admin = _user("admin")
     db.add(admin)
     await db.commit()
-    db.add(ProposalCard(code="P2", title="已通过", background="b", plan="p",
-                        status=APPROVED, creator_id=admin.id))
+    db.add(
+        ProposalCard(
+            code="P2",
+            title="已通过",
+            background="b",
+            plan="p",
+            status=APPROVED,
+            creator_id=admin.id,
+        )
+    )
     await db.commit()
-    assert "proposal" not in _kinds(await desktop_service.get_desktop(db, admin))
+    assert "proposal" not in _kinds(await work_desktop.get_desktop(db, _principal(admin)))

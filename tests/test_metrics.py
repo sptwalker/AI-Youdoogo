@@ -6,12 +6,13 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.bootstrap.observability import readiness, render_metrics
 from app.core import shared_state
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.ai_provider import AiProvider
 from app.models.llm_log import LlmCallLog
-from app.services import metrics_service
+from app.services import metrics_service as legacy_metrics_service
 
 
 @pytest.fixture(autouse=True)
@@ -39,7 +40,7 @@ async def test_render_metrics_prometheus_format(db: AsyncSession) -> None:
         LlmCallLog(role="daily", model="m", total_tokens=50, status="failed"),
     ])
     await db.commit()
-    out = await metrics_service.render_metrics(db)
+    out = await render_metrics(db)
     assert "# TYPE youdoo_llm_calls_total counter" in out
     assert 'youdoo_llm_calls_total{status="success"} 1' in out
     assert 'youdoo_llm_calls_total{status="failed"} 1' in out
@@ -49,7 +50,7 @@ async def test_render_metrics_prometheus_format(db: AsyncSession) -> None:
 
 async def test_render_metrics_empty_db(db: AsyncSession) -> None:
     """空库也能渲染（至少 youdoo_up）。"""
-    out = await metrics_service.render_metrics(db)
+    out = await render_metrics(db)
     assert "youdoo_up 1" in out
 
 
@@ -62,7 +63,7 @@ async def test_render_metrics_counts_agent_tasks(db: AsyncSession) -> None:
         AgentTaskRecord(agent_role_id=role.id, task_type="t", status="success"),
     ])
     await db.commit()
-    out = await metrics_service.render_metrics(db)
+    out = await render_metrics(db)
     assert 'youdoo_agent_tasks_total{status="success"} 2' in out
 
 
@@ -73,12 +74,17 @@ async def test_readiness_ready_with_active_card(db: AsyncSession) -> None:
         api_key="sk", model="m", is_active=True,
     ))
     await db.commit()
-    ready, detail = await metrics_service.readiness(db)
+    ready, detail = await readiness(db)
     assert ready is True and detail["ai_cards_active"] == 1
 
 
 async def test_readiness_not_ready_no_card(db: AsyncSession) -> None:
     """无 active 卡片 → 未就绪（AI 不可用）。"""
-    ready, detail = await metrics_service.readiness(db)
+    ready, detail = await readiness(db)
     assert ready is False and detail["ai_cards_active"] == 0
     assert "reason" in detail
+
+
+def test_legacy_service_exports_bootstrap_observability_functions() -> None:
+    assert legacy_metrics_service.render_metrics is render_metrics
+    assert legacy_metrics_service.readiness is readiness

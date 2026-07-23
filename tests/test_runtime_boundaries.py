@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import ast
+from functools import cache
 from pathlib import Path
 
-from app.agents import skill_registry, skills, tool_dispatcher
+import app.agents.skill_registry as skill_registry
+import app.agents.skills as skills
+import app.agents.tool_dispatcher as tool_dispatcher
 from app.services import (
     orchestration_service,
     workflow_projection,
@@ -13,10 +15,13 @@ from app.services import (
     workflow_service,
     workflow_state,
 )
+from scripts.import_graph import ImportGraph, build_import_graph, format_cycles
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
 RUNTIME_MODULES = {
+    "app.bootstrap.workflow_events",
+    "app.bootstrap.workflow_worker",
     "app.agents.base",
     "app.agents.contracts",
     "app.agents.legacy_skill_adapters",
@@ -24,7 +29,8 @@ RUNTIME_MODULES = {
     "app.agents.skills",
     "app.agents.tool_dispatcher",
     "app.agents.workflow_engine",
-    "app.services.legacy_orchestration",
+    "app.contexts.business.task_management.infrastructure.legacy_workflow",
+    "app.contexts.business.task_management.legacy_public",
     "app.services.orchestration_service",
     "app.services.workflow_event_handler",
     "app.services.workflow_planning",
@@ -38,71 +44,60 @@ RUNTIME_MODULES = {
 }
 
 
-def _path(module: str) -> Path:
-    return ROOT.joinpath(*module.split(".")).with_suffix(".py")
+@cache
+def _app_graph() -> ImportGraph:
+    return build_import_graph(APP)
 
 
 def _imports(module: str) -> set[str]:
-    tree = ast.parse(_path(module).read_text(encoding="utf-8"))
-    known = {
-        ".".join(path.relative_to(ROOT).with_suffix("").parts)
-        for path in APP.rglob("*.py")
-    }
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found.update(alias.name for alias in node.names if alias.name in known)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module in known:
-                found.add(node.module)
-            found.update(
-                child
-                for alias in node.names
-                if (child := f"{node.module}.{alias.name}") in known
-            )
-    return found
-
-
-def _find_cycle(graph: dict[str, set[str]]) -> list[str] | None:
-    visiting: list[str] = []
-    visited: set[str] = set()
-
-    def visit(module: str) -> list[str] | None:
-        if module in visiting:
-            start = visiting.index(module)
-            return [*visiting[start:], module]
-        if module in visited:
-            return None
-        visiting.append(module)
-        for dependency in graph[module]:
-            cycle = visit(dependency)
-            if cycle:
-                return cycle
-        visiting.pop()
-        visited.add(module)
-        return None
-
-    for module in sorted(graph):
-        cycle = visit(module)
-        if cycle:
-            return cycle
-    return None
+    return set(_app_graph().edges[module])
 
 
 def test_runtime_modules_are_acyclic() -> None:
-    graph = {
-        module: _imports(module) & RUNTIME_MODULES for module in RUNTIME_MODULES
-    }
-    assert _find_cycle(graph) is None
+    app_graph = _app_graph()
+    graph = ImportGraph(
+        modules={module: app_graph.modules[module] for module in RUNTIME_MODULES},
+        edges={
+            module: frozenset(app_graph.edges[module] & RUNTIME_MODULES)
+            for module in RUNTIME_MODULES
+        },
+    )
+    cycles = graph.cycles()
+    assert cycles == (), format_cycles(cycles)
 
 
 def test_workflow_and_skill_facades_preserve_public_exports() -> None:
+    from app.bootstrap import workflow_events
+    from app.bootstrap import workflow_worker as bootstrap_worker
+    from app.services import workflow_event_handler
+    from app.services import workflow_worker as legacy_worker
+
     assert workflow_service.create_workflow is workflow_repository.create_workflow
     assert workflow_service.progress is workflow_projection.progress
     assert workflow_service.claim_step_result is workflow_state.claim_step_result
     assert skills.REGISTRY is skill_registry.REGISTRY
     assert skills.ToolDispatcher is tool_dispatcher.ToolDispatcher
     assert orchestration_service.PlanStep.__module__ == "app.services.workflow_planning"
+    assert workflow_event_handler.handle_event is workflow_events.handle_event
+    assert (
+        legacy_worker.outbox_lease_heartbeat
+        is bootstrap_worker.outbox_lease_heartbeat
+    )
+
+
+def test_bootstrap_worker_skips_intermediate_workflow_facades() -> None:
+    worker_imports = _imports("app.bootstrap.workflow_worker")
+    event_imports = _imports("app.bootstrap.workflow_events")
+    assert not worker_imports & {
+        "app.services.workflow_event_handler",
+        "app.services.workflow_recovery",
+        "app.services.workflow_service",
+    }
+    assert not event_imports & {
+        "app.services.discussion_service",
+        "app.services.workflow_service",
+        "app.services.workflow_step_executor",
+    }
 
 
 def test_skill_services_depend_on_contracts_not_agent_base() -> None:
@@ -128,6 +123,18 @@ def test_langgraph_planner_boundary_cannot_bypass_durable_runtime() -> None:
     assert "app.services.workflow_planning" not in _imports(
         "app.services.workflow_step_executor"
     )
-    engine_source = _path("app.agents.workflow_engine").read_text(encoding="utf-8")
+    engine_source = _app_graph().modules[
+        "app.agents.workflow_engine"
+    ].path.read_text(encoding="utf-8")
     assert "workflow_service.create_workflow" in engine_source
     assert "workflow_service.accept_human_step" in engine_source
+
+
+def test_taskcard_fallback_has_no_intermediate_runtime_facades() -> None:
+    orchestration_imports = _imports("app.services.orchestration_service")
+    assert "app.contexts.business.task_management.legacy_public" in orchestration_imports
+    assert "app.services.legacy_orchestration" not in orchestration_imports
+    assert (
+        "app.contexts.foundations.execution.workflow_runtime.infrastructure.legacy_taskcard_runtime"
+        not in orchestration_imports
+    )

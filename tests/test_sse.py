@@ -36,8 +36,14 @@ async def ctx(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[tuple[AsyncClie
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
-        s.add(SysUser(username="alice", password_hash=hash_password("pass-word-8"),
-                      real_name="爱丽丝", role_code="member"))
+        s.add(
+            SysUser(
+                username="alice",
+                password_hash=hash_password("pass-word-8"),
+                real_name="爱丽丝",
+                role_code="member",
+            )
+        )
         await s.commit()
 
     async def _override_db() -> AsyncGenerator:
@@ -69,7 +75,8 @@ async def test_desktop_chat_sse(ctx: tuple[AsyncClient, object]) -> None:
     token = resp.json()["data"]["access_token"]
 
     async with client.stream(
-        "POST", "/api/v1/desktop/chat",
+        "POST",
+        "/api/v1/desktop/chat",
         json={"message": "在吗", "add_agent_ids": []},
         headers={"Authorization": f"Bearer {token}"},
     ) as r:
@@ -89,12 +96,59 @@ async def test_desktop_chat_sse(ctx: tuple[AsyncClient, object]) -> None:
     async with factory() as s:  # type: ignore[operator]
         n = (
             await s.execute(
-                select(func.count()).select_from(DesktopMessage).where(
-                    DesktopMessage.speaker_type == "ai"
-                )
+                select(func.count())
+                .select_from(DesktopMessage)
+                .where(DesktopMessage.speaker_type == "ai")
             )
         ).scalar_one()
     assert n == 1
+
+
+async def test_desktop_chat_get_preserves_envelope_and_owner_history(
+    ctx: tuple[AsyncClient, object],
+) -> None:
+    client, factory = ctx
+    async with factory() as session:  # type: ignore[operator]
+        alice = (
+            await session.execute(select(SysUser).where(SysUser.username == "alice"))
+        ).scalar_one()
+        other = SysUser(username="bob", password_hash="x", real_name="鲍勃")
+        session.add(other)
+        await session.commit()
+        session.add_all(
+            [
+                DesktopMessage(
+                    owner_user_id=alice.id,
+                    speaker_type="user",
+                    speaker_name="爱丽丝",
+                    content="我的消息",
+                ),
+                DesktopMessage(
+                    owner_user_id=other.id,
+                    speaker_type="user",
+                    speaker_name="鲍勃",
+                    content="别人的消息",
+                ),
+            ]
+        )
+        await session.commit()
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "pass-word-8"},
+    )
+    token = login.json()["data"]["access_token"]
+    response = await client.get(
+        "/api/v1/desktop/chat",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 0
+    assert payload["data"]["assistant"]["name"] == "爱丽丝的助理"
+    assert [message["content"] for message in payload["data"]["messages"]] == ["我的消息"]
+    assert payload["data"]["addable_agents"] == []
 
 
 async def test_desktop_chat_sse_unauthorized(ctx: tuple[AsyncClient, object]) -> None:

@@ -9,13 +9,14 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.meeting_management.entrypoints import operations as meeting_operations
 from app.contexts.shared_kernel import ResourceNotFound
 from app.models import Base
 from app.models.meeting import MeetingInfo
 from app.models.proposal import ProposalCard
 from app.models.system import SysUser
 from app.models.task import TaskCard
-from app.services import meeting_service, permission_service, proposal_service, task_service
+from app.services import permission_service, proposal_service, task_service
 
 
 @pytest.fixture
@@ -122,5 +123,8 @@ async def test_meeting_list_row_filtered(db: AsyncSession) -> None:
         MeetingInfo(title="他部门会", creator_id=uuid.uuid4(), department_id=uuid.uuid4()),
     ])
     await db.commit()
-    seen = await meeting_service.list_meetings(db, viewer=mine)
+    seen = await meeting_operations.list_meetings(
+        db,
+        principal=meeting_operations.principal_from_user(mine),
+    )
     assert {m.title for m in seen} == {"本部门会"}

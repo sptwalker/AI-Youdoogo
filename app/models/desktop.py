@@ -1,7 +1,7 @@
 """工作桌面持久对话消息（专属助理 + 圆桌多AI）。
 
 每个真人一条连续消息流（owner_user_id 归属），桌面展示最近 N 天（默认10）；
-更早的消息由 desktop_chat_service.archive_old 归档进助理 personal KB 后**硬删**，
+更早的消息由 Assistant Conversations 归档用例写入助理 personal KB 后**硬删**，
 故本表只留近期热数据。speaker_name 冗余存发言时的显示名，保证归档/渲染稳定。
 """
 

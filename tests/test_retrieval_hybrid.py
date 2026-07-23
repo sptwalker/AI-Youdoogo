@@ -10,9 +10,13 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.knowledge import retrieval
-from app.knowledge.retrieval import Hit, rrf_fuse
+from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import (
+    sqlalchemy_retrieval as retrieval,
+)
 from app.models import Base
+
+Hit = retrieval.Hit
+rrf_fuse = retrieval.rrf_fuse
 
 
 @pytest.fixture

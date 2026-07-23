@@ -11,8 +11,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
+from app.contexts.business.proposal_management.application.contracts import ProposalViewer
+from app.contexts.business.proposal_management.entrypoints import operations
+from app.contexts.foundations.identity.application.contracts import IdentityUserResult
 from app.core.database import get_db
-from app.models.system import SysUser
 from app.platform.http_runtime import ok
 from app.schemas.proposal import (
     ConvertRequest,
@@ -22,18 +24,17 @@ from app.schemas.proposal import (
     ReviewOut,
 )
 from app.schemas.task import TaskOut
-from app.services import audit_service, permission_service, proposal_service
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Manager = Annotated[SysUser, Depends(require_roles("admin", "executive"))]
+Manager = Annotated[IdentityUserResult, Depends(require_roles("admin", "executive"))]
 
 
 @router.post("")
 async def create_proposal(body: ProposalCreate, db: DB, user: CurrentUser) -> dict:
     """创建提案。"""
-    p = await proposal_service.create_proposal(
+    p = await operations.create_proposal(
         db,
         title=body.title,
         background=body.background,
@@ -54,20 +55,38 @@ async def list_proposals(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
     """提案列表（行级可见性：普通员工只见本人/本部门，管理层全见）。"""
-    items = await proposal_service.list_proposals(db, status=status, limit=limit, viewer=user)
+    items = await operations.list_proposals(
+        db,
+        status=status,
+        limit=limit,
+        viewer=ProposalViewer(
+            id=user.id,
+            role_code=user.role_code,
+            department_id=user.department_id,
+        ),
+    )
     return ok([ProposalOut.model_validate(p).model_dump(mode="json") for p in items])
 
 
 @router.get("/{proposal_id}")
 async def get_proposal(proposal_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
     """提案详情 + 评审记录（行级可见性守卫）。"""
-    p = await proposal_service.get_proposal(db, proposal_id)
-    permission_service.assert_can_see(user, creator_id=p.creator_id, department_id=p.department_id)
-    reviews = await proposal_service.list_reviews(db, proposal_id)
+    detail = await operations.get_proposal_detail(
+        db,
+        proposal_id,
+        viewer=ProposalViewer(
+            id=user.id,
+            role_code=user.role_code,
+            department_id=user.department_id,
+        ),
+    )
     return ok(
         {
-            "proposal": ProposalOut.model_validate(p).model_dump(mode="json"),
-            "reviews": [ReviewOut.model_validate(r).model_dump(mode="json") for r in reviews],
+            "proposal": ProposalOut.model_validate(detail.proposal).model_dump(mode="json"),
+            "reviews": [
+                ReviewOut.model_validate(review).model_dump(mode="json")
+                for review in detail.reviews
+            ],
         }
     )
 
@@ -75,7 +94,7 @@ async def get_proposal(proposal_id: uuid.UUID, db: DB, user: CurrentUser) -> dic
 @router.post("/{proposal_id}/ai-research")
 async def ai_research(proposal_id: uuid.UUID, db: DB, manager: Manager) -> dict:
     """会商AI专家会前预研（deepseek-reasoner），产出评审记录。"""
-    review = await proposal_service.run_ai_research(db, proposal_id, operator_id=manager.id)
+    review = await operations.run_ai_research(db, proposal_id, operator_id=manager.id)
     return ok(ReviewOut.model_validate(review).model_dump(mode="json"))
 
 
@@ -84,13 +103,13 @@ async def human_review(
     proposal_id: uuid.UUID, body: HumanReviewRequest, db: DB, manager: Manager
 ) -> dict:
     """真人评审：通过 / 驳回（红线：决议须真人确认生效）。"""
-    p = await proposal_service.human_review(
-        db, proposal_id, reviewer_id=manager.id, conclusion=body.conclusion, decision=body.decision
-    )
-    await audit_service.audit(
-        db, actor_id=manager.id, actor_role=manager.role_code,
-        action=f"proposal.{body.decision}", summary=f"提案评审 {p.code} → {body.decision}",
-        target_type="proposal_card", target_id=p.id,
+    p = await operations.human_review(
+        db,
+        proposal_id,
+        reviewer_id=manager.id,
+        conclusion=body.conclusion,
+        decision=body.decision,
+        actor_role=manager.role_code,
     )
     return ok(ProposalOut.model_validate(p).model_dump(mode="json"))
 
@@ -100,12 +119,11 @@ async def convert_to_task(
     proposal_id: uuid.UUID, body: ConvertRequest, db: DB, manager: Manager
 ) -> dict:
     """把已通过的提案转为任务卡。"""
-    task = await proposal_service.convert_to_task(
-        db, proposal_id, creator_id=manager.id, assignee_agent_id=body.assignee_agent_id
-    )
-    await audit_service.audit(
-        db, actor_id=manager.id, actor_role=manager.role_code,
-        action="proposal.convert", summary=f"提案转任务卡 {task.title[:40]}",
-        target_type="task_card", target_id=task.id,
+    task = await operations.convert_to_task(
+        db,
+        proposal_id,
+        creator_id=manager.id,
+        assignee_agent_id=body.assignee_agent_id,
+        actor_role=manager.role_code,
     )
     return ok(TaskOut.model_validate(task).model_dump(mode="json"))

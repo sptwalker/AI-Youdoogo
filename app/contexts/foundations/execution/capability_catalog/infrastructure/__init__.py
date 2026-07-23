@@ -1,0 +1,1 @@
+"""Capability Catalog infrastructure adapters."""

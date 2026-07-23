@@ -1,35 +1,19 @@
-"""任务卡业务逻辑：创建 / 拆解 / 状态流转 / 查询，每次流转写日志。"""
+"""One-way ORM-shaped facade for the Task Management bounded context."""
 
 from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
+from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
+    SQLAlchemyTaskManagementAdapter,
+)
 from app.models.task import TaskCard, TaskCardLog
-from app.services import task_flow
 
 if TYPE_CHECKING:
     from app.models.system import SysUser
-
-
-async def _log(
-    db: AsyncSession,
-    task_id: uuid.UUID,
-    from_status: str | None,
-    to_status: str,
-    operator_id: uuid.UUID | None,
-    note: str | None = None,
-) -> None:
-    db.add(
-        TaskCardLog(
-            task_id=task_id, from_status=from_status, to_status=to_status,
-            operator_id=operator_id, note=note,
-        )
-    )
 
 
 async def create_task(
@@ -45,26 +29,21 @@ async def create_task(
     payload: dict[str, Any] | None = None,
     step_no: int | None = None,
 ) -> TaskCard:
-    """创建任务卡（初始状态 created），写一条初始流转日志。"""
-    task = TaskCard(
-        title=title, task_type=task_type, creator_id=creator_id, priority=priority,
-        assignee_agent_id=assignee_agent_id, parent_id=parent_id, sla_hours=sla_hours,
-        payload=payload or {}, step_no=step_no,
+    return await SQLAlchemyTaskManagementAdapter(db).create_record(
+        title=title,
+        task_type=task_type,
+        creator_id=creator_id,
+        priority=priority,
+        assignee_agent_id=assignee_agent_id,
+        parent_id=parent_id,
+        sla_hours=sla_hours,
+        payload=payload,
+        step_no=step_no,
     )
-    db.add(task)
-    await db.flush()  # 取 task.id
-    await _log(db, task.id, None, task_flow.CREATED, creator_id, "创建任务")
-    await db.flush()
-    await db.refresh(task)
-    return task
 
 
 async def get_task(db: AsyncSession, task_id: uuid.UUID) -> TaskCard:
-    """取任务卡，不存在抛 404。"""
-    task = await db.get(TaskCard, task_id)
-    if task is None or task.is_delete:
-        raise ResourceNotFound("任务不存在")
-    return task
+    return await SQLAlchemyTaskManagementAdapter(db).get_record(task_id)
 
 
 async def decompose(
@@ -74,36 +53,9 @@ async def decompose(
     *,
     creator_id: uuid.UUID,
 ) -> list[TaskCard]:
-    """把一个任务拆解为若干子任务（子任务 parent_id 指向父任务）。
-
-    Raises:
-        ApplicationError: 父任务不存在或子任务列表为空。
-    """
-    if not subtasks:
-        raise RuleViolation("子任务列表为空")
-    parent = await get_task(db, parent_id)
-    children: list[TaskCard] = []
-    for sub in subtasks:
-        title = sub.get("title")
-        if not title:
-            raise RuleViolation("子任务缺少 title")
-        child = TaskCard(
-            title=title,
-            task_type=sub.get("task_type", parent.task_type),
-            creator_id=creator_id,
-            priority=sub.get("priority", parent.priority),
-            assignee_agent_id=sub.get("assignee_agent_id"),
-            parent_id=parent.id,
-            payload=sub.get("payload", {}),
-        )
-        db.add(child)
-        await db.flush()
-        await _log(db, child.id, None, task_flow.CREATED, creator_id, "拆解自父任务")
-        children.append(child)
-    await db.flush()
-    for c in children:
-        await db.refresh(c)
-    return children
+    return await SQLAlchemyTaskManagementAdapter(db).decompose_records(
+        parent_id, subtasks, creator_id=creator_id
+    )
 
 
 async def transition(
@@ -115,21 +67,13 @@ async def transition(
     note: str | None = None,
     result_content: str | None = None,
 ) -> TaskCard:
-    """执行状态流转（经状态机校验），写流转日志。汇报时可附结果内容。
-
-    Raises:
-        ApplicationError: 任务不存在或非法状态流转。
-    """
-    task = await get_task(db, task_id)
-    task_flow.assert_transition(task.status, to_status)
-    from_status = task.status
-    task.status = to_status
-    if result_content is not None:
-        task.result_content = result_content
-    await _log(db, task.id, from_status, to_status, operator_id, note)
-    await db.flush()
-    await db.refresh(task)
-    return task
+    return await SQLAlchemyTaskManagementAdapter(db).transition_record(
+        task_id,
+        to_status,
+        operator_id=operator_id,
+        note=note,
+        result_content=result_content,
+    )
 
 
 async def list_tasks(
@@ -140,31 +84,19 @@ async def list_tasks(
     limit: int = 100,
     viewer: SysUser | None = None,
 ) -> list[TaskCard]:
-    """列出任务卡（可按状态 / 父任务过滤），按创建时间倒序，默认最多 100 条防全量返回。
-
-    viewer 传入时按行级可见性过滤（H1.2）：普通员工只见本人创建/本部门/派给己；
-    内部编排调用不传 viewer（需看全部步骤卡）。
-    """
-    stmt = select(TaskCard).where(TaskCard.is_delete.is_(False))
-    if status:
-        stmt = stmt.where(TaskCard.status == status)
-    if parent_id:
-        stmt = stmt.where(TaskCard.parent_id == parent_id)
+    visibility_filter = None
     if viewer is not None:
-        from app.services import permission_service
+        from app.services.permission_service import row_filter
 
-        cond = permission_service.row_filter(TaskCard, viewer)
-        if cond is not None:
-            stmt = stmt.where(cond)
-    stmt = stmt.order_by(TaskCard.create_time.desc()).limit(limit)
-    return list((await db.execute(stmt)).scalars())
+        visibility_filter = row_filter
+    return await SQLAlchemyTaskManagementAdapter(db).list_records(
+        status=status,
+        parent_id=parent_id,
+        limit=limit,
+        viewer=viewer,
+        visibility_filter=visibility_filter,
+    )
 
 
 async def list_logs(db: AsyncSession, task_id: uuid.UUID) -> list[TaskCardLog]:
-    """取任务的流转日志（按时间正序）。"""
-    stmt = (
-        select(TaskCardLog)
-        .where(TaskCardLog.task_id == task_id)
-        .order_by(TaskCardLog.create_time)
-    )
-    return list((await db.execute(stmt)).scalars())
+    return await SQLAlchemyTaskManagementAdapter(db).list_logs(task_id)

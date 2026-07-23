@@ -12,24 +12,25 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser
-from app.contexts.shared_kernel import InvalidInput, PermissionDenied
-from app.core.config import get_settings
-from app.core.database import get_db
-from app.core.security import create_access_token
-from app.integrations.feishu.oauth import FeishuOAuthError
-from app.platform.http_runtime import ok
-from app.schemas.auth import FeishuExchangeResponse, LoginRequest, TokenResponse, UserOut
-from app.services.auth_service import authenticate, authenticate_feishu, login_by_feishu
-from app.services.feishu_login import (
+from app.contexts.foundations.identity import public as identity
+from app.contexts.foundations.identity.browser_login import (
     EXCHANGE_TTL_SECONDS,
     STATE_TTL_SECONDS,
+    ExternalOAuthError,
     FeishuLoginService,
     InvalidOAuthCallback,
     InvalidOAuthState,
     InvalidReturnTo,
     OAuthUnavailable,
     get_feishu_login_service,
+    legacy_authorization_url,
 )
+from app.contexts.shared_kernel import InvalidInput, PermissionDenied
+from app.core.config import get_settings
+from app.core.database import get_db
+from app.core.security import create_access_token
+from app.platform.http_runtime import ok
+from app.schemas.auth import FeishuExchangeResponse, LoginRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -86,7 +87,11 @@ def _exchange_error(
 @router.post("/login")
 async def login(body: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]) -> dict:
     """用户名+密码登录，签发访问令牌。"""
-    user = await authenticate(db, body.username, body.password)
+    user = await identity.authenticate_password(
+        db,
+        username=body.username,
+        password=body.password,
+    )
     return ok(_token_for(user.id, user.role_code).model_dump())
 
 
@@ -155,12 +160,15 @@ async def feishu_callback(
         return _login_redirect("error")
     except OAuthUnavailable:
         return _login_redirect("unavailable")
-    except FeishuOAuthError as exc:
+    except ExternalOAuthError as exc:
         logger.warning("飞书 OAuth 认证失败 stage=%s", exc.stage)
         return _login_redirect("error")
 
     try:
-        user = await authenticate_feishu(db, completed.identity.open_id)
+        user = await identity.authenticate_feishu(
+            db,
+            open_id=completed.identity.open_id,
+        )
     except PermissionDenied:
         return _login_redirect("access_required")
 
@@ -229,9 +237,7 @@ async def feishu_exchange(request: Request, service: FeishuService) -> JSONRespo
 @router.get("/feishu/url")
 async def feishu_login_url(redirect_uri: str, state: str = "") -> dict:
     """获取飞书扫码登录授权 URL（前端跳转，I2）。"""
-    from app.integrations.feishu.client import feishu_client
-
-    return ok({"url": feishu_client.oauth_authorize_url(redirect_uri, state)})
+    return ok({"url": legacy_authorization_url(redirect_uri, state)})
 
 
 class FeishuCallback(BaseModel):
@@ -243,7 +249,7 @@ async def feishu_login_callback(
     body: FeishuCallback, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> dict:
     """飞书回调 code 换登录令牌（仅限已预绑定本地账号，I2 兼容端点）。"""
-    user = await login_by_feishu(db, body.code)
+    user = await identity.login_by_feishu(db, code=body.code)
     return ok(_token_for(user.id, user.role_code).model_dump())
 
 

@@ -11,15 +11,26 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
+from app.contexts.foundations.governance.audit_trail.public import (
+    AuditTrailQuery,
+    query_audit_trail,
+)
+from app.contexts.foundations.governance.system_configuration.connectivity.public import (
+    test_external_connectivity,
+)
+from app.contexts.foundations.governance.system_configuration.public import (
+    UpdateConfigCommand,
+    list_configurations,
+    update_configuration,
+)
+from app.contexts.foundations.identity.public import IdentityUserResult
 from app.core.database import get_db
-from app.models.system import SysUser
 from app.platform.http_runtime import ok
-from app.services import audit_service, config_service, connectivity_service
 
 router = APIRouter(tags=["admin"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Admin = Annotated[SysUser, Depends(require_roles("admin"))]
+Admin = Annotated[IdentityUserResult, Depends(require_roles("admin"))]
 
 
 @router.get("/audit-logs")
@@ -31,15 +42,47 @@ async def list_audit_logs(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict:
     """审计流（按时间倒序，可按 action/actor 过滤）。"""
+    records = await query_audit_trail(
+        db,
+        AuditTrailQuery(action=action, actor_id=actor_id, limit=limit),
+    )
     return ok(
-        await audit_service.list_audit_logs(db, action=action, actor_id=actor_id, limit=limit)
+        [
+            {
+                "id": str(record.record_id),
+                "actor_id": str(record.actor_id) if record.actor_id else None,
+                "actor_role": record.actor_role,
+                "action": record.action,
+                "target_type": record.target_type,
+                "target_id": str(record.target_id) if record.target_id else None,
+                "summary": record.summary,
+                "detail": dict(record.detail) if record.detail is not None else None,
+                "result": record.result,
+                "create_time": record.occurred_at,
+            }
+            for record in records
+        ]
     )
 
 
 @router.get("/configs")
 async def list_configs(db: DB, _: Admin) -> dict:
     """可编辑配置列表。"""
-    return ok(await config_service.list_configs(db))
+    configs = await list_configurations(db)
+    return ok(
+        [
+            {
+                "key": config.key,
+                "value": "" if config.is_secret else config.value,
+                "value_type": config.value_type,
+                "category": config.category,
+                "is_editable": config.is_editable,
+                "is_secret": config.is_secret,
+                "is_set": config.is_set,
+            }
+            for config in configs
+        ]
+    )
 
 
 class ConfigUpdate(BaseModel):
@@ -51,13 +94,19 @@ class ConfigUpdate(BaseModel):
 @router.patch("/configs/{key}")
 async def update_config(key: str, body: ConfigUpdate, db: DB, admin: Admin) -> dict:
     """改配置即时生效（内部落审计）。"""
-    cfg = await config_service.set_config(
-        db, key, body.value, updated_by=admin.id, actor_role=admin.role_code
+    config = await update_configuration(
+        db,
+        UpdateConfigCommand(
+            key=key,
+            value=body.value,
+            updated_by=admin.id,
+            actor_role=admin.role_code,
+        ),
     )
-    return ok({"key": cfg.key, "value": cfg.value})
+    return ok({"key": config.key, "value": config.value})
 
 
 @router.get("/admin/connectivity")
 async def test_connectivity(_: Admin) -> dict:
     """外部依赖连通性测试（LLM/飞书/ThinkingData），只回状态+延迟，不回显密钥。"""
-    return ok(await connectivity_service.test_all())
+    return ok([result.to_dict() for result in await test_external_connectivity()])

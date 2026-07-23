@@ -6,8 +6,10 @@ import pytest
 from docx import Document
 from reportlab.pdfgen import canvas
 
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.document_extract import (
+    extract_text,
+)
 from app.contexts.shared_kernel import ApplicationError
-from app.knowledge.extract import extract_text
 
 
 def test_txt_utf8() -> None:

@@ -1,0 +1,1 @@
+"""Knowledge Indexing infrastructure adapters."""

@@ -1,0 +1,1 @@
+"""Capability Catalog bounded context."""

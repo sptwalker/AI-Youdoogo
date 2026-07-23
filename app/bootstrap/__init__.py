@@ -1,5 +1,1 @@
-"""Application composition root."""
-
-from app.bootstrap.app import app, create_app
-
-__all__ = ["app", "create_app"]
+"""Application composition root; import concrete wiring from leaf modules."""

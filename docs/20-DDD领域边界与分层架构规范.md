@@ -1,6 +1,6 @@
 # 20 · 企业智能体四层架构与 DDD 领域边界规范
 
-> 状态：架构语义重定义版（2026-07-22），代码按模块化单体继续渐进迁移。
+> 状态：P0～P4 与全量验证已完成（2026-07-23）。
 > 范围：定义“四层运行架构 + 两大横切支撑系统”、DDD 限界上下文、数据所有权、Context 内分层、
 > 依赖方向和迁移路线。
 > 目标形态：模块化单体，不因概念分层直接拆微服务，不改变现有 API 与 durable runtime 语义。
@@ -13,18 +13,22 @@
 
 本规范按模块化单体渐进落地，不以一次性移动全部文件为验收标准：
 
-| 阶段 | 状态 | 当前结果 |
+| OpenSpec 阶段 | 状态 | 当前结果 |
 |---|---|---|
-| 阶段 0：架构语义与边界评审 | 已完成 | 四层运行架构、两大横切系统与 DDD Context Map 已明确分离 |
-| 阶段 1：边界护栏 | 已完成首版 | 新增静态 import boundary test；兼容 facade 仅在仍有历史调用方时保留 |
-| 阶段 2：Platform 与 Bootstrap | 进行中 | Bootstrap、Database、Outbox、HTTP Runtime 已落地；旧 `AppError` 调用及异常 facade 已移除 |
-| 阶段 3：Capability 与 Connector | 部分开始 | Governed Data Query 的 SQL 护栏已迁入首个真实 Context |
-| 阶段 4：Business Context | 部分开始 | Proposal Management 已拥有纯 Domain/Application 错误和 HTTP entrypoint mapper |
-| 阶段 5～8 | 待按业务增量执行 | 保持现有 API、表和 durable runtime 语义，逐 Context 迁移 |
+| P0：基线与架构护栏 | 已完成 | 应用 import graph、无循环、Context 向内依赖、单向 facade 和无副作用包初始化已有回归测试；旧异常 facade 已移除 |
+| P1：Proposal Management 参考切片 | 已完成 | Proposal 的 Domain/Application/Ports/SQLAlchemy adapter/Entrypoint 已落地，旧 Service 仅作单向兼容入口 |
+| P2：Expert、Agent、Capability | 已完成 | 专家快照、Agent 纯请求/结果、Capability Catalog/Execution 端口与当前 runtime adapter 已分离 |
+| P2：Planning、Workflow Runtime、Task | 已完成 | Planning 与 durable Runtime 已分界，step 执行已拆分，Workflow/Task 通过幂等事件协作，旧 workflow 模块只能单向委托 |
+| P3：Identity、Organization、Knowledge、Environment | 已完成 | 身份、组织/专家快照、访问决策、Wiki/Index/Retrieval/Semantic/Memory 与 ContextSnapshot 边界已落地 |
+| P3：Communication、Meeting、Analytics、Governance | 已完成 | 助理会话、群消息、协作请求、会议、运营分析及 Audit/Review/Quality/Budget/Configuration 边界已落地 |
+| P4：HTTP Entrypoints 与前端 Feature | 已完成 | Group Chat 与大页面拆分已完成；迁移 route 已使用 Context entrypoint，且不再直接依赖 ORM、旧 Service、具体 Agent/LLM 或 Context infrastructure |
+| 文档与全量验证 | 已完成 | Ruff、Mypy、683 个非交付 Pytest、前端 28 tests/lint/build、`035_channel_member` 单一 head、app/worker smoke 与 Graphify 代码架构复核均通过 |
 
 迁移期 `app/api/core/models/schemas/services/agents/knowledge/llm/integrations` 中尚有历史入口。新实现必须进入
-对应 Context 或 Platform；仍有调用方的旧模块只能向新实现单向 re-export，新模块禁止反向依赖
-兼容 facade。旧异常入口的仓库内调用方已迁移完成，因此不再保留 facade。
+对应 Context 或 Platform；仍有调用方的旧模块只能向新实现单向委托或 re-export，新模块禁止反向依赖
+兼容 facade。仓库内静态调用清单、已删除的零调用 facade 与退出条件见 11.3～11.5。Graphify 增量图为
+9,950 个节点、24,762 条边，代码与文档/PNG 已刷新；按本次交付要求，17 个演示 SVG 保留为待选语义更新，
+不影响代码依赖、写入所有权和质量门验收。
 
 ## 1. 总体架构结论
 
@@ -1140,12 +1144,44 @@ context_snapshot_version / source_refs
 
 ## 11. 当前文件目标归属
 
+### 11.1 当前实施 Ownership Map
+
+下表记录 2026-07-23 工作树中已有实现的代码所有权。“已有 Context root”表示 Domain/Application/
+Entrypoint/Infrastructure 中至少已有一个可执行切片，不表示所有 HTTP route 或所有历史调用方都已迁移。
+
+| 分组 | 当前 Context owner | 实现根目录 | 主要写入/规则所有权 |
+|---|---|---|---|
+| Business | Proposal Management | `app/contexts/business/proposal_management` | 提案生命周期、评审、转执行意图 |
+| Business | Meeting Management | `app/contexts/business/meeting_management` | 会议、议题、投票、纪要、决议与 Task 转换意图 |
+| Business | Operational Analytics | `app/contexts/business/operational_analytics` | 运营指标、异常事实、分析结果 |
+| Business | Assistant Conversations | `app/contexts/business/assistant_conversations` | 一对一会话、消息、流式回复与归档协调 |
+| Business | Group Messaging | `app/contexts/business/group_messaging` | 频道、成员、消息、未读、附件与归档 |
+| Business | Collaboration Requests | `app/contexts/business/collaboration_requests` | 跨部门协作请求与复核状态 |
+| Business | Task Management | `app/contexts/business/task_management` | TaskCard 分配、接受、驳回、上报与日志 |
+| Business | Work Desktop | `app/contexts/business/work_desktop` | 工作台组合用例；不夺取 Task/Message/Collaboration 的来源所有权 |
+| Foundation / Execution | Agent Execution、Capability Catalog、Capability Execution、Work Planning、Workflow Runtime | `app/contexts/foundations/execution/*` | Agent 执行、能力定义/幂等执行、计划语义、durable workflow 状态 |
+| Foundation / Knowledge | Wiki Management、Knowledge Indexing、Knowledge Retrieval、Semantic Catalog、Organizational Memory | `app/contexts/foundations/knowledge/*` | 文档、索引 read model、检索结果/引用、语义口径、提炼记忆 |
+| Foundation / Workforce | Expert Management | `app/contexts/foundations/workforce/expert_management` | 专家生命周期、能力绑定与版本化执行快照 |
+| Foundation / Organization | Organization Structure | `app/contexts/foundations/organization_structure` | 部门树、主管、成员归属与组织快照 |
+| Foundation / Identity & Policy | Identity、Access Control | `app/contexts/foundations/identity`<br>`app/contexts/foundations/access_control` | 登录/绑定/Principal 与资源访问决策 |
+| Foundation / Context | Environment Projection | `app/contexts/foundations/environment_projection` | 带 scope/provenance/version/missing/expiry 的 ContextSnapshot 组合与失效投影 |
+| Foundation / Integration | Connector Management、Governed Data Query | `app/contexts/foundations/integration/*` | Connector 配置/快照与受治理查询/SQL 护栏 |
+| Foundation / Governance | Audit Trail、Human Review、AI Quality、Usage & Budget、System Configuration/AI Provider/Connectivity | `app/contexts/foundations/governance/*` | 追加式审计、审核决定、AI 评估、用量预算、系统/模型/连通性配置 |
+| Shared Kernel | Application failure categories | `app/contexts/shared_kernel` | 与传输无关的稳定应用失败分类；不拥有 Context 业务规则 |
+| Platform / Bootstrap | Database、Outbox、HTTP/LLM/Realtime/Object Storage 等技术机制与组合根 | `app/platform/*`<br>`app/bootstrap/*` | 技术资源、传输与装配；不拥有业务事实 |
+
+当前目录分组与本文早期概念分组不完全一致：Communication、Task 和 Work Desktop 的实现目前位于
+`contexts/business` 下。这不改变其叶子 Context 的模型和写入所有权；若后续调整导航分组，必须作为纯目录迁移，
+不能借机共享 Domain 模型或产生第二写入者。
+
+### 11.2 历史文件的目标归属
+
 | 当前文件/职责 | 目标 Context/Platform | 说明 |
 |---|---|---|
-| `models/knowledge.py`、`knowledge_base_service.py` | Wiki Management | Wiki/文档模型和生命周期 |
-| `knowledge/ingest.py`、`chunk.py`、`embedding.py` | Knowledge Indexing | 索引构建和重建 |
-| `knowledge/retrieval.py`、`rerank.py` | Knowledge Retrieval | 检索和引用契约 |
-| `semantic_service.py` | Semantic Catalog | 术语、别名和指标口径 |
+| `models/knowledge.py`、已删除 `knowledge_base_service.py` | Wiki Management | Wiki/文档模型和生命周期已由 published operations 承接 |
+| `knowledge/ingest.py`、`embedding.py`、已删除 `chunk.py`、`extract.py` | Knowledge Indexing | 生产兼容入口仅剩索引/embedding；分块与抽取测试已迁入 Context |
+| 已删除 `knowledge/retrieval.py`、`rerank.py` | Knowledge Retrieval | 检索、精排和诊断脚本改用 published contracts/operations |
+| 已删除 `semantic_service.py` | Semantic Catalog | 术语、别名和指标口径已由 Context public API 承接 |
 | `memory_service.py` | Organizational Memory | 消费归档事件生成记忆 |
 | `agent_role_service.py`、`AgentRole ORM` | Expert Management | 专家业务模型与 ORM 分离 |
 | `skill_registry.py` | Capability Catalog | 能力定义、schema、风险和版本 |
@@ -1159,20 +1195,21 @@ context_snapshot_version / source_refs
 | `workflow_projection.py` | Workflow Runtime query + Task projection | 按写入所有权拆分 |
 | `workflow_event_handler.py` | Workflow Runtime entrypoint | 通用 lease/retry 移到 Platform Outbox |
 | `workflow_worker.py` | Bootstrap + Platform Outbox facade | 生命周期和轮询机制分开 |
-| `task_service.py`、`models/task.py` | Task Management | 状态规则移入 domain |
+| `task_service.py`、`models/task.py`、已删除 `legacy_orchestration.py` | Task Management | 状态规则移入 domain；TaskCard fallback 直接进入 Task Management legacy public |
 | `deliver_service.py`、`models/deliverable.py` | Deliverable Management | 文件业务生命周期 |
 | `data_source_service.py` | Connector Management | DataSource 演进为 Connector 元数据 |
-| `connectivity_service.py` | Connector Management/Execution | 健康语义与网络实现分开 |
-| `data_query_service.py`、`data_catalog_service.py`、`sql_guard.py` | Governed Data Query | 查询和 SQL 护栏 |
+| 已删除 `connectivity_service.py` | System Configuration / Connectivity | 零调用 facade 已移除；连通性用例和 adapter 归 Context |
+| `data_query_service.py`、`data_catalog_service.py`、已删除 `sql_guard.py` | Governed Data Query | 查询 facade 尚保留；SQL 护栏测试已迁到 Context public API |
 | `integrations/feishu/*`、`thinkingdata/client.py` | Platform Integrations | 底层供应商 client |
 | MCP server/client transport、session、codec | Platform MCP Runtime + Context adapter | 协议机制在 Platform；tool/resource 语义归目标 Context |
-| `desktop_chat_service.py`、`desktop_chat_repository.py` | Assistant Conversations | 工作台聚合与会话数据分开 |
+| 已删除 `desktop_chat_service.py`、`desktop_chat_streaming.py`、`desktop_chat_repository.py` | Assistant Conversations | HTTP、测试和归档脚本统一使用 Context entrypoint/ports |
+| 已删除 `desktop_service.py` | Work Desktop | 桌面聚合统一使用 Work Desktop public API |
 | `discussion_service.py` | Group Messaging | 频道、消息、成员、未读 |
 | `realtime_service.py` | Group Messaging adapter + Platform Realtime | 群语义与 Redis 机制分开 |
 | `collab_service.py` | Collaboration Requests | 跨部门请求和复核 |
-| `org_service.py`、`org_template.py`、`org_sync_service.py` | Organization Structure | 组织模型；飞书 client 在 Platform |
+| `org_service.py`、`org_sync_service.py`、已删除 `org_template.py` | Organization Structure | 模板入口已迁到 Context operations；飞书 client 在 Platform |
 | `auth_service.py`、`feishu_login.py` | Identity | 身份和飞书登录映射 |
-| `permission_service.py`、`resource_grant_service.py` | Access Control | 资源访问政策 |
+| `permission_service.py`、已删除 `resource_grant_service.py` | Access Control | Grant CRUD/推导测试已迁入 Context，资源类型约束归 domain |
 | `audit_service.py` | Audit Trail | 追加式审计记录 |
 | `config_service.py`、`runtime_config.py` | System Configuration + Platform Config | 可编辑配置语义与读取机制分开 |
 | `ai_provider_service.py` | Provider Management | Provider 卡片和路由快照 |
@@ -1181,11 +1218,100 @@ context_snapshot_version / source_refs
 | `eval_service.py`、`feedback_service.py`、`reflection_service.py` | AI Quality | 评估和反馈闭环 |
 | `environment_service.py` | Environment Projection | 组合 ContextSnapshot、版本、来源引用和事件失效 read model |
 | `proposal_service.py` | Proposal Management | 提案业务场景 |
-| `meeting_service.py`、`meeting_ai_actions.py` | Meeting Management | 会议规则与 Agent adapter 分开 |
-| `ops_data.py`、`anomaly.py` | Operational Analytics | 运营业务事实和异常 |
+| 已删除 `meeting_service.py`、`meeting_ai_actions.py` | Meeting Management | 会议规则、AI/Task adapter 和测试均使用 Context 正式入口 |
+| 已删除 `ops_data.py`、`td_event_service.py`、`anomaly.py` | Operational Analytics | 运营事实/事件别名与异常检测均改用 Context 正式 entrypoint |
 | `outbox_service.py` | Platform Outbox | 不包含任何业务 handler |
 | 稳定应用失败分类 | Shared Kernel | 不携带 HTTP 元数据；特定业务错误留在所属 Context |
 | 应用失败到 HTTP envelope 的映射 | Bootstrap / Context Entrypoint | 全局分类由 Bootstrap 映射，Context 特定错误由自己的 HTTP adapter 映射 |
+
+### 11.3 保留的 Legacy Facade 清单
+
+以 2026-07-23 的 AST import 扫描为准，下列兼容入口仍有仓库内 runtime、测试或脚本调用方，因此必须
+暂时保留。“保留”只代表不能立即删除，不代表允许在其中新增业务规则。
+
+| 边界 | 保留的兼容入口 | 当前调用证据与退出方向 |
+|---|---|---|
+| Agent runtime | `app/agents/base.py`、`skills.py`、`tool_dispatcher.py` | Context infrastructure、workflow runtime 和测试仍使用旧 callable/SkillResult 形状；迁到 Agent Execution/Capability ports 后删除 |
+| Agent 包级兼容 | `app/agents/__init__.py` | 当前无 eager re-export，但 `from app.agents import base/ops/scheduler/skills` 仍存在；所有调用改为叶子 Context 后可删除包级兼容语义 |
+| Identity / Organization / Expert | `auth_service.py`、`feishu_login.py`、`org_service.py`、`org_sync_service.py`、`org_template.py`、`agent_role_service.py` | bootstrap、脚本和特征测试仍有调用；HTTP 与 Environment Projection 已改用 Identity/Organization/Expert published operations |
+| Governance / Configuration | `audit_service.py`、`permission_service.py`、`config_service.py`、`ai_provider_service.py`、`eval_service.py`、`feedback_service.py` | bootstrap、Context adapters 和测试仍依赖；HTTP 已改用 Audit/Access Control/System Configuration/AI Quality command/query ports |
+| Knowledge | `app/knowledge/embedding.py`、`ingest.py`、`storage.py` 及无 eager re-export 的 `app/knowledge/__init__.py` | runtime adapters、probe/smoke 和测试仍使用旧索引、存储或 embedding 路径；继续迁入 Knowledge/Platform gateway |
+| Knowledge / Data service | `memory_service.py`、`data_source_service.py`、`data_catalog_service.py`、`data_query_service.py` | Environment/skill adapter 和测试仍有调用；替换为 Knowledge、Connector Management 和 Governed Data Query published operations |
+| Communication / Business | `collab_service.py`、`discussion_service.py`、`proposal_service.py` | skill/runtime adapter 或测试仍使用；替换为各 Business Context operation/event contract |
+| Task / Workflow | `task_flow.py`、`task_service.py`、`orchestration_service.py`、`workflow_planning.py`、`workflow_projection.py`、`workflow_recovery.py`、`workflow_repository.py`、`workflow_service.py`、`workflow_state.py`、`workflow_step_executor.py`、`workflow_worker.py` | Agent scheduler、assistant adapter 和 durable runtime 测试仍有调用；生产 worker 与事件路由已移到 Bootstrap，旧 worker 入口仅保留兼容测试缝 |
+| Operational probes | `metrics_service.py`、`workflow_event_handler.py` | 生产入口已直接使用 Bootstrap-owned adapter；旧路径仅保留无业务逻辑的兼容导出，完成外部弃用核对后删除 |
+| Platform Outbox | `outbox_service.py` | Group Messaging adapter 与架构/durable 测试仍使用旧入口；改为 Platform Outbox repository/dispatcher 公开边界 |
+
+除上表 facade 外，`app/agents/contracts.py`、`legacy_skill_adapters.py`、`runtime_adapters.py`、`skill_registry.py`、
+`ops.py`、`scheduler.py`、`workflow_engine.py` 仍是 Agent 迁移桥接；`collab_protocol.py`、
+`deliver_service.py`、`environment_service.py`、`query_skill.py`、`realtime_service.py`、`reflection_service.py`
+仍包含横向实现或组装职责。它们不是“零逻辑 facade”，
+不得在未迁移所有权和特征测试前直接删除。
+
+### 11.4 静态调用分类与零调用证据
+
+扫描范围为仓库内 Python 文件，包括 `app/`、`tests/`、`scripts/` 和 migration/tooling；同时用全仓
+文本检索复核模块字符串引用。它能证明仓库内调用，但无法自动证明仓库外插件、手工运维命令或第三方
+使用者已停止调用。
+
+**仍有 runtime 调用，必须保留：** 其余大多数 facade；典型证据包括 `app/bootstrap/lifecycle.py` 调用
+Provider/Login/Workflow worker facade，以及多个 Context infrastructure adapter 仍调用 `app.agents.base` 或
+历史 Service 作为外层适配缝。`app/api/deps.py` 已直接使用 Identity/Access Control published operations。
+
+**仅有测试或脚本调用，不是零调用：**
+
+- `app.agents.scheduler`;
+- `app.services.org_sync_service`.
+
+该入口仍需先迁移组织同步特征测试和外部同步调用，再重新扫描；不能为了获得“零调用”而直接删掉对兼容
+行为有价值的测试。
+
+**已确认零调用并在 P4 删除：**
+
+- `app/services/connectivity_service.py`;
+- `app/services/desktop_chat_repository.py`;
+- `app/services/feishu_oauth_config.py`;
+- `app/services/feishu_oauth_store.py`;
+- `app/services/meeting_ai_actions.py`;
+- `app/services/tool_execution_service.py`.
+
+**本轮确认零调用并删除：**
+
+- Knowledge shim：`chunk.py`、`extract.py`、`rerank.py`、`retrieval.py`、`scope.py`；
+- Business facade：`desktop_service.py`、`desktop_chat_service.py`、`desktop_chat_streaming.py`、
+  `meeting_service.py`、`ops_data.py`、`td_event_service.py`、`anomaly.py`；
+- Foundation facade：`knowledge_base_service.py`、`semantic_service.py`、`resource_grant_service.py`、
+  `sql_guard.py`、`org_template.py`；
+- Workflow wrapper：`legacy_orchestration.py`、`workflow_runtime/infrastructure/legacy_taskcard_runtime.py`.
+
+`tests/test_architecture_boundaries.py::test_zero_caller_legacy_facades_are_removed` 对既有 6 个和本轮 19 个路径
+统一建立不得回归的架构门禁；相关 Context/entrypoint/脚本测试继续锁定原字典 shape、事务、授权、stream、
+归档和诊断行为。当前剩余 facade 均仍有 runtime 调用或独占组装职责，不属于可机械删除的浅包装。
+
+### 11.5 Facade 退出条件与后续迁移指导
+
+删除任一历史入口前，必须同时满足：
+
+1. AST import 扫描在 runtime、tests、scripts、migration/tooling 中均为零，且全仓文本检索无 monkeypatch/importlib/
+   配置字符串引用；
+2. 每个原调用方已改用对应 Context 的 `public`/`contracts`/`entrypoints` 或 Platform 公开边界，不能迁到另一个
+   横向代理模块；
+3. 旧 facade 内没有独占的事务、查询、状态转换、默认值、异常映射或 monkeypatch seam；若有，先迁入
+   Context/Platform 并用特征测试锁定；
+4. 相关 HTTP/worker/script 冒烟和针对性回归测试通过，架构 allowlist/豁免项同步删除，并增加“旧路径不得
+   回归”断言；
+5. 对曾作为外部扩展点的路径，需有运维/插件清单、弃用窗口或显式的 breaking-change 决策；仓库内零调用
+   不能单独证明外部零调用。
+
+后续迁移顺序：
+
+1. HTTP route 到 Context entrypoint 的迁移已经完成；后续禁止 route 重新依赖 ORM、legacy Service、具体 Agent/LLM；
+2. 迁移“仅测试/脚本调用”清单，优先清理 Knowledge 叶子 facade、Meeting/Organization 特征测试和 probe/smoke 脚本；
+3. 处理尚非纯 facade 的横向模块：Deliverable 业务生命周期进入 Deliverable Management，Realtime 的群语义与 Platform
+   Redis 机制分离；DB-backed Metrics 与 Workflow event handler 组装已进入 Bootstrap，后续继续把 Environment Projection 的
+   横向实现收回 Context-owned operation，并只在 Platform 保留不依赖业务模型的通用机制；
+4. 每次删除一组 facade 后运行针对性测试和 import boundary test，最后再执行全量质量门与 Graphify
+   刷新。
 
 ## 12. 禁止规则
 

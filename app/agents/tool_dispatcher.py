@@ -1,38 +1,111 @@
-"""Typed skill dispatch with validation, idempotency, and replay."""
+"""Legacy ToolDispatcher adapter over clean Capability Execution."""
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import ExecutionContext, SkillExecutor, SkillRequest, SkillResult
 from app.agents.skill_registry import REGISTRY, Skill, enabled_skills, flag_on
+from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
+    CapabilityDefinition,
+)
+from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
+    InMemoryCapabilityCatalog,
+)
+from app.contexts.foundations.execution.capability_execution.application.ports import (
+    HandlerExecutionResult,
+)
+from app.contexts.foundations.execution.capability_execution.application.use_cases import (
+    CapabilityExecutionApplication,
+)
+from app.contexts.foundations.execution.capability_execution.contracts.execution import (
+    CapabilityExecutionRequest,
+    CapabilityExecutionStatus,
+    CapabilityPrincipal,
+    CapabilityTrace,
+)
+from app.contexts.foundations.execution.capability_execution.infrastructure.current_policy import (
+    CurrentCapabilityApproval,
+    CurrentCapabilityAuthorization,
+)
+from app.contexts.foundations.execution.capability_execution.infrastructure.sqlalchemy_uow import (
+    SQLAlchemyCapabilityExecutionUnitOfWork,
+)
 from app.models.agent import AgentRole
-from app.services import tool_execution_service
 
 logger = logging.getLogger(__name__)
 
 
-def _stored_result(data: dict[str, Any]) -> SkillResult:
-    return SkillResult(
-        notes=list(data.get("notes") or []),
-        datasets=list(data.get("datasets") or []),
-        artifacts=list(data.get("artifacts") or []),
-    )
+def _json_dump(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _result_data(result: SkillResult) -> dict[str, Any]:
-    return {
-        "notes": result.notes,
-        "datasets": result.datasets,
-        "artifacts": result.artifacts,
-    }
+def _json_dict(value: str) -> dict[str, object]:
+    loaded = json.loads(value)
+    return loaded if isinstance(loaded, dict) else {}
+
+
+class _BoundCatalog:
+    """Expose only catalog definitions with a concrete current runtime binding."""
+
+    def __init__(self, executor: SkillExecutor | None) -> None:
+        self._executor = executor
+        self._catalog = InMemoryCapabilityCatalog()
+
+    async def resolve(
+        self, key: str, version: str | None
+    ) -> CapabilityDefinition | None:
+        if self._executor is None:
+            return None
+        return await self._catalog.resolve(key, version)
+
+
+class _LegacyHandlerAdapter:
+    def __init__(
+        self,
+        session: AsyncSession,
+        role: AgentRole,
+        context: ExecutionContext,
+        executor: SkillExecutor | None,
+    ) -> None:
+        self._session = session
+        self._role = role
+        self._context = context
+        self._executor = executor
+        self.last_result: SkillResult | None = None
+
+    async def execute(
+        self,
+        request: CapabilityExecutionRequest,
+        definition: CapabilityDefinition,
+    ) -> HandlerExecutionResult:
+        del definition
+        if self._executor is None:
+            raise LookupError(f"Capability handler {request.capability_key} is unavailable")
+        legacy_request = SkillRequest(
+            skill_key=request.capability_key,
+            action_index=request.action_index,
+            arguments=_json_dict(request.arguments_json),
+            raw_text=request.raw_text,
+        )
+        self.last_result = await self._executor.execute(
+            self._session,
+            self._role,
+            legacy_request,
+            self._context,
+        )
+        return HandlerExecutionResult(
+            notes=tuple(self.last_result.notes),
+            dataset_json=tuple(_json_dump(item) for item in self.last_result.datasets),
+            artifact_json=tuple(_json_dump(item) for item in self.last_result.artifacts),
+        )
 
 
 class ToolDispatcher:
-    """Dispatch registered typed skills and reuse completed logical actions."""
+    """Preserve legacy calls while delegating structured actions to the use case."""
 
     def __init__(self, registry: dict[str, Skill] | None = None) -> None:
         self.registry = registry or REGISTRY
@@ -51,39 +124,57 @@ class ToolDispatcher:
         context: ExecutionContext,
     ) -> SkillResult:
         executor = self._executor(request)
-        if executor is None:
+        handler = _LegacyHandlerAdapter(db, role, context, executor)
+        idempotency_key = None
+        if executor is not None and executor.requires_idempotency(request):
+            idempotency_key = context.action_key(request.skill_key, request.action_index)
+        capability_request = CapabilityExecutionRequest(
+            capability_key=request.skill_key,
+            capability_version="1.0",
+            action_index=request.action_index,
+            arguments_json=_json_dump(request.arguments),
+            raw_text=request.raw_text,
+            principal=CapabilityPrincipal(
+                principal_id=context.user_id,
+                expert_id=role.id,
+                permission_keys=tuple(
+                    item for item in (role.tools or []) if isinstance(item, str)
+                ),
+            ),
+            trace=CapabilityTrace(
+                trace_id=context.trace_id,
+                workflow_run_id=context.workflow_run_id,
+                workflow_step_id=context.workflow_step_id,
+                attempt=context.attempt,
+            ),
+            idempotency_key=idempotency_key,
+        )
+        result = await CapabilityExecutionApplication(
+            catalog=_BoundCatalog(executor),
+            authorization=CurrentCapabilityAuthorization(),
+            approval=CurrentCapabilityApproval(),
+            uow=SQLAlchemyCapabilityExecutionUnitOfWork(db),
+            handler=handler,
+        ).execute(capability_request)
+
+        if result.status is CapabilityExecutionStatus.REJECTED:
             return SkillResult(notes=[f"技能「{request.skill_key}」未注册，动作已拒绝"])
-
-        key = context.action_key(request.skill_key, request.action_index)
-        tool_record = None
-        if key and executor.requires_idempotency(request):
-            tool_record, replay = await tool_execution_service.begin(
-                db,
-                tool_key=request.skill_key,
-                idempotency_key=key,
-                request_data=request.model_dump(mode="json"),
-                context=context,
+        if result.status is CapabilityExecutionStatus.FAILED:
+            logger.warning(
+                "结构化技能执行失败 skill=%s error=%s",
+                request.skill_key,
+                result.error.message if result.error else "unknown",
             )
-            if replay:
-                result = _stored_result(tool_record.result_data or {})
-                result.tool_execution_ids.append(tool_record.id)
-                return result
-            await db.commit()
-
-        try:
-            result = await executor.execute(db, role, request, context)
-        except Exception as exc:  # noqa: BLE001 - one tool failure must not block finalization
-            if tool_record is not None:
-                await tool_execution_service.fail(db, tool_record, str(exc))
-                await db.commit()
-            logger.warning("结构化技能执行失败 skill=%s", request.skill_key, exc_info=True)
             return SkillResult(notes=[f"技能「{request.skill_key}」执行失败，已记录"])
 
-        if tool_record is not None:
-            await tool_execution_service.succeed(db, tool_record, _result_data(result))
-            await db.commit()
-            result.tool_execution_ids.append(tool_record.id)
-        return result
+        legacy = handler.last_result or SkillResult(
+            notes=list(result.notes),
+            datasets=[_json_dict(item) for item in result.dataset_json],
+            artifacts=[_json_dict(item) for item in result.artifact_json],
+        )
+        if result.invocation_id is not None:
+            legacy.tool_execution_ids.append(result.invocation_id)
+        return legacy
 
     async def dispatch_text(
         self,
@@ -106,6 +197,6 @@ class ToolDispatcher:
                 merged.merge(
                     await skill.legacy_executor(db, role, output, active_context, excluded)
                 )
-            except Exception:  # noqa: BLE001 - legacy protocols are independently isolated
+            except Exception:  # noqa: BLE001 - legacy protocol isolation is observable behavior
                 logger.warning("技能执行失败 skill=%s", skill.key, exc_info=True)
         return merged

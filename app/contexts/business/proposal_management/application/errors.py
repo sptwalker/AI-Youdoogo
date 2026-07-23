@@ -6,8 +6,8 @@ from app.contexts.business.proposal_management.domain.errors import ProposalErro
 class ProposalNotFound(ProposalError):
     """The requested proposal does not exist or is logically deleted."""
 
-    def __init__(self) -> None:
-        super().__init__("提案不存在")
+    def __init__(self, message: str = "提案不存在") -> None:
+        super().__init__(message)
 
 
 class ProposalExpertUnavailable(ProposalError):

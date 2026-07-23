@@ -115,6 +115,19 @@ async def test_upload_file_type(client: AsyncClient) -> None:
     assert r.json()["data"]["type"] == "file"
 
 
+async def test_upload_rejects_file_over_20mb(client: AsyncClient) -> None:
+    files = {
+        "file": (
+            "large.bin",
+            io.BytesIO(b"x" * (20 * 1024 * 1024 + 1)),
+            "application/octet-stream",
+        )
+    }
+    response = await client.post("/api/v1/channels/attachments", files=files)
+    assert response.status_code == 400
+    assert "20MB" in response.json()["msg"]
+
+
 async def test_download_rejects_non_chat_path(client: AsyncClient) -> None:
     """越权:下载非 chat/ 前缀的对象 → 400（防读任意 MinIO 对象）。"""
     r = await client.get(

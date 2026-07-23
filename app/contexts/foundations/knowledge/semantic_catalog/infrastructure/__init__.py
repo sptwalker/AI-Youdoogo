@@ -1,0 +1,1 @@
+"""Semantic Catalog infrastructure adapters."""

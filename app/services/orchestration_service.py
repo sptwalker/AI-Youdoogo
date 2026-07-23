@@ -9,9 +9,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.workflow_engine import get_workflow_engine
+from app.contexts.business.task_management import legacy_public as legacy_taskcard_workflow
 from app.llm import get_llm_for_role
 from app.models.task import TaskCard
-from app.services import legacy_orchestration, workflow_service
+from app.services import workflow_service
 from app.services.workflow_planning import (
     MAX_STEPS as _MAX_STEPS,
 )
@@ -39,15 +40,8 @@ __all__ = [
 logger = logging.getLogger(__name__)
 _MIN_REQUEST_LEN = 8
 
-# Compatibility exports for legacy tests/callers during migration.
-_step_cards = legacy_orchestration.step_cards
-_ready_steps = legacy_orchestration.ready_steps
-_render_dataset = legacy_orchestration.render_dataset
-_step_message = legacy_orchestration.step_message
-_run_step = legacy_orchestration.run_step
-_to_reported = legacy_orchestration.to_reported
-_pipe_outputs = legacy_orchestration.pipe_outputs
-_kickoff_parent = legacy_orchestration.kickoff_parent
+# Private seam retained for focused legacy-fallback tests.
+_run_step = legacy_taskcard_workflow.run_step
 
 
 async def plan(db: AsyncSession, request: str) -> list[PlanStep] | None:
@@ -61,7 +55,7 @@ async def advance(
     db: AsyncSession, parent_id: uuid.UUID, *, operator_id: uuid.UUID | None
 ) -> dict[str, Any]:
     """显式委派旧 TaskCard-only 同步执行器。"""
-    return await legacy_orchestration.advance(
+    return await legacy_taskcard_workflow.advance(
         db,
         parent_id,
         operator_id=operator_id,
@@ -122,9 +116,9 @@ async def resume_if_step(
 async def progress(db: AsyncSession, parent_id: uuid.UUID) -> dict[str, Any]:
     if await workflow_service.get_run_by_parent_task(db, parent_id) is not None:
         return await get_workflow_engine().progress(db, parent_id)
-    return await legacy_orchestration.progress(db, parent_id)
+    return await legacy_taskcard_workflow.progress(db, parent_id)
 
 
 async def recover_incomplete(db: AsyncSession) -> dict[str, int]:
     """迁移期旧 TaskCard-only 编排恢复入口。"""
-    return await legacy_orchestration.recover_incomplete(db, advance_runner=advance)
+    return await legacy_taskcard_workflow.recover_incomplete(db, advance_runner=advance)

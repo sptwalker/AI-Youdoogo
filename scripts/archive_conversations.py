@@ -16,9 +16,22 @@ sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows 
 
 from sqlalchemy import select  # noqa: E402
 
+from app.contexts.business.assistant_conversations.application.contracts import (  # noqa: E402
+    Principal,
+)
+from app.contexts.business.assistant_conversations.entrypoints import (  # noqa: E402
+    operations as assistant_conversations,
+)
 from app.core.database import async_session_factory  # noqa: E402
 from app.models.system import SysUser  # noqa: E402
-from app.services import desktop_chat_service  # noqa: E402
+
+
+def _principal(user: SysUser) -> Principal:
+    return Principal(
+        id=user.id,
+        display_name=user.real_name or user.username,
+        department_id=user.department_id,
+    )
 
 
 async def _run() -> int:
@@ -27,15 +40,13 @@ async def _run() -> int:
         users = list(
             (
                 await db.execute(
-                    select(SysUser).where(
-                        SysUser.is_active.is_(True), SysUser.is_delete.is_(False)
-                    )
+                    select(SysUser).where(SysUser.is_active.is_(True), SysUser.is_delete.is_(False))
                 )
             ).scalars()
         )
         for user in users:
             try:
-                n = await desktop_chat_service.archive_old(db, user)
+                n = await assistant_conversations.archive_old(db, _principal(user))
             except Exception as exc:  # noqa: BLE001 - 单个用户失败不影响其余
                 print(f"用户 {user.username} 归档失败：{exc}")
                 continue

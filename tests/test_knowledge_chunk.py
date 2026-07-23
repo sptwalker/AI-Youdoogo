@@ -1,6 +1,8 @@
 """文本分块单测（纯逻辑，无网络）。"""
 
-from app.knowledge.chunk import chunk_text
+from app.contexts.foundations.knowledge.knowledge_indexing.domain.chunking import (
+    chunk_text,
+)
 
 
 def test_short_text_single_chunk() -> None:

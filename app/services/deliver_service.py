@@ -28,8 +28,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.knowledge.storage as storage
 from app.agents.contracts import ExecutionContext, SkillRequest, SkillResult
-from app.knowledge import storage
 from app.models.agent import AgentRole
 from app.models.deliverable import Deliverable
 from app.services import config_service

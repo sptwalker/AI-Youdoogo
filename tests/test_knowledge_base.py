@@ -4,14 +4,15 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 from app.contexts.shared_kernel import ApplicationError
-from app.knowledge.scope import resolve_visible_kb_ids
 from app.models import Base
 from app.models.knowledge import KnowledgeBase, KnowledgeFile
 from app.models.system import SysDepartment
-from app.services import knowledge_base_service as kb_svc
+from app.platform.outbox.model import OutboxEvent
 
 
 @pytest.fixture
@@ -23,9 +24,7 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as s:
         # 公司公共库种子（生产在迁移 012 里，SQLite 单测手工建）
         s.add(
-            KnowledgeBase(
-                name="公司公共知识库", code="kb_public", scope="company", is_default=True
-            )
+            KnowledgeBase(name="公司公共知识库", code="kb_public", scope="company", is_default=True)
         )
         await s.commit()
         yield s
@@ -35,25 +34,41 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 async def test_create_scopes(session: AsyncSession) -> None:
     """三档 scope 建库；department/personal 缺归属时拒绝。"""
     dept_id, agent_id = uuid.uuid4(), uuid.uuid4()
-    assert (await kb_svc.create_kb(session, name="A", scope="company")).scope == "company"
-    d = await kb_svc.create_kb(session, name="B", scope="department", department_id=dept_id)
+    assert (
+        await wiki_management.create_knowledge_base(session, name="A", scope="company")
+    ).scope == "company"
+    d = await wiki_management.create_knowledge_base(
+        session,
+        name="B",
+        scope="department",
+        department_id=dept_id,
+    )
     assert d.department_id == dept_id
-    p = await kb_svc.create_kb(session, name="C", scope="personal", owner_agent_id=agent_id)
+    p = await wiki_management.create_knowledge_base(
+        session,
+        name="C",
+        scope="personal",
+        owner_agent_id=agent_id,
+    )
     assert p.owner_agent_id == agent_id
     with pytest.raises(ApplicationError, match="部门"):
-        await kb_svc.create_kb(session, name="D", scope="department")
+        await wiki_management.create_knowledge_base(session, name="D", scope="department")
     with pytest.raises(ApplicationError, match="智能体"):
-        await kb_svc.create_kb(session, name="E", scope="personal")
+        await wiki_management.create_knowledge_base(session, name="E", scope="personal")
 
 
 async def test_default_kb_not_deletable(session: AsyncSession) -> None:
-    default = await kb_svc.get_default_kb(session)
+    default = await wiki_management.get_default_knowledge_base(session)
     with pytest.raises(ApplicationError, match="不可删除"):
-        await kb_svc.delete_kb(session, default.id)
+        await wiki_management.delete_knowledge_base(session, default.id)
 
 
 async def test_delete_blocked_by_files(session: AsyncSession) -> None:
-    kb = await kb_svc.create_kb(session, name="有文件", scope="company")
+    kb = await wiki_management.create_knowledge_base(
+        session,
+        name="有文件",
+        scope="company",
+    )
     session.add(
         KnowledgeFile(
             file_name="f", knowledge_base_id=kb.id, uploader_id=uuid.uuid4(), storage_path="inline"
@@ -61,33 +76,145 @@ async def test_delete_blocked_by_files(session: AsyncSession) -> None:
     )
     await session.commit()
     with pytest.raises(ApplicationError, match="文档"):
-        await kb_svc.delete_kb(session, kb.id)
+        await wiki_management.delete_knowledge_base(session, kb.id)
+
+
+async def test_crud_dict_shape_and_rebuild_trigger(session: AsyncSession) -> None:
+    kb = await wiki_management.create_knowledge_base(
+        session,
+        name="待更新",
+        code="kb_crud",
+        scope="company",
+        description="旧描述",
+    )
+    updated = await wiki_management.update_knowledge_base(
+        session,
+        kb.id,
+        name="已更新",
+        description="新描述",
+        is_active=False,
+    )
+    assert updated.name == "已更新"
+    assert updated.description == "新描述"
+    assert updated.is_active is False
+
+    row = next(
+        snapshot.to_dict()
+        for snapshot in await wiki_management.list_knowledge_bases(session)
+        if snapshot.id == kb.id
+    )
+    assert row == {
+        "id": str(kb.id),
+        "name": "已更新",
+        "code": "kb_crud",
+        "scope": "company",
+        "department_id": None,
+        "owner_agent_id": None,
+        "is_confidential": False,
+        "is_default": False,
+        "is_active": False,
+        "description": "新描述",
+        "file_count": 0,
+    }
+
+    events = list(
+        (
+            await session.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "environment.source.changed.v1",
+                    OutboxEvent.aggregate_id == kb.id,
+                )
+            )
+        ).scalars()
+    )
+    assert len(events) == 2
+    assert all(event.payload["source_type"] == "knowledge_base" for event in events)
+
+    await wiki_management.delete_knowledge_base(session, kb.id)
+    with pytest.raises(ApplicationError, match="不存在"):
+        await wiki_management.get_knowledge_base(session, kb.id)
+    event_count = len(
+        list(
+            (
+                await session.execute(
+                    select(OutboxEvent).where(
+                        OutboxEvent.event_type == "environment.source.changed.v1",
+                        OutboxEvent.aggregate_id == kb.id,
+                    )
+                )
+            ).scalars()
+        )
+    )
+    assert event_count == 3
+
+
+async def test_duplicate_code_conflict_keeps_transaction_usable(
+    session: AsyncSession,
+) -> None:
+    await wiki_management.create_knowledge_base(
+        session,
+        name="第一个",
+        code="kb_duplicate",
+        scope="company",
+    )
+    with pytest.raises(ApplicationError, match="编码已存在"):
+        await wiki_management.create_knowledge_base(
+            session,
+            name="重复",
+            code="kb_duplicate",
+            scope="company",
+        )
+    recovered = await wiki_management.create_knowledge_base(
+        session,
+        name="恢复后",
+        code="kb_recovered",
+        scope="company",
+    )
+    assert recovered.code == "kb_recovered"
 
 
 async def test_visible_scope_isolation(session: AsyncSession) -> None:
     """契约②减法隔离：admin 全见；本部门见本部门机密+自己私库；外人只见公司公共。"""
     dept_id = uuid.uuid4()
     session.add(SysDepartment(id=dept_id, name="财务", code="fin", path=f"/{dept_id}/"))
-    conf = await kb_svc.create_kb(
+    conf = await wiki_management.create_knowledge_base(
         session, name="机密", scope="department", department_id=dept_id, is_confidential=True
     )
     agent_a, agent_b = uuid.uuid4(), uuid.uuid4()
-    pa = await kb_svc.create_kb(session, name="A私库", scope="personal", owner_agent_id=agent_a)
-    pb = await kb_svc.create_kb(session, name="B私库", scope="personal", owner_agent_id=agent_b)
-    default = await kb_svc.get_default_kb(session)
+    pa = await wiki_management.create_knowledge_base(
+        session,
+        name="A私库",
+        scope="personal",
+        owner_agent_id=agent_a,
+    )
+    pb = await wiki_management.create_knowledge_base(
+        session,
+        name="B私库",
+        scope="personal",
+        owner_agent_id=agent_b,
+    )
+    default = await wiki_management.get_default_knowledge_base(session)
 
     # admin 全库可见
-    admin_ids = set(await resolve_visible_kb_ids(session, department_id=None, is_admin=True))
+    admin_ids = set(
+        await wiki_management.visible_knowledge_base_ids(
+            session,
+            department_id=None,
+            is_admin=True,
+        )
+    )
     assert {conf.id, pa.id, pb.id, default.id}.issubset(admin_ids)
 
     # 本部门 A 员工：公司公共 + 本部门机密 + 自己私库；不见 B 私库
-    a_ids = await resolve_visible_kb_ids(
+    a_ids = await wiki_management.visible_knowledge_base_ids(
         session, department_id=dept_id, owner_agent_id=agent_a
     )
     assert default.id in a_ids and conf.id in a_ids and pa.id in a_ids
     assert pb.id not in a_ids
 
     # 无部门外人：只见公司公共，不见机密/他人私库
-    out_ids = await resolve_visible_kb_ids(session, department_id=None, owner_agent_id=None)
+    out_ids = await wiki_management.visible_knowledge_base_ids(
+        session, department_id=None, owner_agent_id=None
+    )
     assert default.id in out_ids
     assert conf.id not in out_ids and pa.id not in out_ids

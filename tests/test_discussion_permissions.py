@@ -122,6 +122,16 @@ async def test_only_owner_can_add_members(permission_ctx: PermissionContext) -> 
     assert allowed.json()["data"] == {"added": 1}
 
 
+async def test_owner_cannot_be_removed(permission_ctx: PermissionContext) -> None:
+    client, users, state = permission_ctx
+    state["user_id"] = users["owner"]
+    response = await client.delete(
+        f"/api/v1/channels/{state['private']}/members/human/{users['owner']}"
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == 400
+
+
 async def test_channel_list_is_member_scoped_but_managers_see_all(
     permission_ctx: PermissionContext,
 ) -> None:

@@ -34,7 +34,9 @@ async def test_create_with_mixed_members(db: AsyncSession) -> None:
     """建群带真人+AI 混合初始成员。"""
     creator, human2, ai1 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     c = await discussion_service.create_channel(
-        db, name="混合群", creator_id=creator,
+        db,
+        name="混合群",
+        creator_id=creator,
         members=[
             {"member_type": "human", "member_id": human2, "member_name": "李四"},
             {"member_type": "ai", "member_id": ai1, "member_name": "顾问A"},
@@ -48,19 +50,17 @@ async def test_create_with_mixed_members(db: AsyncSession) -> None:
 async def test_add_members_idempotent(db: AsyncSession) -> None:
     creator, h2 = uuid.uuid4(), uuid.uuid4()
     c = await discussion_service.create_channel(db, name="g", creator_id=creator)
-    n1 = await discussion_service.add_members(
-        db, c.id, [{"member_type": "human", "member_id": h2}]
-    )
-    n2 = await discussion_service.add_members(
-        db, c.id, [{"member_type": "human", "member_id": h2}]
-    )
+    n1 = await discussion_service.add_members(db, c.id, [{"member_type": "human", "member_id": h2}])
+    n2 = await discussion_service.add_members(db, c.id, [{"member_type": "human", "member_id": h2}])
     assert n1 == 1 and n2 == 0  # 重复不加
 
 
 async def test_remove_member(db: AsyncSession) -> None:
     creator, h2 = uuid.uuid4(), uuid.uuid4()
     c = await discussion_service.create_channel(
-        db, name="g", creator_id=creator,
+        db,
+        name="g",
+        creator_id=creator,
         members=[{"member_type": "human", "member_id": h2}],
     )
     assert await discussion_service.is_member(db, c.id, h2) is True
@@ -89,7 +89,9 @@ async def test_disband_soft_deletes_channel_and_members(db: AsyncSession) -> Non
 
     creator, h2 = uuid.uuid4(), uuid.uuid4()
     c = await discussion_service.create_channel(
-        db, name="g", creator_id=creator,
+        db,
+        name="g",
+        creator_id=creator,
         members=[{"member_type": "human", "member_id": h2}],
     )
     await discussion_service.disband_channel(db, c.id)
@@ -98,11 +100,14 @@ async def test_disband_soft_deletes_channel_and_members(db: AsyncSession) -> Non
     assert ch is not None and ch.is_delete is True
     # 成员软删
     from sqlalchemy import func, select
-    live = (await db.execute(
-        select(func.count()).select_from(ChannelMember).where(
-            ChannelMember.channel_id == c.id, ChannelMember.is_delete.is_(False)
+
+    live = (
+        await db.execute(
+            select(func.count())
+            .select_from(ChannelMember)
+            .where(ChannelMember.channel_id == c.id, ChannelMember.is_delete.is_(False))
         )
-    )).scalar_one()
+    ).scalar_one()
     assert live == 0
     # 不再出现在任何人的"我的群"
     assert str(c.id) not in await discussion_service.my_channel_ids(db, creator)
@@ -125,10 +130,15 @@ async def test_unread_count(db: AsyncSession) -> None:
     c = await discussion_service.create_channel(db, name="g", creator_id=me)
     # 他人发 2 条
     for i in range(2):
-        db.add(DiscussionMessage(
-            channel_id=c.id, speaker_type="human", speaker_id=other,
-            speaker_name="他", content=f"msg{i}",
-        ))
+        db.add(
+            DiscussionMessage(
+                channel_id=c.id,
+                speaker_type="human",
+                speaker_id=other,
+                speaker_name="他",
+                content=f"msg{i}",
+            )
+        )
     await db.commit()
     chans = await discussion_service.my_channels_with_unread(db, me)
     mine = next(x for x in chans if x["id"] == str(c.id))
@@ -145,38 +155,62 @@ async def test_unread_excludes_own_messages(db: AsyncSession) -> None:
 
     me = uuid.uuid4()
     c = await discussion_service.create_channel(db, name="g", creator_id=me)
-    db.add(DiscussionMessage(
-        channel_id=c.id, speaker_type="human", speaker_id=me,
-        speaker_name="我", content="自己发的",
-    ))
+    db.add(
+        DiscussionMessage(
+            channel_id=c.id,
+            speaker_type="human",
+            speaker_id=me,
+            speaker_name="我",
+            content="自己发的",
+        )
+    )
     await db.commit()
     chans = await discussion_service.my_channels_with_unread(db, me)
     assert next(x for x in chans if x["id"] == str(c.id))["unread"] == 0
 
 
 # ── I7 群聊归档入库 ─────────────────────────────────────
-async def test_archive_ingests_to_kb(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_archive_ingests_to_kb(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """归档群 → 聊天记录提炼入 KB（复用 H3.2）。"""
     from app.models.discussion import DiscussionMessage
 
     creator = uuid.uuid4()
     c = await discussion_service.create_channel(db, name="项目群", creator_id=creator)
-    db.add(DiscussionMessage(
-        channel_id=c.id, speaker_type="human", speaker_id=creator,
-        speaker_name="张三", content="讨论了运营方案",
-    ))
+    db.add(
+        DiscussionMessage(
+            channel_id=c.id,
+            speaker_type="human",
+            speaker_id=creator,
+            speaker_name="张三",
+            content="讨论了运营方案",
+        )
+    )
     await db.commit()
 
     captured: dict[str, object] = {}
 
-    async def _fake_distill(_db: object, transcript: str, **kw: object) -> str:
-        return "## 摘要\n讨论运营方案"
+    from app.contexts.foundations.knowledge.knowledge_indexing import (
+        public as knowledge_indexing,
+    )
+    from app.contexts.foundations.knowledge.organizational_memory import (
+        public as organizational_memory,
+    )
+    from app.contexts.foundations.knowledge.organizational_memory.contracts import (
+        MemoryDraft,
+    )
+    from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 
-    async def _fake_ingest(_db: object, *, title: str, text: str, **kw: object) -> None:
-        captured["title"] = title
-        captured["text"] = text
+    async def _fake_distill(_db: object, command: object, **kw: object) -> MemoryDraft:
+        assert "运营方案" in str(command.transcript)
+        return MemoryDraft(
+            content="## 摘要\n讨论运营方案",
+            source_type="discussion_channel",
+            source_id=c.id,
+        )
+
+    async def _fake_index(_db: object, command: object) -> None:
+        captured["title"] = command.title
+        captured["text"] = command.text
 
     class _KB:
         id = uuid.uuid4()
@@ -184,12 +218,9 @@ async def test_archive_ingests_to_kb(
     async def _fake_kb(_db: object) -> object:
         return _KB()
 
-    from app.knowledge import ingest as ingest_mod
-    from app.services import knowledge_base_service, memory_service
-
-    monkeypatch.setattr(memory_service, "distill_conversation", _fake_distill)
-    monkeypatch.setattr(ingest_mod, "ingest_text", _fake_ingest)
-    monkeypatch.setattr(knowledge_base_service, "get_default_kb", _fake_kb)
+    monkeypatch.setattr(organizational_memory, "distill_conversation", _fake_distill)
+    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_index)
+    monkeypatch.setattr(wiki_management, "get_default_knowledge_base", _fake_kb)
 
     await discussion_service.archive_channel(db, c.id)
     assert "群聊存档" in str(captured.get("title")) and "运营方案" in str(captured.get("text"))

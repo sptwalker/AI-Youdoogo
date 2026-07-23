@@ -12,15 +12,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
+from app.contexts.foundations.access_control.entrypoints import operations as access
+from app.contexts.foundations.governance.audit_trail.public import (
+    AppendAuditRecordCommand,
+    append_audit_record,
+)
+from app.contexts.foundations.identity.public import IdentityUserResult
 from app.core.database import get_db
-from app.models.system import SysUser
 from app.platform.http_runtime import ok
-from app.services import audit_service, resource_grant_service
 
 router = APIRouter(prefix="/resource-grants", tags=["permission"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
-Admin = Annotated[SysUser, Depends(require_roles("admin"))]
+Admin = Annotated[IdentityUserResult, Depends(require_roles("admin"))]
 
 
 class GrantCreate(BaseModel):
@@ -42,37 +46,66 @@ async def list_grants(
     grantee_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> dict:
     """授权列表（可按资源类型/被授方过滤）。"""
+    grants = await access.list_grants(
+        db,
+        resource_type=resource_type,
+        grantee_id=grantee_id,
+    )
     return ok(
-        await resource_grant_service.list_grants(
-            db, resource_type=resource_type, grantee_id=grantee_id
-        )
+        [
+            {
+                "id": str(grant.id),
+                "resource_type": grant.resource_type,
+                "resource_id": str(grant.resource_id),
+                "grantee_type": grant.grantee_type,
+                "grantee_id": str(grant.grantee_id),
+                "perm": grant.perm,
+                "granted_by": str(grant.granted_by) if grant.granted_by else None,
+                "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
+                "create_time": grant.create_time.isoformat(),
+            }
+            for grant in grants
+        ]
     )
 
 
 @router.post("")
 async def create_grant(body: GrantCreate, db: DB, admin: Admin) -> dict:
     """新增授权 → 落权限变更审计。"""
-    g = await resource_grant_service.create_grant(
+    grant = await access.create_grant(
         db,
         resource_type=body.resource_type, resource_id=body.resource_id,
         grantee_type=body.grantee_type, grantee_id=body.grantee_id,
-        perm=body.perm, granted_by=admin.id, expires_at=body.expires_at,
+        permission=body.perm, granted_by=admin.id, expires_at=body.expires_at,
     )
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="grant.create",
-        summary=f"授权 {body.resource_type} → {body.grantee_type}",
-        target_type=body.resource_type, target_id=body.resource_id,
-        detail={"grantee_id": str(body.grantee_id), "perm": body.perm},
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="grant.create",
+            summary=f"授权 {body.resource_type} → {body.grantee_type}",
+            target_type=body.resource_type,
+            target_id=body.resource_id,
+            detail={"grantee_id": str(body.grantee_id), "perm": body.perm},
+        ),
     )
-    return ok({"id": str(g.id)})
+    return ok({"id": str(grant.id)})
 
 
 @router.delete("/{grant_id}")
 async def revoke_grant(grant_id: uuid.UUID, db: DB, admin: Admin) -> dict:
     """撤销授权 → 落权限变更审计。"""
-    await resource_grant_service.revoke_grant(db, grant_id)
-    await audit_service.audit(
-        db, actor_id=admin.id, actor_role=admin.role_code, action="grant.revoke",
-        summary="撤销授权", target_type="resource_grant", target_id=grant_id,
+    await access.revoke_grant(db, grant_id)
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="grant.revoke",
+            summary="撤销授权",
+            target_type="resource_grant",
+            target_id=grant_id,
+        ),
     )
     return ok()

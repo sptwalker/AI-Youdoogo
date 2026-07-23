@@ -15,6 +15,12 @@ from app.agents.legacy_skill_adapters import (
     legacy_deliver,
     legacy_query,
 )
+from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
+    CapabilityDefinition,
+)
+from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
+    CAPABILITY_DEFINITIONS,
+)
 from app.models.agent import AgentRole
 from app.services import config_service
 
@@ -23,15 +29,34 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Skill:
-    """One source of truth for skill prompt metadata and executor registration."""
+    """Legacy runtime binding kept separate from catalog metadata."""
 
-    key: str
-    label: str
-    description: str
-    flag_key: str
-    default_on: bool = True
+    definition: CapabilityDefinition
     executor_factory: Callable[[], SkillExecutor] | None = None
     legacy_executor: LegacyExecutor | None = None
+
+    @property
+    def key(self) -> str:
+        return self.definition.key
+
+    @property
+    def label(self) -> str:
+        return self.definition.label
+
+    @property
+    def description(self) -> str:
+        return self.definition.description
+
+    @property
+    def flag_key(self) -> str:
+        return self.definition.feature_flag or ""
+
+    @property
+    def default_on(self) -> bool:
+        return self.definition.default_enabled
+
+
+_DEFINITIONS = {definition.key: definition for definition in CAPABILITY_DEFINITIONS}
 
 
 def _collab_executor() -> SkillExecutor:
@@ -54,32 +79,20 @@ def _query_executor() -> SkillExecutor:
 
 REGISTRY: dict[str, Skill] = {
     "env_context": Skill(
-        "env_context",
-        "环境快照",
-        "感知组织架构/AI花名册/真人用户/数据接口",
-        "agent_env_context",
+        _DEFINITIONS["env_context"],
     ),
     "collab": Skill(
-        "collab",
-        "协作原语",
-        "咨询其他AI + 发起跨部门协作（真人复核生效）",
-        "agent_collab_protocol",
+        _DEFINITIONS["collab"],
         executor_factory=_collab_executor,
         legacy_executor=legacy_collab,
     ),
     "deliver": Skill(
-        "deliver",
-        "文件交付",
-        "把产出整理成CSV/XLSX/文档交付到工作桌面",
-        "agent_deliver",
+        _DEFINITIONS["deliver"],
         executor_factory=_deliver_executor,
         legacy_executor=legacy_deliver,
     ),
     "data_query": Skill(
-        "data_query",
-        "数据取数",
-        "用只读SQL查运营数据（护栏校验+审计）",
-        "agent_data_query",
+        _DEFINITIONS["data_query"],
         executor_factory=_query_executor,
         legacy_executor=legacy_query,
     ),

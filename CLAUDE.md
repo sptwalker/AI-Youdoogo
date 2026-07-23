@@ -48,10 +48,17 @@ app/
 **目录/表/服务只在当前阶段用到时创建，禁止预建空壳。** 旧路径仅作为兼容 facade；新代码禁止反向依赖
 `app/services`、`app/models` 等旧横向实现。完整 Context Map、数据所有权和迁移顺序以 docs/20 为准。
 
-当前已落地 Bootstrap、Database、Outbox、HTTP Runtime、Governed Data Query、Proposal Management
-和 Shared Kernel 应用错误分类。应用错误不携带 HTTP 元数据；HTTP status/code 只允许在
-Bootstrap 或 Context entrypoint/HTTP adapter 中映射。旧 `AppError` 调用和 `app.core.exceptions`
-兼容层已全部移除。
+当前 OpenSpec 迁移的 P0～P4 已完成：Bootstrap/Database/Outbox/HTTP Runtime、Proposal、
+Expert/Agent/Capability、Planning/Workflow/Task、Identity/Organization/Knowledge/Environment、
+Communication/Meeting/Analytics/Governance 均已有 Context-owned 边界；HTTP route 已迁到 Context
+entrypoint，route 对 ORM、旧 Service 和具体 Agent/LLM 的依赖已清除，6 个零调用 facade 已删除。
+实施 ownership map、保留 facade 清单、零调用证据和退出条件见
+`docs/20-DDD领域边界与分层架构规范.md` 第 11 节。
+
+应用错误不携带 HTTP 元数据；HTTP status/code 只允许在 Bootstrap 或 Context entrypoint/HTTP adapter
+中映射。旧 `AppError` 调用和 `app.core.exceptions` 兼容层已全部移除。最终门禁已通过 Ruff、Mypy、
+683 个非交付 Pytest、前端 test/lint/build、单一 migration head、app/worker smoke；Graphify 代码图已刷新
+并验证无 import cycle、无 Context→legacy 反向依赖、无重复持久化 writer。
 
 ## 开发铁律
 
