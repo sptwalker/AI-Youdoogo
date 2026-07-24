@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listUsers, type UserInfo } from '../api/auth'
 import { getDesktop, listDeliverables, type Deliverable, type Desktop } from '../api/desktop'
 
@@ -7,22 +7,42 @@ export function useDashboardData(me: UserInfo | null) {
   const [viewUser, setViewUser] = useState<string | undefined>()
   const [users, setUsers] = useState<UserInfo[]>([])
   const [deliverables, setDeliverables] = useState<Deliverable[]>([])
+  const desktopRequestRef = useRef(0)
+  const deliverablesRequestRef = useRef(0)
 
-  const reload = useCallback(async () => setData(await getDesktop(viewUser)), [viewUser])
+  const reload = useCallback(async () => {
+    const requestId = ++desktopRequestRef.current
+    const next = await getDesktop(viewUser)
+    if (requestId === desktopRequestRef.current) setData(next)
+  }, [viewUser])
   const loadDeliverables = useCallback(async () => {
-    setDeliverables(await listDeliverables(viewUser))
+    const requestId = ++deliverablesRequestRef.current
+    const next = await listDeliverables(viewUser)
+    if (requestId === deliverablesRequestRef.current) setDeliverables(next)
   }, [viewUser])
 
   useEffect(() => {
-    void reload()
+    setData(null)
+    void reload().catch(() => {})
+    return () => { desktopRequestRef.current += 1 }
   }, [reload])
 
   useEffect(() => {
-    void loadDeliverables()
+    setDeliverables([])
+    void loadDeliverables().catch(() => {})
+    return () => { deliverablesRequestRef.current += 1 }
   }, [loadDeliverables])
 
   useEffect(() => {
-    if (me?.role_code === 'admin') void listUsers().then(setUsers)
+    let disposed = false
+    if (me?.role_code === 'admin') {
+      void listUsers()
+        .then((items) => { if (!disposed) setUsers(items) })
+        .catch(() => {})
+    } else {
+      setUsers([])
+    }
+    return () => { disposed = true }
   }, [me])
 
   return {

@@ -83,6 +83,7 @@ export default function OpsBoard() {
               uploadOpsDaily(file)
                 .then((r) => {
                   message.success(`已入库 ${r.upserted} 条，错误 ${r.errors.length} 条`)
+                  actionRef.current?.reload()
                 })
                 .catch(() => {
                   /* 错误已由拦截器提示 */

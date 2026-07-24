@@ -10,7 +10,18 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Switch, Tag, Typography, message } from 'antd'
 import { useRef } from 'react'
-import { createUser, listUsers, ROLE_LABELS, updateUser, type UserInfo } from '../api/auth'
+import {
+  createUser,
+  listUsers,
+  ROLE_LABELS,
+  updateUser,
+  type UserInfo,
+} from '../api/auth'
+import {
+  normalizeUserCreateValues,
+  validateOptionalFeishuOpenId,
+  type UserCreateFormValues,
+} from './userForm'
 
 export default function Users() {
   const actionRef = useRef<ActionType>(null)
@@ -89,7 +100,9 @@ export default function Users() {
             label="飞书 open_id"
             tooltip="填写飞书授权用户的不可变 open_id；留空保存可解绑。解绑不会替代停用账号。"
             fieldProps={{ maxLength: 128 }}
-            rules={[{ pattern: /^(|ou[-_][A-Za-z0-9_-]+)$/, message: '请输入以 ou_ 或 ou- 开头的 open_id' }]}
+            rules={[
+              { validator: (_, value) => validateOptionalFeishuOpenId(value as string | undefined) },
+            ]}
           />
         </ModalForm>,
       ],
@@ -108,19 +121,13 @@ export default function Users() {
           return { data: users, success: true }
         }}
         toolBarRender={() => [
-          <ModalForm<{
-            username: string
-            password: string
-            real_name?: string
-            role_code: string
-            feishu_open_id?: string
-          }>
+          <ModalForm<UserCreateFormValues>
             key="create"
             title="新建用户"
             trigger={<Button type="primary">新建用户</Button>}
             modalProps={{ destroyOnHidden: true }}
             onFinish={async (values) => {
-              await createUser(values)
+              await createUser(normalizeUserCreateValues(values))
               message.success('已创建')
               actionRef.current?.reload()
               return true
@@ -131,20 +138,34 @@ export default function Users() {
               label="用户名"
               rules={[
                 { required: true },
+                { min: 2, message: '至少2位' },
+                { max: 64, message: '最多64位' },
                 { pattern: /^[a-zA-Z0-9_.-]+$/, message: '仅限字母/数字/_.-' },
               ]}
             />
             <ProFormText.Password
               name="password"
               label="初始密码"
-              rules={[{ required: true, min: 8, message: '至少8位' }]}
+              fieldProps={{ maxLength: 128 }}
+              rules={[
+                { required: true, min: 8, message: '至少8位' },
+                { max: 128, message: '最多128位' },
+              ]}
             />
-            <ProFormText name="real_name" label="姓名" />
+            <ProFormText
+              name="real_name"
+              label="姓名"
+              fieldProps={{ maxLength: 64 }}
+              rules={[{ max: 64, message: '最多64位' }]}
+            />
             <ProFormText
               name="feishu_open_id"
               label="飞书 open_id（可选）"
               tooltip="填写当前应用内稳定的飞书 open_id 完成预绑定；未绑定身份不能登录，也不会自动开户。"
-              rules={[{ pattern: /^(|ou[-_][A-Za-z0-9_-]+)$/, message: '请输入以 ou_ 或 ou- 开头的 open_id' }]}
+              fieldProps={{ maxLength: 128 }}
+              rules={[
+                { validator: (_, value) => validateOptionalFeishuOpenId(value as string | undefined) },
+              ]}
             />
             <ProFormSelect
               name="role_code"

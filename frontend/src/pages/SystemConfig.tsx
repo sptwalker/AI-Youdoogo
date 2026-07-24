@@ -38,7 +38,10 @@ const KEY_LABEL: Record<string, string> = {
   agent_global_prompt: 'AI 全局红线提示词',
 }
 
-const asText = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v))
+const asText = (v: unknown): string => {
+  if (v == null) return ''
+  return typeof v === 'string' ? v : JSON.stringify(v)
+}
 const label = (k: string) => KEY_LABEL[k] ?? k
 
 /** 连通性测试目标的中文名。 */
@@ -82,6 +85,7 @@ export default function SystemConfig() {
   }
 
   const runReadTest = async () => {
+    if (!readDate) return
     setReading(true)
     try {
       setReadResult(await testReadOpsData(readDate))
@@ -174,7 +178,13 @@ export default function SystemConfig() {
               onChange={(e) => setReadDate(e.target.value)}
               style={{ padding: '2px 6px' }}
             />
-            <Button size="small" type="primary" loading={reading} onClick={runReadTest}>
+            <Button
+              size="small"
+              type="primary"
+              loading={reading}
+              disabled={!readDate}
+              onClick={runReadTest}
+            >
               测试读取该日数据
             </Button>
           </Space>

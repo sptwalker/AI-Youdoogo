@@ -12,6 +12,13 @@ import { getOrchestrationProgress, transitionTask, type OrchProgress } from '../
 import DashboardSidebar from '../components/dashboard/DashboardSidebar'
 import DesktopConversations from '../components/dashboard/DesktopConversations'
 import PendingCard from '../components/dashboard/PendingCard'
+import {
+  DESKTOP_STREAMING_MESSAGE_PREFIX,
+  appendDesktopAiDelta,
+  beginDesktopAiTurn,
+  clearFailedDesktopChat,
+  reconcileDesktopMessageEnd,
+} from '../components/dashboard/desktopChatModel'
 import { useDashboardData } from '../hooks/useDashboardData'
 
 export default function Dashboard() {
@@ -26,6 +33,8 @@ export default function Dashboard() {
   const [chatSending, setChatSending] = useState(false)
   const [orchestration, setOrchestration] = useState<OrchProgress | null>(null)
   const chatBoxRef = useRef<HTMLDivElement>(null)
+  const activeAiTurnIdRef = useRef<string | null>(null)
+  const aiTurnSequenceRef = useRef(0)
 
   useEffect(() => {
     const element = chatBoxRef.current
@@ -50,7 +59,7 @@ export default function Dashboard() {
     if (!chatInput.trim() || chatSending) return
     const query = chatInput.trim()
     const optimisticId = `tmp-${Date.now()}`
-    const streamId = '__streaming__'
+    activeAiTurnIdRef.current = null
     setChatInput('')
     setChatSending(true)
     setChatMessages((items) => [...items, { id: optimisticId, speaker_type: 'user', speaker_agent_id: null, speaker_name: '我', content: query, create_time: '' }])
@@ -58,22 +67,33 @@ export default function Dashboard() {
       await sendDesktopChat(query, addAgentIds, (event, payload) => {
         if (event === 'message_start') {
           const start = payload as unknown as { speaker_agent_id: string | null; speaker_name: string }
-          setChatMessages((items) => [...items, { id: streamId, speaker_type: 'ai', speaker_agent_id: start.speaker_agent_id, speaker_name: start.speaker_name, content: '', create_time: '' }])
+          const previousTurnId = activeAiTurnIdRef.current
+          const turnId = `${DESKTOP_STREAMING_MESSAGE_PREFIX}${++aiTurnSequenceRef.current}`
+          activeAiTurnIdRef.current = turnId
+          setChatMessages((items) => beginDesktopAiTurn(items, previousTurnId, turnId, start))
         } else if (event === 'delta') {
           const text = String((payload as { text?: unknown }).text ?? '')
-          setChatMessages((items) => items.map((item) => item.id === streamId ? { ...item, content: item.content + text } : item))
+          const activeTurnId = activeAiTurnIdRef.current
+          setChatMessages((items) => appendDesktopAiDelta(items, activeTurnId, text))
         } else if (event === 'message_end') {
           const persisted = payload as unknown as DesktopMessage
-          const replaceId = persisted.speaker_type === 'user' ? optimisticId : streamId
-          setChatMessages((items) => items.map((item) => item.id === replaceId ? persisted : item))
+          const activeTurnId = activeAiTurnIdRef.current
+          setChatMessages((items) => reconcileDesktopMessageEnd(
+            items,
+            persisted,
+            optimisticId,
+            activeTurnId,
+          ))
+          if (persisted.speaker_type === 'ai') activeAiTurnIdRef.current = null
         } else if (event === 'orchestration') {
           setOrchestration(payload as unknown as OrchProgress)
         }
       })
     } catch {
-      setChatMessages((items) => items.filter((item) => item.id !== streamId && item.id !== optimisticId))
+      setChatMessages((items) => clearFailedDesktopChat(items, optimisticId))
       setChatInput(query)
     } finally {
+      activeAiTurnIdRef.current = null
       setChatSending(false)
       void loadDeliverables()
     }

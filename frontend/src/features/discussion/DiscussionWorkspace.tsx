@@ -24,7 +24,7 @@ import {
 import { useAdvisorComposer } from './hooks/useAdvisorComposer'
 import { useDiscussionFeed, type ChannelMessageSession } from './hooks/useDiscussionFeed'
 
-export default function DiscussionWorkspace() {
+export default function DiscussionWorkspace({ canPromote = false }: { canPromote?: boolean }) {
   const [current, setCurrent] = useState<ChannelWithUnread | null>(null)
   const [agents, setAgents] = useState<AgentRole[]>([])
   const discussion = useDiscussionFeed({ activeChannelId: current?.id ?? null })
@@ -95,6 +95,7 @@ export default function DiscussionWorkspace() {
             channel={current}
             agents={agents}
             session={discussion.activeSession}
+            canPromote={canPromote}
           />
         )}
       </Card>
@@ -106,10 +107,12 @@ function AdvisorChannel({
   channel,
   agents,
   session,
+  canPromote,
 }: {
   channel: ChannelWithUnread
   agents: AgentRole[]
   session: ChannelMessageSession
+  canPromote: boolean
 }) {
   const composer = useAdvisorComposer({
     channelId: channel.id,
@@ -131,7 +134,7 @@ function AdvisorChannel({
           locale={{ emptyText: '还没有消息，@ 一位顾问开始讨论' }}
           renderItem={(item) => (
             <List.Item
-              actions={item.speaker_type === 'human' && !item.ref_id
+              actions={canPromote && item.speaker_type === 'human' && !item.ref_id
                 ? [
                     <Popconfirm
                       key="proposal"

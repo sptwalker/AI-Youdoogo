@@ -1,5 +1,8 @@
 /** 协作空间 API（对应后端 app/api/v1/discussion.py）。 */
+import { message } from 'antd'
 import {
+  ApiError,
+  clearSessionAndRedirectToLogin,
   request,
   sseRequest,
   sseSubscribe,
@@ -126,18 +129,48 @@ export async function uploadAttachment(file: File): Promise<Attachment> {
   return request({ method: 'POST', url: '/channels/attachments', data: form })
 }
 
-/** 群聊附件下载地址（带鉴权由前端 fetch，见 downloadAttachment）。 */
-export async function downloadAttachment(att: Attachment): Promise<void> {
+function attachmentDownloadUrl(att: Attachment): string {
+  return `/api/v1/channels/attachments/download?storage_path=${encodeURIComponent(att.storage_path)}&name=${encodeURIComponent(att.name)}`
+}
+
+/** 附件二进制内容；图片预览与文件下载都必须手动带 Bearer token。 */
+export async function fetchAttachmentBlob(
+  att: Attachment,
+  options: { signal?: AbortSignal; silent?: boolean } = {},
+): Promise<Blob> {
   const token = localStorage.getItem(TOKEN_KEY)
-  const url = `/api/v1/channels/attachments/download?storage_path=${encodeURIComponent(att.storage_path)}&name=${encodeURIComponent(att.name)}`
-  const resp = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-  if (!resp.ok) throw new Error('下载失败')
-  const blob = await resp.blob()
+  const resp = await fetch(attachmentDownloadUrl(att), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal: options.signal,
+  })
+  if (resp.status === 401) {
+    const redirected = clearSessionAndRedirectToLogin()
+    if (!redirected && !options.silent) message.error('未登录或登录已过期')
+    throw new ApiError('未登录或登录已过期')
+  }
+  if (!resp.ok) {
+    let errorMessage = '附件读取失败'
+    try {
+      const body = await resp.json() as { msg?: string; detail?: string }
+      errorMessage = body.msg ?? body.detail ?? errorMessage
+    } catch { /* 非 JSON 错误体 */ }
+    if (!options.silent) message.error(errorMessage)
+    throw new ApiError(errorMessage)
+  }
+  return resp.blob()
+}
+
+/** 群聊附件下载。 */
+export async function downloadAttachment(att: Attachment): Promise<void> {
+  const blob = await fetchAttachmentBlob(att)
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
+  const url = URL.createObjectURL(blob)
+  a.href = url
   a.download = att.name
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(a.href)
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 /** 订阅实时消息推送（I3）。别人在群发言即时收到，并暴露连接状态供轮询降级。 */

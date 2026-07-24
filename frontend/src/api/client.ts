@@ -20,6 +20,26 @@ const http = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 /** 已由拦截器/request 向用户提示过的 API 错误：全局据此抑制 unhandledrejection 噪音。 */
 export class ApiError extends Error {}
 
+interface BrowserLocation {
+  pathname: string
+  search: string
+}
+
+/** Build one consistent login hand-off for route guards and every API transport. */
+export function loginRedirectPath(location: BrowserLocation): string | null {
+  if (location.pathname === '/login') return null
+  const returnTo = `${location.pathname}${location.search}`
+  return `/login?${new URLSearchParams({ return_to: returnTo }).toString()}`
+}
+
+export function clearSessionAndRedirectToLogin(): boolean {
+  localStorage.removeItem(TOKEN_KEY)
+  const redirectPath = loginRedirectPath(window.location)
+  if (!redirectPath) return false
+  window.location.href = redirectPath
+  return true
+}
+
 http.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY)
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -33,8 +53,9 @@ http.interceptors.response.use(
     const msg: string = error.response?.data?.msg ?? '网络错误'
     const silent = Boolean((error.config as RequestConfig | undefined)?.silent)
     if (status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
-      if (window.location.pathname !== '/login') window.location.href = '/login'
+      const redirected = clearSessionAndRedirectToLogin()
+      // A credential failure on the login page is user feedback, not session expiry.
+      if (!redirected && !silent) message.error(msg)
     } else if (!silent) {
       message.error(msg)
     }
@@ -141,8 +162,7 @@ export async function sseRequest(url: string, body: unknown, onEvent: SseHandler
   })
   if (resp.status === 401) {
     // 复刻 axios 拦截器的 401 处理
-    localStorage.removeItem(TOKEN_KEY)
-    if (window.location.pathname !== '/login') window.location.href = '/login'
+    clearSessionAndRedirectToLogin()
     throw new ApiError('未登录或登录已过期')
   }
   if (!resp.ok || !resp.body) {
@@ -216,8 +236,7 @@ export function sseSubscribe(
           signal: ctrl.signal,
         })
         if (resp.status === 401) {
-          localStorage.removeItem(TOKEN_KEY)
-          if (window.location.pathname !== '/login') window.location.href = '/login'
+          clearSessionAndRedirectToLogin()
           stopped = true
           reportState('disconnected')
           return

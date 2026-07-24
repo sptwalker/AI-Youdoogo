@@ -36,6 +36,7 @@ export function updateDataSource(
   id: string,
   payload: {
     name?: string
+    config?: Record<string, unknown>
     secret_ref?: string
     is_active?: boolean
     department_id?: string

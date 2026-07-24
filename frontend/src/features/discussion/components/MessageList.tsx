@@ -1,8 +1,8 @@
 import { PaperClipOutlined } from '@ant-design/icons'
 import { Spin, Tag, Typography } from 'antd'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Markdown from '../../../components/Markdown'
-import { attachmentPreviewUrl, type Attachment, type Message } from '../api'
+import { fetchAttachmentBlob, type Attachment, type Message } from '../api'
 
 interface MessageListProps {
   messages: Message[]
@@ -75,17 +75,7 @@ function MessageItem({
       {(message.attachments ?? []).map((attachment, index) => (
         <div key={index} style={{ marginTop: 4 }}>
           {attachment.type === 'image' ? (
-            <img
-              src={attachmentPreviewUrl(attachment)}
-              alt={attachment.name}
-              style={{
-                maxWidth: 180,
-                maxHeight: 180,
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
-              onClick={() => onDownload(attachment)}
-            />
+            <AuthenticatedImage attachment={attachment} onDownload={onDownload} />
           ) : (
             <a onClick={() => onDownload(attachment)} style={{ fontSize: 12 }}>
               <PaperClipOutlined /> {attachment.name}
@@ -94,5 +84,60 @@ function MessageItem({
         </div>
       ))}
     </div>
+  )
+}
+
+function AuthenticatedImage({
+  attachment,
+  onDownload,
+}: {
+  attachment: Attachment
+  onDownload(attachment: Attachment): void
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const { name, size, storage_path: storagePath, type } = attachment
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    const previewAttachment: Attachment = { name, size, storage_path: storagePath, type }
+    setPreviewUrl(null)
+    setPreviewFailed(false)
+    void fetchAttachmentBlob(previewAttachment, { signal: controller.signal, silent: true })
+      .then((blob) => {
+        if (controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPreviewFailed(true)
+      })
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [name, size, storagePath, type])
+
+  if (!previewUrl) {
+    return (
+      <a onClick={() => onDownload(attachment)} style={{ fontSize: 12 }}>
+        <PaperClipOutlined /> {previewFailed ? '预览失败，点击下载' : `正在加载 ${attachment.name}…`}
+      </a>
+    )
+  }
+
+  return (
+    <img
+      src={previewUrl}
+      alt={attachment.name}
+      style={{
+        maxWidth: 180,
+        maxHeight: 180,
+        borderRadius: 6,
+        cursor: 'pointer',
+      }}
+      onClick={() => onDownload(attachment)}
+    />
   )
 }

@@ -5,6 +5,7 @@ import {
   createChannel,
   disbandChannel,
   downloadAttachment,
+  fetchAttachmentBlob,
   listMembers,
   listMessages,
   markRead,
@@ -23,6 +24,7 @@ import type { SseHandler } from '../../api/client'
 
 export type { AgentRole, Attachment, Colleague, Message }
 export type { ChannelWithUnread }
+export { fetchAttachmentBlob }
 
 export interface DiscussionMember {
   member_type: string
@@ -89,10 +91,4 @@ export const discussionWorkspaceApi: DiscussionWorkspaceApi = {
   createChannel,
   subscribeRealtime,
   promoteMessage,
-}
-
-export function attachmentPreviewUrl(attachment: Attachment): string {
-  const storagePath = encodeURIComponent(attachment.storage_path)
-  const name = encodeURIComponent(attachment.name)
-  return `/api/v1/channels/attachments/download?storage_path=${storagePath}&name=${name}`
 }

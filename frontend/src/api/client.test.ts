@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 
+import { message } from 'antd'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sseRequest, sseSubscribe, type SseConnectionState } from './client'
+import {
+  ApiError,
+  loginRedirectPath,
+  request,
+  sseRequest,
+  sseSubscribe,
+  TOKEN_KEY,
+  type SseConnectionState,
+} from './client'
 
 function sseResponse(...chunks: string[]): Response {
   return new Response(new ReadableStream<Uint8Array>({
@@ -24,6 +33,33 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   localStorage.clear()
+})
+
+describe('authentication failures', () => {
+  it('preserves the current application location when login is required', () => {
+    expect(loginRedirectPath({ pathname: '/tasks', search: '?status=todo' })).toBe(
+      '/login?return_to=%2Ftasks%3Fstatus%3Dtodo',
+    )
+    expect(loginRedirectPath({ pathname: '/login', search: '?return_to=%2Ftasks' })).toBeNull()
+  })
+
+  it('shows a password-login 401 instead of silently treating it as an expired session', async () => {
+    window.history.replaceState({}, '', '/login')
+    localStorage.setItem(TOKEN_KEY, 'stale-token')
+    const errorMessage = vi.spyOn(message, 'error').mockImplementation(() => undefined as never)
+
+    await expect(request({
+      method: 'POST',
+      url: '/auth/login',
+      adapter: async (config) => Promise.reject({
+        config,
+        response: { status: 401, data: { msg: '用户名或密码错误' } },
+      }),
+    })).rejects.toBeInstanceOf(ApiError)
+
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(errorMessage).toHaveBeenCalledWith('用户名或密码错误')
+  })
 })
 
 describe('sseRequest', () => {

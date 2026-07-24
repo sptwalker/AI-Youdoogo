@@ -48,7 +48,7 @@ describe('discussion presentation', () => {
     expect(markup.indexOf('human plain text')).toBeLessThan(markup.indexOf('AI markdown'))
     expect(markup).toContain('<strong>AI markdown</strong>')
     expect(markup).toContain('brief plan.pdf')
-    expect(markup).toContain('storage_path=chat%2Fdiagram.png')
+    expect(markup).toContain('正在加载 diagram.png…')
     expect(markup).toContain('ant-spin')
   })
 
@@ -71,6 +71,20 @@ describe('discussion presentation', () => {
     expect(ownerMarkup).toContain('Design Group')
     expect(ownerMarkup).toContain('4 成员')
     expect(ownerMarkup).toContain('群主')
+    expect(ownerMarkup).toContain('+ 拉人/AI')
     expect(ownerMarkup).toContain('解散群')
+
+    const memberMarkup = renderToStaticMarkup(
+      <ChannelActions
+        channelName="Design Group"
+        memberCount={4}
+        isOwner={false}
+        onOpenMembers={vi.fn()}
+        onOpenPicker={vi.fn()}
+        onDisband={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+    expect(memberMarkup).not.toContain('+ 拉人/AI')
+    expect(memberMarkup).not.toContain('解散群')
   })
 })

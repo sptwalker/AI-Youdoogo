@@ -77,6 +77,16 @@ export default function KnowledgeBases() {
           <ProFormSelect name="department_id" label="归属部门" options={depts} tooltip="改部门" />
           <ProFormTextArea name="description" label="描述" />
         </ModalForm>,
+        <a
+          key="active"
+          onClick={async () => {
+            await updateKnowledgeBase(r.id, { is_active: !r.is_active })
+            message.success(r.is_active ? '已停用' : '已启用')
+            reload()
+          }}
+        >
+          {r.is_active ? '停用' : '启用'}
+        </a>,
         <a key="grant" onClick={() => openGrants(r)}>授权</a>,
         r.is_default ? (
           <span key="d" style={{ color: '#ccc' }}>删除</span>
@@ -114,7 +124,22 @@ export default function KnowledgeBases() {
           >
             <ProFormText name="name" label="名称" rules={[{ required: true }]} />
             <ProFormSelect name="scope" label="范围" initialValue="department" options={[{ value: 'company', label: '公司（全员）' }, { value: 'department', label: '部门' }]} rules={[{ required: true }]} />
-            <ProFormSelect name="department_id" label="归属部门" options={depts} tooltip="部门范围时必填" />
+            <ProFormSelect
+              name="department_id"
+              label="归属部门"
+              options={depts}
+              tooltip="部门范围时必填"
+              dependencies={['scope']}
+              rules={[
+                ({ getFieldValue }) => ({
+                  validator: (_, value) => (
+                    getFieldValue('scope') !== 'department' || value
+                      ? Promise.resolve()
+                      : Promise.reject(new Error('部门范围必须选择归属部门'))
+                  ),
+                }),
+              ]}
+            />
             <ProFormSelect name="is_confidential" label="机密" initialValue={false} options={[{ value: false, label: '公开' }, { value: true, label: '机密' }]} />
             <ProFormTextArea name="description" label="描述" />
           </ModalForm>,

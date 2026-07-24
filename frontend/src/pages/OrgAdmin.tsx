@@ -44,6 +44,9 @@ export default function OrgAdmin() {
   const refreshEmployees = async (departmentId: string) => {
     setEmployees(await listEmployees(departmentId))
   }
+  const refreshDepartment = async (departmentId: string) => {
+    await Promise.all([refreshTree(departmentId), refreshEmployees(departmentId)])
+  }
 
   useEffect(() => {
     void getTree().then(setTree)
@@ -73,7 +76,8 @@ export default function OrgAdmin() {
           onConfirm={async () => {
             const r = await syncFeishu()
             message.success(`已同步 ${r.departments} 部门，新增 ${r.users_created} 人`)
-            await refreshTree()
+            if (selected) await refreshDepartment(selected.id)
+            else await refreshTree()
           }}
         >
           <Button>从飞书同步</Button>
@@ -107,17 +111,17 @@ export default function OrgAdmin() {
             onAddEmployee={async (value) => {
               await createEmployee(selected.id, value as never)
               message.success('已新增员工')
-              await refreshEmployees(selected.id)
+              await refreshDepartment(selected.id)
             }}
             onUpdateEmployee={async (employeeId, value) => {
               await updateEmployee(employeeId, value)
               message.success('已更新')
-              await refreshEmployees(selected.id)
+              await refreshDepartment(selected.id)
             }}
             onDeleteEmployee={async (employeeId) => {
               await deleteEmployee(employeeId)
               message.success('已删除')
-              await refreshEmployees(selected.id)
+              await refreshDepartment(selected.id)
             }}
           />
         )}

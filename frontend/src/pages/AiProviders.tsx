@@ -156,10 +156,14 @@ export default function AiProviders() {
           initialValues={{ tier: 'daily' }}
           onFinish={async (v) => {
             const { id } = await createProvider(v as Parameters<typeof createProvider>[0])
-            const r = await testProvider(id)
-            message[r.status === 'ok' ? 'success' : 'warning'](
-              r.status === 'ok' ? '已创建并连通正常' : `已创建，但连通失败：${r.msg}`,
-            )
+            try {
+              const r = await testProvider(id)
+              message[r.status === 'ok' ? 'success' : 'warning'](
+                r.status === 'ok' ? '已创建并连通正常' : `已创建，但连通失败：${r.msg}`,
+              )
+            } catch {
+              message.warning('卡片已创建，但自动连通测试未完成，可稍后手动测试')
+            }
             await load()
             return true
           }}

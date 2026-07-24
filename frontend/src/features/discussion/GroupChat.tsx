@@ -76,7 +76,9 @@ export default function GroupChat({
       <MessageList
         messages={session.messages}
         sending={composer.sending}
-        onDownload={(attachment) => { void groupChatApi.downloadAttachment(attachment) }}
+        onDownload={(attachment) => {
+          void groupChatApi.downloadAttachment(attachment).catch(() => {})
+        }}
       />
       <MessageComposer members={membership.members} composer={composer} />
       <MemberPicker

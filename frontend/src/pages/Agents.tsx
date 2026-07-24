@@ -11,6 +11,8 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Card, Modal, Rate, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import type { UserInfo } from '../api/auth'
 import Markdown from '../components/Markdown'
 import {
   addFeedback,
@@ -26,6 +28,7 @@ import {
   type SkillInfo,
   type TaskRecord,
 } from '../api/agents'
+import { hasAdminRole, hasManagerRole } from './managementPermissions'
 
 const TASK_LABEL: Record<string, string> = {
   daily_report: '运营日报',
@@ -41,7 +44,10 @@ const TASK_LABEL: Record<string, string> = {
 }
 
 export default function Agents() {
+  const { me } = useOutletContext<{ me: UserInfo | null }>()
   const actionRef = useRef<ActionType>(null)
+  const canGenerateProposal = hasManagerRole(me?.role_code)
+  const canConfigureAgents = hasAdminRole(me?.role_code)
 
   const columns: ProColumns<TaskRecord>[] = [
     { title: '任务', dataIndex: 'task_type', render: (_, r) => TASK_LABEL[r.task_type] || r.task_type },
@@ -62,7 +68,7 @@ export default function Agents() {
         <Rate
           onChange={async (v) => {
             await addFeedback(r.id, v)
-            message.success('已评分，可在角色卡触发提示词优化')
+            message.success(canConfigureAgents ? '已评分，可在角色卡触发提示词优化' : '已评分')
           }}
         />
       ),
@@ -72,7 +78,7 @@ export default function Agents() {
 
   return (
     <PageContainer title="智能体">
-      <RolesCard />
+      <RolesCard canConfigure={canConfigureAgents} />
       <ProTable<TaskRecord>
         rowKey="id"
         actionRef={actionRef}
@@ -87,7 +93,7 @@ export default function Agents() {
             </Typography.Paragraph>
           ),
         }}
-        toolBarRender={() => [
+        toolBarRender={() => canGenerateProposal ? [
           <ModalForm<{ topic: string; context?: string }>
             key="proposal"
             title="生成运营提案"
@@ -103,18 +109,18 @@ export default function Agents() {
             <ProFormText name="topic" label="议题" rules={[{ required: true }]} />
             <ProFormTextArea name="context" label="参考信息（可选）" />
           </ModalForm>,
-        ]}
+        ] : []}
       />
     </PageContainer>
   )
 }
 
-function RolesCard() {
+function RolesCard({ canConfigure }: { canConfigure: boolean }) {
   const [opt, setOpt] = useState<OptimizeResult | null>(null)
   const [skillList, setSkillList] = useState<SkillInfo[]>([])
   const rolesRef = useRef<ActionType>(null)
   useEffect(() => {
-    void listSkills().then(setSkillList)
+    void listSkills().then(setSkillList).catch(() => {})
   }, [])
   const skillLabel = (k: string) => skillList.find((s) => s.key === k)?.label ?? k
 
@@ -154,7 +160,7 @@ function RolesCard() {
           },
           {
             title: '操作',
-            render: (_, r) => (
+            render: (_, r) => canConfigure ? (
               <Space>
                 <ModalForm<{ tools: string[] }>
                   key="skills"
@@ -194,7 +200,7 @@ function RolesCard() {
                   优化提示词
                 </a>
               </Space>
-            ),
+            ) : '-',
           },
         ]}
       />

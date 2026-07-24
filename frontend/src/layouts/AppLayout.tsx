@@ -3,7 +3,7 @@ import { LogoutOutlined } from '@ant-design/icons'
 import { ProLayout } from '@ant-design/pro-components'
 import { Button, Dropdown, Result, Spin } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { fetchMe, ROLE_LABELS, type UserInfo } from '../api/auth'
 import { TOKEN_KEY } from '../api/client'
 
@@ -95,7 +95,9 @@ export default function AppLayout() {
       route={buildMenu(me.role_code === 'admin')}
       location={{ pathname: location.pathname }}
       menuItemRender={(item, dom) => (
-        <a onClick={() => item.path && navigate(item.path)}>{dom}</a>
+        item.path && !item.isUrl
+          ? <Link to={item.path} onClick={item.onClick}>{dom}</Link>
+          : dom
       )}
       avatarProps={{
         title: `${me.real_name || me.username}（${ROLE_LABELS[me.role_code]}）`,

@@ -4,6 +4,7 @@ import { useEventNaming } from '../hooks/useEventNaming'
 
 export function EventNamingCard() {
   const naming = useEventNaming()
+  const hasValidDate = /^\d{4}-\d{2}-\d{2}$/.test(naming.statDate)
 
   return (
     <Card
@@ -17,7 +18,12 @@ export function EventNamingCard() {
             onChange={(event) => naming.setStatDate(event.target.value)}
             style={{ padding: '2px 6px' }}
           />
-          <Button size="small" onClick={() => { void naming.load() }} loading={naming.loading}>
+          <Button
+            size="small"
+            onClick={() => { void naming.load() }}
+            loading={naming.loading}
+            disabled={!hasValidDate}
+          >
             查该日事件
           </Button>
           <Button
@@ -25,6 +31,7 @@ export function EventNamingCard() {
             type="primary"
             onClick={() => { void naming.save() }}
             loading={naming.saving}
+            disabled={!hasValidDate}
           >
             保存命名
           </Button>

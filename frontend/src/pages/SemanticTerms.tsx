@@ -83,13 +83,18 @@ export default function SemanticTerms() {
     void load()
   }, [])
 
+  const showInForm = (values: FormVals) => {
+    form.resetFields()
+    form.setFieldsValue(values)
+  }
+
   const pick = (t: SemanticTerm) => {
     setSelectedId(t.id)
-    form.setFieldsValue(toForm(t))
+    showInForm(toForm(t))
   }
   const startNew = () => {
     setSelectedId(null)
-    form.setFieldsValue(BLANK)
+    showInForm(BLANK)
   }
 
   const onSave = async (v: FormVals) => {
@@ -98,12 +103,13 @@ export default function SemanticTerms() {
       message.success('已保存')
       await load()
       setSelectedId(u.id)
+      showInForm(toForm(u))
     } else {
       const c = await createTerm(toPayload(v))
       message.success('已创建')
       await load()
       setSelectedId(c.id)
-      form.setFieldsValue(toForm(c))
+      showInForm(toForm(c))
     }
   }
 

@@ -1,5 +1,13 @@
 /** 真人工作桌面 API（对应后端 app/api/v1/desktop.py）。取代 workbench。 */
-import { request, sseRequest, TOKEN_KEY, type SseHandler } from './client'
+import { message } from 'antd'
+import {
+  ApiError,
+  clearSessionAndRedirectToLogin,
+  request,
+  sseRequest,
+  TOKEN_KEY,
+  type SseHandler,
+} from './client'
 
 export interface PendingItem {
   kind: 'task' | 'proposal' | 'resolution' | 'collab'
@@ -94,12 +102,26 @@ export async function downloadDeliverable(id: string, fileName: string): Promise
   const resp = await fetch(`/api/v1/desktop/deliverables/${id}/download`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
-  if (!resp.ok) throw new Error('下载失败')
+  if (resp.status === 401) {
+    if (!clearSessionAndRedirectToLogin()) message.error('未登录或登录已过期')
+    throw new ApiError('未登录或登录已过期')
+  }
+  if (!resp.ok) {
+    let errorMessage = '下载失败'
+    try {
+      const body = await resp.json() as { msg?: string; detail?: string }
+      errorMessage = body.msg ?? body.detail ?? errorMessage
+    } catch { /* 非 JSON 错误体 */ }
+    message.error(errorMessage)
+    throw new ApiError(errorMessage)
+  }
   const blob = await resp.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = fileName
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }

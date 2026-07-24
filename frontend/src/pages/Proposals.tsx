@@ -11,6 +11,8 @@ import {
 } from '@ant-design/pro-components'
 import { Button, Modal, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import type { UserInfo } from '../api/auth'
 import Markdown from '../components/Markdown'
 import {
   aiResearch,
@@ -23,6 +25,7 @@ import {
   type Proposal,
   type Review,
 } from '../api/proposals'
+import { hasManagerRole } from './managementPermissions'
 
 const STATUS_COLOR: Record<string, string> = {
   draft: 'default',
@@ -33,8 +36,10 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 export default function Proposals() {
+  const { me } = useOutletContext<{ me: UserInfo | null }>()
   const actionRef = useRef<ActionType>(null)
   const [reviews, setReviews] = useState<Review[] | null>(null)
+  const canManage = hasManagerRole(me?.role_code)
   const reload = () => actionRef.current?.reload()
 
   const openDetail = async (id: string) => {
@@ -51,7 +56,11 @@ export default function Proposals() {
       valueEnum: Object.fromEntries(
         Object.entries(PROPOSAL_STATUS).map(([k, v]) => [k, { text: v }]),
       ),
-      render: (_, r) => <Tag color={STATUS_COLOR[r.status]}>{PROPOSAL_STATUS[r.status]}</Tag>,
+      render: (_, r) => (
+        <Tag color={STATUS_COLOR[r.status] ?? 'default'}>
+          {PROPOSAL_STATUS[r.status] ?? r.status}
+        </Tag>
+      ),
     },
     { title: '优先级', dataIndex: 'priority', search: false },
     { title: '创建时间', dataIndex: 'create_time', valueType: 'dateTime', search: false },
@@ -60,17 +69,21 @@ export default function Proposals() {
       valueType: 'option',
       render: (_, r) => {
         const a = [<a key="d" onClick={() => openDetail(r.id)}>详情</a>]
-        if (['draft', 'researching', 'reviewed'].includes(r.status)) {
+        if (canManage && ['draft', 'researching', 'reviewed'].includes(r.status)) {
           a.push(
             <a key="ai" onClick={async () => {
               message.loading({ content: 'AI 预研中…', key: 'ai' })
-              await aiResearch(r.id)
-              message.success({ content: '预研完成', key: 'ai' })
-              reload()
+              try {
+                await aiResearch(r.id)
+                message.success({ content: '预研完成', key: 'ai' })
+                reload()
+              } catch {
+                message.destroy('ai')
+              }
             }}>AI预研</a>,
           )
         }
-        if (r.status === 'reviewed') {
+        if (canManage && r.status === 'reviewed') {
           a.push(
             <ModalForm<{ decision: 'approve' | 'reject'; conclusion: string }>
               key="rv"
@@ -90,7 +103,7 @@ export default function Proposals() {
             </ModalForm>,
           )
         }
-        if (r.status === 'approved' && !r.converted_task_id) {
+        if (canManage && r.status === 'approved' && !r.converted_task_id) {
           a.push(
             <a key="cv" onClick={async () => {
               await convertProposal(r.id)

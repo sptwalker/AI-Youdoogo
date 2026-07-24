@@ -28,6 +28,10 @@ describe('data source feature model', () => {
     expect(defaultEventDate(new Date('2026-07-23T12:00:00Z'))).toBe('2026-07-22')
   })
 
+  it('uses the local calendar date around midnight', () => {
+    expect(defaultEventDate(new Date(2026, 6, 24, 0, 30))).toBe('2026-07-23')
+  })
+
   it('round-trips event aliases through the local edit buffer', () => {
     const edits = editsFromGroups(groups)
     expect(edits).toEqual({

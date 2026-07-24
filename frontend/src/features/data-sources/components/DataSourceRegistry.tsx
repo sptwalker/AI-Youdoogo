@@ -12,6 +12,15 @@ import { dataSourcesApi, DS_TYPES, type DataSource } from '../api'
 import { secretStatusView } from '../model'
 import { useDataSourceOptions } from '../hooks/useDataSourceOptions'
 
+interface DataSourceCreateValues {
+  name: string
+  code?: string
+  type: string
+  department_id?: string
+  owner_agent_id?: string
+  secret_ref?: string
+}
+
 export function DataSourceRegistry() {
   const actionRef = useRef<ActionType>(null)
   const { departments, agents } = useDataSourceOptions()
@@ -43,6 +52,42 @@ export function DataSourceRegistry() {
       title: '操作',
       valueType: 'option',
       render: (_, item) => [
+        <ModalForm<{
+          name: string
+          secret_ref?: string
+        }>
+          key="edit"
+          title={`编辑数据接口 · ${item.name}`}
+          trigger={<a>编辑</a>}
+          modalProps={{ destroyOnHidden: true }}
+          initialValues={{ name: item.name, secret_ref: item.secret_ref ?? undefined }}
+          onFinish={async (values) => {
+            await dataSourcesApi.updateDataSource(item.id, {
+              name: values.name,
+              secret_ref: values.secret_ref?.trim() ?? '',
+            })
+            message.success('已保存')
+            reload()
+            return true
+          }}
+        >
+          <ProFormText name="name" label="名称" rules={[{ required: true }]} />
+          <ProFormText
+            name="secret_ref"
+            label="密钥变量名(.env)"
+            tooltip="留空表示该接口不使用密钥；这里只保存变量名，不保存密钥值"
+          />
+        </ModalForm>,
+        <a
+          key="active"
+          onClick={async () => {
+            await dataSourcesApi.updateDataSource(item.id, { is_active: !item.is_active })
+            message.success(item.is_active ? '已停用' : '已启用')
+            reload()
+          }}
+        >
+          {item.is_active ? '停用' : '启用'}
+        </a>,
         <ModalForm
           key="agent"
           title={`指派对接AI · ${item.name}`}
@@ -66,7 +111,7 @@ export function DataSourceRegistry() {
             rules={[{ required: true }]}
           />
         </ModalForm>,
-        <ModalForm
+        <ModalForm<{ department_id: string }>
           key="department"
           title={`改部门 · ${item.name}`}
           trigger={<a>改部门</a>}
@@ -113,19 +158,28 @@ export function DataSourceRegistry() {
       request={async () => ({ data: await dataSourcesApi.listDataSources(), success: true })}
       pagination={false}
       toolBarRender={() => [
-        <ModalForm
+        <ModalForm<DataSourceCreateValues>
           key="new"
           title="注册数据接口"
           trigger={<Button type="primary">注册数据接口</Button>}
           modalProps={{ destroyOnHidden: true }}
           onFinish={async (values) => {
-            await dataSourcesApi.createDataSource(values as { name: string; type: string })
+            await dataSourcesApi.createDataSource({
+              ...values,
+              code: values.code?.trim() || undefined,
+              secret_ref: values.secret_ref?.trim() || undefined,
+            })
             message.success('已注册')
             reload()
             return true
           }}
         >
           <ProFormText name="name" label="名称" rules={[{ required: true }]} />
+          <ProFormText
+            name="code"
+            label="编码（可选）"
+            tooltip="留空由系统自动生成；对接脚本依赖编码时建议显式填写"
+          />
           <ProFormSelect
             name="type"
             label="类型"
