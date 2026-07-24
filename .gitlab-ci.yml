@@ -111,7 +111,7 @@ preflight_delivery:
     pull_policy: always
   extends: .delivery_rules
   variables:
-    DOCKER_HOST: unix:///var/run/docker.sock
+    DOCKER_HOST: unix:///runner-docker.sock
     DOCKER_BUILDKIT: "1"
     BUILDX_GIT_INFO: "0"
   before_script:
