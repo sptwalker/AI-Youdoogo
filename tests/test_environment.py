@@ -33,6 +33,16 @@ from app.contexts.foundations.environment_projection.entrypoints import (
 from app.contexts.foundations.environment_projection.infrastructure import (
     source_change_handler,
 )
+from app.contexts.foundations.integration.connector_management.application.contracts import (
+    RegisterConnector,
+    UpdateConnector,
+)
+from app.contexts.foundations.integration.connector_management.contracts import (
+    ConnectorSnapshot,
+)
+from app.contexts.foundations.integration.connector_management.entrypoints import (
+    operations as connector_operations,
+)
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
@@ -41,7 +51,6 @@ from app.models.system import COMPANY, DEPT_L1, SysDepartment, SysUser
 from app.platform.outbox.model import OUTBOX_DONE, OutboxEvent
 from app.services import (
     agent_role_service,
-    data_source_service,
     org_service,
     workflow_worker,
 )
@@ -94,6 +103,27 @@ async def _env_files(db: AsyncSession) -> list[KnowledgeFile]:
     return list((await db.execute(stmt)).scalars())
 
 
+async def _register_connector(
+    db: AsyncSession,
+    *,
+    name: str,
+    connector_type: str,
+    secret_ref: str | None = None,
+    config: dict[str, object] | None = None,
+    owner_expert_id: uuid.UUID | None = None,
+) -> ConnectorSnapshot:
+    return await connector_operations.register_connector(
+        db,
+        RegisterConnector(
+            name=name,
+            connector_type=connector_type,
+            secret_ref=secret_ref,
+            config=config,
+            owner_expert_id=owner_expert_id,
+        ),
+    )
+
+
 async def test_ensure_archivist_idempotent(db: AsyncSession) -> None:
     """档案员幂等创建，挂公司根。"""
     root, _, _ = await _seed_base(db)
@@ -126,9 +156,9 @@ async def test_build_snapshot_content_and_determinism(db: AsyncSession) -> None:
     agent = await agent_role_service.create_agent_role(
         db, name="运营总监", prompt_template="x", department_id=dept.id, title="总监"
     )
-    await data_source_service.create_ds(
-        db, name="数数TD", type="thinkingdata", secret_ref="TD_SECRET",
-        config={"host": "internal"}, owner_agent_id=agent.id,
+    await _register_connector(
+        db, name="数数TD", connector_type="thinkingdata", secret_ref="TD_SECRET",
+        config={"host": "internal"}, owner_expert_id=agent.id,
     )
     snap1 = await projection.build_snapshot(db)
     snap2 = await projection.build_snapshot(db)
@@ -276,7 +306,7 @@ async def test_sources_publish_versioned_changes_without_sync_refresh(
     monkeypatch.setattr(legacy_environment, "refresh_env_doc", _spy)
     await org_service.create_node(db, name="新部门", parent_id=root.id)
     await agent_role_service.create_agent_role(db, name="新AI", prompt_template="x")
-    await data_source_service.create_ds(db, name="接口A", type="http_api")
+    await _register_connector(db, name="接口A", connector_type="http_api")
     events = list(
         (
             await db.execute(
@@ -430,9 +460,9 @@ async def test_source_and_outbox_roll_back_together(
 
     monkeypatch.setattr(source_change_events, "publish_source_change", _fail_publish)
     with pytest.raises(RuntimeError, match="outbox unavailable"):
-        await data_source_service.create_ds(db, name="不可孤立提交", type="http_api")
+        await _register_connector(db, name="不可孤立提交", connector_type="http_api")
     await db.rollback()
-    assert await data_source_service.list_ds(db) == []
+    assert await connector_operations.list_connectors(db) == ()
 
 
 async def test_env_context_injection_flag(
@@ -469,16 +499,27 @@ async def test_ds_owner_agent_roundtrip(db: AsyncSession) -> None:
     """数据源对接AI：创建/更新往返；指派不存在的 AI 报 404。"""
     await _seed_base(db)
     a = await agent_role_service.create_agent_role(db, name="数据AI", prompt_template="x")
-    ds = await data_source_service.create_ds(db, name="接口B", type="http_api", owner_agent_id=a.id)
-    assert ds.owner_agent_id == a.id
-    listed = await data_source_service.list_ds(db)
-    assert listed[0]["owner_agent_name"] == "数据AI"
+    ds = await _register_connector(
+        db,
+        name="接口B",
+        connector_type="http_api",
+        owner_expert_id=a.id,
+    )
+    assert ds.owner_expert_id == a.id
+    listed = await connector_operations.list_connectors(db)
+    assert listed[0].owner_expert_name == "数据AI"
     b = await agent_role_service.create_agent_role(db, name="数据AI2", prompt_template="x")
-    ds = await data_source_service.update_ds(db, ds.id, owner_agent_id=b.id)
-    assert ds.owner_agent_id == b.id
+    ds = await connector_operations.update_connector(
+        db,
+        UpdateConnector(connector_id=ds.id, owner_expert_id=b.id),
+    )
+    assert ds.owner_expert_id == b.id
     with pytest.raises(ApplicationError, match="对接AI不存在"):
-        await data_source_service.create_ds(
-            db, name="接口C", type="http_api", owner_agent_id=uuid.uuid4()
+        await _register_connector(
+            db,
+            name="接口C",
+            connector_type="http_api",
+            owner_expert_id=uuid.uuid4(),
         )
     # 环境文档确随变更累积刷新且不重复
     files = await _env_files(db)

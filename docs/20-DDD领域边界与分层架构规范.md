@@ -1197,9 +1197,9 @@ Entrypoint/Infrastructure 中至少已有一个可执行切片，不表示所有
 | `workflow_worker.py` | Bootstrap + Platform Outbox facade | 生命周期和轮询机制分开 |
 | `task_service.py`、`models/task.py`、已删除 `legacy_orchestration.py` | Task Management | 状态规则移入 domain；TaskCard fallback 直接进入 Task Management legacy public |
 | `deliver_service.py`、`models/deliverable.py` | Deliverable Management | 文件格式化、幂等发布、对象存储与 Agent capability 已归 Context/Platform；旧 service 仅保留兼容导出和测试缝 |
-| `data_source_service.py` | Connector Management | DataSource 演进为 Connector 元数据 |
+| 已删除 `data_source_service.py` | Connector Management | API、Environment Projection 和测试夹具统一使用 Connector commands/operations |
 | 已删除 `connectivity_service.py` | System Configuration / Connectivity | 零调用 facade 已移除；连通性用例和 adapter 归 Context |
-| `data_query_service.py`、`data_catalog_service.py`、`query_skill.py`、已删除 `sql_guard.py` | Governed Data Query | 查询/目录 facade 尚保留；Agent 取数闭环已迁到 Context capability adapter，`query_skill.py` 仅作兼容接线 |
+| `data_query_service.py`、`query_skill.py`、已删除 `data_catalog_service.py`、`sql_guard.py` | Governed Data Query | 目录调用已直达 Context operations；查询与 Agent 旧入口仍保留兼容接线 |
 | `integrations/feishu/*`、`thinkingdata/client.py` | Platform Integrations | 底层供应商 client |
 | MCP server/client transport、session、codec | Platform MCP Runtime + Context adapter | 协议机制在 Platform；tool/resource 语义归目标 Context |
 | 已删除 `desktop_chat_service.py`、`desktop_chat_streaming.py`、`desktop_chat_repository.py` | Assistant Conversations | HTTP、测试和归档脚本统一使用 Context entrypoint/ports |
@@ -1236,7 +1236,7 @@ Entrypoint/Infrastructure 中至少已有一个可执行切片，不表示所有
 | Identity / Organization / Expert | `auth_service.py`、`feishu_login.py`、`org_service.py`、`org_sync_service.py`、`agent_role_service.py` | bootstrap、脚本和特征测试仍有调用；HTTP 与 Environment Projection 已改用 Identity/Organization/Expert published operations |
 | Governance / Configuration | `audit_service.py`、`permission_service.py`、`config_service.py`、`ai_provider_service.py`、`eval_service.py`、`feedback_service.py` | bootstrap、Context adapters 和测试仍依赖；HTTP 已改用 Audit/Access Control/System Configuration/AI Quality command/query ports |
 | Knowledge | `app/knowledge/embedding.py`、`ingest.py`、`storage.py` 及无 eager re-export 的 `app/knowledge/__init__.py` | runtime adapters、probe/smoke 和测试仍使用旧索引、存储或 embedding 路径；继续迁入 Knowledge/Platform gateway |
-| Knowledge / Data service | `memory_service.py`、`data_source_service.py`、`data_catalog_service.py`、`data_query_service.py` | 其他 runtime adapter 和测试仍有调用；Environment 与 Agent skill 已改用 Knowledge、Connector Management 和 Governed Data Query published operations |
+| Knowledge / Data service | `memory_service.py`、`data_query_service.py` | 测试仍锁定旧 callable；Connector 与目录零调用 facade 已删除，Environment 与 Agent skill 使用正式 Context operations |
 | Communication / Business | `collab_service.py`、`discussion_service.py`、`proposal_service.py` | skill/runtime adapter 或测试仍使用；替换为各 Business Context operation/event contract |
 | Task / Workflow | `task_flow.py`、`task_service.py`、`orchestration_service.py`、`workflow_planning.py`、`workflow_projection.py`、`workflow_recovery.py`、`workflow_repository.py`、`workflow_service.py`、`workflow_state.py`、`workflow_step_executor.py`、`workflow_worker.py` | Agent scheduler、assistant adapter 和 durable runtime 测试仍有调用；生产 worker 与事件路由已移到 Bootstrap，旧 worker 入口仅保留兼容测试缝 |
 | Operational probes | `metrics_service.py`、`workflow_event_handler.py` | 生产入口已直接使用 Bootstrap-owned adapter；旧路径仅保留无业务逻辑的兼容导出，完成外部弃用核对后删除 |

@@ -605,6 +605,8 @@ def test_zero_caller_legacy_facades_are_removed() -> None:
         APP / "services" / "desktop_chat_service.py",
         APP / "services" / "desktop_chat_streaming.py",
         APP / "services" / "desktop_service.py",
+        APP / "services" / "data_catalog_service.py",
+        APP / "services" / "data_source_service.py",
         APP / "services" / "feishu_oauth_config.py",
         APP / "services" / "feishu_oauth_store.py",
         APP / "services" / "knowledge_base_service.py",
