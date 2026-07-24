@@ -8,10 +8,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.agents.contracts import ExecutionContext, SkillResult
+from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+    agent_capability,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.deliverable import Deliverable
-from app.services import deliver_service, query_skill
+from app.services import config_service, data_query_service, deliver_service, query_skill
 
 
 @pytest.fixture
@@ -53,6 +57,17 @@ def test_table_renders_rows() -> None:
     assert "| ev | c |" in md and "| a | 1 |" in md and "共 2 行" in md
 
 
+def test_legacy_facade_exports_canonical_parser_and_bindings() -> None:
+    assert query_skill.parse is agent_capability.parse
+    assert query_skill._table is agent_capability.render_table
+    assert query_skill.data_query_service is data_query_service
+    assert query_skill.config_service is config_service
+    assert issubclass(
+        query_skill.DataQuerySkillExecutor,
+        agent_capability.DataQuerySkillExecutor,
+    )
+
+
 # ── execute:闭环回喂 ────────────────────────────────────
 async def test_execute_runs_and_interprets(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -73,6 +88,7 @@ async def test_execute_runs_and_interprets(
     fed: dict[str, Any] = {}
 
     async def _fake_agent(_db: Any, agent: Any, **kw: Any) -> Any:
+        fed["agent"] = agent
         fed["prompt"] = kw.get("user_message")
         fed["task_type"] = kw.get("task_type")
         return _Rec()
@@ -86,6 +102,7 @@ async def test_execute_runs_and_interprets(
     assert captured["sql"] == "select count(*) c from v_event_4"
     assert captured["source"] == "agent:分析助理"  # 审计来源带 AI 名
     assert "42" in fed["prompt"] and fed["task_type"] == "data_interpret"  # 数据回喂
+    assert fed["agent"] is role  # 查询结果回喂同一 Agent
     assert res.notes == []  # 成功不再折原始表进 note
     assert len(res.consult_replies) == 1 and res.consult_replies[0][0] is role
     # 结构化载荷:取数产出进 datasets（阶段A 产出管道）
@@ -158,6 +175,97 @@ async def test_execute_rejected_becomes_note_no_interpret(
     res = await query_skill.execute(db, _role(), "【取数】DROP TABLE v_event_4", user_id=None)
     assert len(res.notes) == 1 and "被拒" in res.notes[0]
     assert res.consult_replies == [] and agent_called is False
+
+
+async def test_execute_failure_becomes_note_no_interpret(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_run(_db: Any, sql: str, **kw: Any) -> dict[str, Any]:
+        return {"status": "fail", "msg": "connector unavailable"}
+
+    agent_called = False
+
+    async def _fake_agent(*args: Any, **kwargs: Any) -> Any:
+        nonlocal agent_called
+        agent_called = True
+
+    monkeypatch.setattr(query_skill.data_query_service, "run_readonly_sql", _fake_run)
+    monkeypatch.setattr(query_skill, "run_agent", _fake_agent)
+    result = await query_skill.execute(
+        db,
+        _role(),
+        "【取数】select count(*) from v_event_4",
+    )
+    assert len(result.notes) == 1 and "取数失败" in result.notes[0]
+    assert result.consult_replies == [] and agent_called is False
+
+
+async def test_interpret_round_excludes_only_recursive_data_query(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_run(_db: Any, sql: str, **kw: Any) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "columns": ["dau"],
+            "rows": [{"dau": 42}],
+            "row_count": 1,
+            "truncated": False,
+        }
+
+    class _Record:
+        output_content = (
+            "昨日 DAU 为 42。\n"
+            "【交付】名称：运营日报；格式：xlsx\n"
+            "【发起协作】目标部门：运营部；类别：analysis；内容：复核数据"
+        )
+
+    async def _fake_agent(*args: Any, **kwargs: Any) -> _Record:
+        return _Record()
+
+    captured: dict[str, Any] = {}
+
+    class _Dispatcher:
+        async def dispatch(
+            self,
+            session: AsyncSession,
+            role: AgentRole,
+            request: Any,
+            context: ExecutionContext,
+        ) -> SkillResult:
+            return await query_skill.DataQuerySkillExecutor().execute(
+                session, role, request, context
+            )
+
+        async def dispatch_text(
+            self,
+            _session: AsyncSession,
+            _role: AgentRole,
+            output: str,
+            _context: ExecutionContext,
+            *,
+            exclude: set[str] | None = None,
+        ) -> SkillResult:
+            captured["output"] = output
+            captured["exclude"] = exclude
+            return SkillResult(
+                artifacts=[
+                    {"file_name": "运营日报.xlsx"},
+                    {"collab_request_id": "request-id"},
+                ]
+            )
+
+    monkeypatch.setattr(query_skill.data_query_service, "run_readonly_sql", _fake_run)
+    monkeypatch.setattr(query_skill, "run_agent", _fake_agent)
+    context = ExecutionContext(dispatcher=_Dispatcher())
+    result = await query_skill.execute(
+        db,
+        _role(),
+        "【取数】select dau from v_event_4",
+        execution_context=context,
+    )
+    assert captured["exclude"] == {"data_query"}
+    assert "【交付】" in captured["output"] and "【发起协作】" in captured["output"]
+    assert len(result.artifacts) == 2
 
 
 async def test_execute_disabled_flag(

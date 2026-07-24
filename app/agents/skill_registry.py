@@ -60,21 +60,25 @@ _DEFINITIONS = {definition.key: definition for definition in CAPABILITY_DEFINITI
 
 
 def _collab_executor() -> SkillExecutor:
-    from app.services.collab_protocol import CollabSkillExecutor
+    from app.contexts.business.collaboration_requests.entrypoints import agent_capability
 
-    return CollabSkillExecutor()
+    return agent_capability.CollabSkillExecutor()
 
 
 def _deliver_executor() -> SkillExecutor:
-    from app.services.deliver_service import DeliverySkillExecutor
+    from app.contexts.foundations.execution.deliverable_management.entrypoints import (
+        agent_capability,
+    )
 
-    return DeliverySkillExecutor()
+    return agent_capability.DeliverySkillExecutor()
 
 
 def _query_executor() -> SkillExecutor:
-    from app.services.query_skill import DataQuerySkillExecutor
+    from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+        agent_capability,
+    )
 
-    return DataQuerySkillExecutor()
+    return agent_capability.DataQuerySkillExecutor()
 
 
 REGISTRY: dict[str, Skill] = {
@@ -114,24 +118,32 @@ async def flag_on(db: AsyncSession, skill: Skill) -> bool:
 
 async def _section(db: AsyncSession, skill: Skill) -> str:
     if skill.key == "env_context":
-        from app.services.environment_service import get_env_context
+        from app.contexts.foundations.environment_projection import (
+            public as environment_projection,
+        )
 
-        snapshot = await get_env_context(db)
+        snapshot = await environment_projection.get_env_context(db)
         if not snapshot:
             return ""
         return f"\n\n【系统环境快照】（由系统档案员维护，实时数据，可直接引用）\n{snapshot}"
     if skill.key == "collab":
-        from app.services.collab_protocol import PROMPT_SECTION
+        from app.contexts.business.collaboration_requests.entrypoints import (
+            agent_capability as collaboration_capability,
+        )
 
-        return PROMPT_SECTION
+        return collaboration_capability.PROMPT_SECTION
     if skill.key == "deliver":
-        from app.services.deliver_service import PROMPT_SECTION
+        from app.contexts.foundations.execution.deliverable_management.entrypoints import (
+            agent_capability as delivery_capability,
+        )
 
-        return PROMPT_SECTION
+        return delivery_capability.PROMPT_SECTION
     if skill.key == "data_query":
-        from app.services.query_skill import prompt_section
+        from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+            agent_capability as query_capability,
+        )
 
-        return await prompt_section(db)
+        return await query_capability.prompt_section(db)
     return ""
 
 

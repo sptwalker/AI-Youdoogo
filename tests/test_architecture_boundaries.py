@@ -7,10 +7,13 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
+from app.contexts.foundations.knowledge import storage_gateway as knowledge_storage
 from app.core import database as legacy_database
+from app.knowledge import storage as legacy_storage
 from app.models import base as legacy_model_base
 from app.models import workflow as legacy_workflow_models
 from app.platform import database as platform_database
+from app.platform.object_storage import gateway as object_storage
 from app.platform.outbox import model as outbox_model
 from app.platform.outbox import repository as outbox_repository
 from app.services import outbox_service
@@ -385,6 +388,23 @@ def test_legacy_to_canonical_facade_edges_are_one_way() -> None:
     assert violations == []
 
 
+def test_runtime_skips_migrated_capability_projection_and_realtime_facades() -> None:
+    """Production modules use canonical boundaries; old paths remain external shims."""
+    migrated_facades = {
+        "app.services.collab_protocol",
+        "app.services.deliver_service",
+        "app.services.environment_service",
+        "app.services.query_skill",
+        "app.services.realtime_service",
+    }
+    violations = [
+        f"{module} -> {dependency}"
+        for module, dependencies in sorted(_app_graph().edges.items())
+        for dependency in sorted(dependencies & migrated_facades)
+    ]
+    assert violations == []
+
+
 def test_platform_does_not_depend_on_business_code() -> None:
     """Technical mechanisms must remain reusable without any bounded context."""
     forbidden = (
@@ -538,6 +558,10 @@ def test_legacy_facades_preserve_public_object_identity() -> None:
     assert legacy_workflow_models.OutboxEvent is outbox_model.OutboxEvent
     assert outbox_service.enqueue is outbox_repository.enqueue
     assert outbox_service.claim_next is outbox_repository.claim_next
+    assert legacy_storage.put_object is object_storage.put_object
+    assert legacy_storage.get_object_bytes is object_storage.get_object_bytes
+    assert knowledge_storage.put_object is object_storage.put_object
+    assert knowledge_storage.get_object_bytes is object_storage.get_object_bytes
 
 
 def test_proposal_service_uses_context_errors_instead_of_shared_generic_errors() -> None:

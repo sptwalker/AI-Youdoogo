@@ -94,6 +94,7 @@ def test_bootstrap_worker_skips_intermediate_workflow_facades() -> None:
         "app.services.workflow_service",
     }
     assert not event_imports & {
+        "app.services.environment_service",
         "app.services.discussion_service",
         "app.services.workflow_service",
         "app.services.workflow_step_executor",
@@ -109,6 +110,15 @@ def test_skill_services_depend_on_contracts_not_agent_base() -> None:
         imports = _imports(module)
         assert "app.agents.contracts" in imports
         assert "app.agents.base" not in imports
+
+
+def test_skill_runtime_skips_migrated_capability_facades() -> None:
+    for module in ("app.agents.legacy_skill_adapters", "app.agents.skill_registry"):
+        assert not _imports(module) & {
+            "app.services.collab_protocol",
+            "app.services.deliver_service",
+            "app.services.query_skill",
+        }
 
 
 def test_langgraph_planner_boundary_cannot_bypass_durable_runtime() -> None:

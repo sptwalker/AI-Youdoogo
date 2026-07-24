@@ -30,7 +30,6 @@ export interface DiscussionFeed {
   channels: ChannelWithUnread[]
   activeSession: ChannelMessageSession
   refreshChannels(forceResubscribe?: boolean): Promise<void>
-  restartRealtime(): void
 }
 
 /** Owns channel discovery, realtime delivery, fallback polling, and read acknowledgement. */
@@ -54,22 +53,18 @@ export function useDiscussionFeed({
     dispatch({ type: 'channel_changed', channelId: activeChannelId })
   }, [activeChannelId])
 
-  const loadChannels = useCallback(async (
-    signal?: AbortSignal,
-    forceResubscribe = false,
-  ) => {
+  const loadChannels = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     const items = await api.listChannels({ signal, silent: true })
-    if (signal?.aborted) return
+    if (signal?.aborted) return false
     const nextSignature = channelSignature(items)
     const previousSignature = channelSignatureRef.current
     channelSignatureRef.current = nextSignature
     setChannels(items)
-    if (
-      forceResubscribe
-      || (previousSignature !== null && previousSignature !== nextSignature)
-    ) {
+    const channelSetChanged = previousSignature !== null && previousSignature !== nextSignature
+    if (channelSetChanged) {
       subscriptionRef.current?.restart()
     }
+    return channelSetChanged
   }, [api])
 
   const markChannelRead = useCallback(async (channelId: string, signal?: AbortSignal) => {
@@ -194,12 +189,13 @@ export function useDiscussionFeed({
   }, [])
 
   const refreshChannels = useCallback(async (forceResubscribe = false) => {
-    await loadChannels(undefined, forceResubscribe)
+    let restarted = false
+    try {
+      restarted = await loadChannels()
+    } finally {
+      if (forceResubscribe && !restarted) subscriptionRef.current?.restart()
+    }
   }, [loadChannels])
-
-  const restartRealtime = useCallback(() => {
-    subscriptionRef.current?.restart()
-  }, [])
 
   return {
     channels,
@@ -210,6 +206,5 @@ export function useDiscussionFeed({
       refresh: refreshMessages,
     },
     refreshChannels,
-    restartRealtime,
   }
 }

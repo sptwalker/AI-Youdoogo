@@ -55,11 +55,7 @@ export default function DesktopConversations({
       message.success('讨论组已创建')
       setNewGroupOpen(false)
       setActive({ type: 'group', id: channel.id, name: channel.name })
-      try {
-        await discussion.refreshChannels(true)
-      } catch {
-        discussion.restartRealtime()
-      }
+      await discussion.refreshChannels(true).catch(() => {})
     } finally {
       setCreating(false)
     }
@@ -96,6 +92,7 @@ export default function DesktopConversations({
           <GroupChat
             channelId={active.id}
             channelName={active.name}
+            agents={agents}
             session={discussion.activeSession}
             isOwner={activeChannel?.creator_id === meId}
             ownerId={activeChannel?.creator_id ?? null}

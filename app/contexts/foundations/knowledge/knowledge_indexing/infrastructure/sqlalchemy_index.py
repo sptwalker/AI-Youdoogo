@@ -14,7 +14,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.knowledge import embedding_gateway, storage_gateway
+from app.contexts.foundations.knowledge import embedding_gateway
 from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
     DocumentIndexRemovedV1,
     IndexReadyV1,
@@ -31,6 +31,7 @@ from app.contexts.foundations.knowledge.wiki_management.contracts import (
 from app.contexts.shared_kernel import ApplicationError, ResourceNotFound, RuleViolation
 from app.integrations.feishu.client import FeishuClient
 from app.models.knowledge import KnowledgeBase, KnowledgeFile, KnowledgeVector
+from app.platform.object_storage import gateway as storage_gateway
 from app.platform.outbox import repository as outbox_repository
 from app.platform.outbox.source_change import publish_source_change
 

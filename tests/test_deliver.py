@@ -10,9 +10,16 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.execution.deliverable_management.application import (
+    formatting,
+)
+from app.contexts.foundations.execution.deliverable_management.entrypoints import (
+    agent_capability,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.deliverable import Deliverable
+from app.platform.object_storage import gateway as object_storage
 from app.services import deliver_service
 
 
@@ -40,6 +47,15 @@ def test_parse_extracts_name_fmt_body() -> None:
     assert len(items) == 1
     name, fmt, body = items[0]
     assert name == "销售周报" and fmt == "xlsx" and "120" in body
+
+
+def test_legacy_facade_exports_canonical_delivery_components() -> None:
+    assert deliver_service.parse is agent_capability.parse
+    assert deliver_service.DeliverySkillExecutor is agent_capability.DeliverySkillExecutor
+    assert deliver_service._build_bytes is formatting.build_bytes
+    assert deliver_service._markdown_table_to_rows is formatting.markdown_table_to_rows
+    assert deliver_service._safe_name is formatting.safe_file_name
+    assert deliver_service.storage is object_storage
 
 
 def test_parse_truncates_to_two() -> None:
@@ -117,6 +133,20 @@ async def test_execute_happy_path(db: AsyncSession, monkeypatch: pytest.MonkeyPa
     assert len(r.artifacts) == 1
     assert r.artifacts[0]["file_name"] == "销售周报.xlsx"
     assert r.artifacts[0]["deliverable_id"] == str(row.id)
+
+
+async def test_storage_failure_does_not_publish_visible_deliverable(
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fail_put(_object_name: str, _data: bytes, _content_type: str) -> str:
+        raise RuntimeError("object storage unavailable")
+
+    monkeypatch.setattr(deliver_service.storage, "put_object", _fail_put)
+    result = await deliver_service.execute(db, _role(), _TABLE, user_id=uuid.uuid4())
+
+    assert any("交付「销售周报」失败" in note for note in result.notes)
+    assert (await db.execute(select(Deliverable))).first() is None
 
 
 async def test_list_deliverables_scoped_and_ordered(

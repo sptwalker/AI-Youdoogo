@@ -21,10 +21,10 @@ from app.contexts.business.work_desktop.application.contracts import (
 from app.contexts.foundations.access_control import public as access_control
 from app.contexts.foundations.identity import public as identity
 from app.contexts.foundations.identity.contracts import Principal, PrincipalType
-from app.contexts.foundations.knowledge.storage_gateway import get_object_bytes
 from app.models.deliverable import Deliverable
 from app.models.meeting import MeetingResolution
 from app.models.task import TaskCard
+from app.platform.object_storage.gateway import get_object_bytes
 
 _REPORTED = "reported"
 _ACCEPTED = "accepted"

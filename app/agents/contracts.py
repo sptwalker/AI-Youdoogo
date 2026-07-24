@@ -66,6 +66,7 @@ class ExecutionContext(BaseModel):
     idempotency_prefix: str | None = None
     user_id: uuid.UUID | None = None
     user_intent: str | None = None
+    excluded_skills: frozenset[str] = Field(default_factory=frozenset)
     # Protocol 无运行时 class，Pydantic v2 无法为其构造 isinstance validator；保留
     # 静态端口类型在 AgentRunner/SkillDispatcher 定义处，数据模型字段用 Any 承载注入实例。
     agent_runner: Any = None

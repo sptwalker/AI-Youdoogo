@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.services.environment_service as environment_service
 from app.agents.contracts import AgentRunner
 from app.contexts.business.group_messaging.public import (
     DISBAND_ARCHIVE_EVENT,
@@ -19,6 +18,9 @@ from app.contexts.business.task_management.contracts.tasks import (
 from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyTaskManagementAdapter,
     task_decision_from_payload,
+)
+from app.contexts.foundations.environment_projection import (
+    public as environment_projection,
 )
 from app.contexts.foundations.environment_projection.contracts.source_change import (
     ENVIRONMENT_SOURCE_CHANGED_V1,
@@ -53,7 +55,7 @@ from app.models.workflow import OutboxEvent
 
 class _EnvironmentSnapshotCache:
     def invalidate(self) -> None:
-        environment_service.invalidate_cache()
+        environment_projection.invalidate_cache()
 
 
 class _EnvironmentSnapshotRefresh:
@@ -61,7 +63,7 @@ class _EnvironmentSnapshotRefresh:
         self._session = session
 
     async def refresh(self) -> None:
-        await environment_service.refresh_env_doc(
+        await environment_projection.refresh_env_doc(
             self._session,
             suppress_errors=False,
         )

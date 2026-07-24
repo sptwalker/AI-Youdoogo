@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import app.agents.base as base
 import app.knowledge.ingest as ingest
 import app.platform.outbox.source_change as source_change_events
+from app.contexts.foundations.environment_projection import public as projection
 from app.contexts.foundations.environment_projection.application.invalidation import (
     EnvironmentInvalidationState,
     InvalidateEnvironmentSnapshot,
@@ -25,6 +26,9 @@ from app.contexts.foundations.environment_projection.contracts.context_snapshot 
 from app.contexts.foundations.environment_projection.contracts.source_change import (
     ENVIRONMENT_SOURCE_CHANGED_V1,
     EnvironmentSourceChange,
+)
+from app.contexts.foundations.environment_projection.entrypoints import (
+    operations as projection_operations,
 )
 from app.contexts.foundations.environment_projection.infrastructure import (
     source_change_handler,
@@ -41,9 +45,7 @@ from app.services import (
     org_service,
     workflow_worker,
 )
-from app.services import (
-    environment_service as svc,
-)
+from app.services import environment_service as legacy_environment
 
 pytestmark = pytest.mark.usefixtures("_no_embed")
 
@@ -56,7 +58,7 @@ def _no_embed(monkeypatch: pytest.MonkeyPatch) -> None:
         return [[0.0] * 4 for _ in texts]
 
     monkeypatch.setattr(ingest, "embed_texts", _fake_embed)
-    svc._cache = None  # 各测试互不串缓存
+    projection.invalidate_cache()
     source_change_handler.reset_invalidation_state()
 
 
@@ -86,7 +88,8 @@ async def _seed_base(db: AsyncSession) -> tuple[SysDepartment, SysUser, Knowledg
 
 async def _env_files(db: AsyncSession) -> list[KnowledgeFile]:
     stmt = select(KnowledgeFile).where(
-        KnowledgeFile.file_name == svc.ENV_DOC_TITLE, KnowledgeFile.is_delete.is_(False)
+        KnowledgeFile.file_name == projection.ENV_DOC_TITLE,
+        KnowledgeFile.is_delete.is_(False),
     )
     return list((await db.execute(stmt)).scalars())
 
@@ -94,10 +97,10 @@ async def _env_files(db: AsyncSession) -> list[KnowledgeFile]:
 async def test_ensure_archivist_idempotent(db: AsyncSession) -> None:
     """档案员幂等创建，挂公司根。"""
     root, _, _ = await _seed_base(db)
-    a1 = await svc.ensure_archivist(db)
-    a2 = await svc.ensure_archivist(db)
+    a1 = await projection.ensure_archivist(db)
+    a2 = await projection.ensure_archivist(db)
     assert a1.id == a2.id
-    assert a1.code == svc.ARCHIVIST_CODE and a1.is_seed
+    assert a1.code == projection.ARCHIVIST_CODE and a1.is_seed
     assert a1.department_id == root.id
     events = list(
         (
@@ -127,8 +130,8 @@ async def test_build_snapshot_content_and_determinism(db: AsyncSession) -> None:
         db, name="数数TD", type="thinkingdata", secret_ref="TD_SECRET",
         config={"host": "internal"}, owner_agent_id=agent.id,
     )
-    snap1 = await svc.build_snapshot(db)
-    snap2 = await svc.build_snapshot(db)
+    snap1 = await projection.build_snapshot(db)
+    snap2 = await projection.build_snapshot(db)
     assert snap1 == snap2  # 确定性
     for expected in ("平台运营部", "运营总监", "老板", "数数TD", "对接AI：运营总监"):
         assert expected in snap1
@@ -147,7 +150,7 @@ async def test_context_snapshot_publishes_scope_versions_and_expiry(
         prompt_template="x",
     )
 
-    snapshot = await svc.get_context_snapshot(db)
+    snapshot = await projection.get_context_snapshot(db)
 
     assert snapshot.scope == SnapshotScope(
         tenant_id="default",
@@ -171,7 +174,7 @@ async def test_context_snapshot_publishes_scope_versions_and_expiry(
     assert version.version > 0
     assert evidence.event_id
     assert evidence.observed_at.tzinfo is not None
-    assert await svc.get_env_context(db) == snapshot.content
+    assert await projection.get_env_context(db) == snapshot.content
 
 
 async def test_context_snapshot_fails_closed_with_missing_source_metadata(
@@ -184,15 +187,31 @@ async def test_context_snapshot_fails_closed_with_missing_source_metadata(
     async def _boom(_db: AsyncSession) -> str:
         raise RuntimeError("source unavailable")
 
-    monkeypatch.setattr(svc, "build_snapshot", _boom)
-    snapshot = await svc.get_context_snapshot(db)
+    monkeypatch.setattr(projection_operations, "build_snapshot", _boom)
+    snapshot = await projection.get_context_snapshot(db)
 
     assert snapshot.content == ""
     assert snapshot.stale
     assert {item.source_type for item in snapshot.missing} == set(snapshot.scope.areas)
     assert all(item.required for item in snapshot.missing)
     assert not snapshot.is_usable()
-    assert await svc.get_env_context(db) == ""
+    assert await projection.get_env_context(db) == ""
+
+
+async def test_legacy_facade_preserves_builder_monkeypatch_seam(
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_base(db)
+
+    async def _legacy_snapshot(_db: AsyncSession) -> str:
+        return "# legacy monkeypatch"
+
+    monkeypatch.setattr(legacy_environment, "build_snapshot", _legacy_snapshot)
+    snapshot = await legacy_environment.get_context_snapshot(db)
+
+    assert snapshot.content == "# legacy monkeypatch"
+    assert await legacy_environment.get_env_context(db) == snapshot.content
 
 
 def test_context_snapshot_contract_is_immutable() -> None:
@@ -221,8 +240,8 @@ def test_context_snapshot_contract_is_immutable() -> None:
 async def test_refresh_env_doc_upsert_no_duplicate(db: AsyncSession) -> None:
     """连续刷新只保留一份《系统环境快照》。"""
     await _seed_base(db)
-    await svc.refresh_env_doc(db)
-    await svc.refresh_env_doc(db)
+    await projection.refresh_env_doc(db)
+    await projection.refresh_env_doc(db)
     files = await _env_files(db)
     assert len(files) == 1
     assert files[0].status == "indexed"
@@ -231,7 +250,7 @@ async def test_refresh_env_doc_upsert_no_duplicate(db: AsyncSession) -> None:
 async def test_refresh_env_doc_nonfatal(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """ingest 失败/无 admin 都不抛，不连累业务操作。"""
     # 无 admin：直接跳过
-    await svc.refresh_env_doc(db)
+    await projection.refresh_env_doc(db)
     assert await _env_files(db) == []
     # 有 admin 但 ingest 挂了：吞异常
     await _seed_base(db)
@@ -239,8 +258,8 @@ async def test_refresh_env_doc_nonfatal(db: AsyncSession, monkeypatch: pytest.Mo
     async def _boom(*a: Any, **kw: Any) -> None:
         raise RuntimeError("embedding down")
 
-    monkeypatch.setattr(svc.ingest, "ingest_text", _boom)
-    await svc.refresh_env_doc(db)  # 不应抛
+    monkeypatch.setattr(legacy_environment.ingest, "ingest_text", _boom)
+    await legacy_environment.refresh_env_doc(db)  # 不应抛
 
 
 async def test_sources_publish_versioned_changes_without_sync_refresh(
@@ -254,7 +273,7 @@ async def test_sources_publish_versioned_changes_without_sync_refresh(
     async def _spy(_db: AsyncSession) -> None:
         calls.append("refresh")
 
-    monkeypatch.setattr(svc, "refresh_env_doc", _spy)
+    monkeypatch.setattr(legacy_environment, "refresh_env_doc", _spy)
     await org_service.create_node(db, name="新部门", parent_id=root.id)
     await agent_role_service.create_agent_role(db, name="新AI", prompt_template="x")
     await data_source_service.create_ds(db, name="接口A", type="http_api")
@@ -436,12 +455,12 @@ async def test_env_context_injection_flag(
     assert "【系统环境快照】" not in system_off
 
     monkeypatch.undo()
-    svc._cache = None
+    projection.invalidate_cache()
 
     async def _boom(_db: AsyncSession) -> str:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(svc, "build_snapshot", _boom)
+    monkeypatch.setattr(projection_operations, "build_snapshot", _boom)
     _, system_fail, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
     assert "【系统环境快照】" not in system_fail  # 失败静默跳过，不抛
 
@@ -471,7 +490,7 @@ async def test_snapshot_counts_match(db: AsyncSession) -> None:
     await _seed_base(db)
     for i in range(3):
         await agent_role_service.create_agent_role(db, name=f"AI{i}", prompt_template="x")
-    snap = await svc.build_snapshot(db)
+    snap = await projection.build_snapshot(db)
     n = (await db.execute(select(func.count()).select_from(AgentRole))).scalar_one()
     assert n == 3
     for i in range(3):

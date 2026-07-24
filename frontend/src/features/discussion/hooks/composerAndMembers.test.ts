@@ -296,6 +296,7 @@ describe('useChannelMembers', () => {
     expect(api.removeMember).toHaveBeenCalledWith('channel-a', 'human', 'human-2')
     expect(onMembershipChange).toHaveBeenCalledTimes(2)
     expect(vi.mocked(api.listMembers).mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(api.listAgents).not.toHaveBeenCalled()
     await rendered.unmount()
   })
 })

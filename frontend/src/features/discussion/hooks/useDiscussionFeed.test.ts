@@ -203,4 +203,17 @@ describe('useDiscussionFeed', () => {
     expect(rendered.current.activeSession.messages).toEqual([])
     await rendered.unmount()
   })
+
+  it('forces a realtime restart even when an explicit channel refresh fails', async () => {
+    const listChannels = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('refresh failed'))
+    const { api, cancel } = createApi({ listChannels })
+    const rendered = await renderFeed({ activeChannelId: null, api })
+    await flushEffects()
+
+    await expect(rendered.current.refreshChannels(true)).rejects.toThrow('refresh failed')
+    expect(cancel.restart).toHaveBeenCalledOnce()
+    await rendered.unmount()
+  })
 })

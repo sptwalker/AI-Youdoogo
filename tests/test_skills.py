@@ -8,9 +8,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, skills
+from app.contexts.business.collaboration_requests.entrypoints import (
+    agent_capability as collaboration_capability,
+)
 from app.models import Base
 from app.models.agent import AgentRole
-from app.services import collab_protocol
 
 
 @pytest.fixture
@@ -53,7 +55,10 @@ async def test_prompt_sections_respects_tools(
     async def _fake_env(_db: AsyncSession) -> str:
         return "快照内容"
 
-    monkeypatch.setattr("app.services.environment_service.get_env_context", _fake_env)
+    monkeypatch.setattr(
+        "app.contexts.foundations.environment_projection.public.get_env_context",
+        _fake_env,
+    )
     only_collab = await skills.prompt_sections(db, _role(["collab"]))
     assert "【协作能力】" in only_collab and "【系统环境快照】" not in only_collab
     both = await skills.prompt_sections(db, _role([]))
@@ -81,7 +86,10 @@ async def test_prompt_sections_single_skill_failure_isolated(
     async def _boom(_db: AsyncSession) -> str:
         raise RuntimeError("env down")
 
-    monkeypatch.setattr("app.services.environment_service.get_env_context", _boom)
+    monkeypatch.setattr(
+        "app.contexts.foundations.environment_projection.public.get_env_context",
+        _boom,
+    )
     out = await skills.prompt_sections(db, _role([]))
     assert "【协作能力】" in out  # collab 不受 env 故障影响
 
@@ -95,11 +103,11 @@ async def test_execute_all_gated_by_tools(
 
     async def _spy(
         _db: AsyncSession, initiator: AgentRole, output: str, *, user_id: Any = None
-    ) -> collab_protocol.ProtocolResult:
+    ) -> collaboration_capability.ProtocolResult:
         calls.append(output)
-        return collab_protocol.ProtocolResult(notes=["done"])
+        return collaboration_capability.ProtocolResult(notes=["done"])
 
-    monkeypatch.setattr(collab_protocol, "execute", _spy)
+    monkeypatch.setattr(collaboration_capability, "execute", _spy)
     text = "【咨询 @财务总监】预算？"
 
     r1 = await skills.execute_all(db, _role(["env_context"]), text)
@@ -115,7 +123,10 @@ async def test_prepare_uses_skills(db: AsyncSession, monkeypatch: pytest.MonkeyP
     async def _fake_env(_db: AsyncSession) -> str:
         return "快照"
 
-    monkeypatch.setattr("app.services.environment_service.get_env_context", _fake_env)
+    monkeypatch.setattr(
+        "app.contexts.foundations.environment_projection.public.get_env_context",
+        _fake_env,
+    )
     role = _role(["env_context"])
     _, system, _, _ = await base._prepare(db, role, "hi", use_knowledge=False)
     assert "【系统环境快照】" in system and "【协作能力】" not in system

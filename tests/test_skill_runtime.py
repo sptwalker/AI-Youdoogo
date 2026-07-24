@@ -14,6 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.agents import base, skills
 from app.agents.contracts import ExecutionContext, SkillRequest
+from app.agents.skill_registry import REGISTRY
+from app.contexts.business.collaboration_requests.entrypoints.agent_capability import (
+    CollabSkillExecutor,
+)
+from app.contexts.foundations.execution.deliverable_management.entrypoints.agent_capability import (
+    DeliverySkillExecutor,
+)
+from app.contexts.foundations.integration.governed_data_query.entrypoints.agent_capability import (
+    DataQuerySkillExecutor,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.collab import CollabRequest
@@ -111,9 +121,15 @@ async def test_collab_replay_creates_one_review_request(db: AsyncSession) -> Non
     first = await skills.execute_all(db, role, text, execution_context=context)
     second = await skills.execute_all(db, role, text, execution_context=context)
     count = (await db.execute(select(func.count()).select_from(CollabRequest))).scalar_one()
+    execution_count = (
+        await db.execute(select(func.count()).select_from(ToolExecution))
+    ).scalar_one()
     assert count == 1
+    assert execution_count == 1
     assert first.artifacts == second.artifacts
     assert first.artifacts[0]["collab_request_id"]
+    assert len(first.tool_execution_ids) == len(second.tool_execution_ids) == 1
+    assert first.tool_execution_ids == second.tool_execution_ids
 
 
 async def test_invalid_or_unregistered_action_never_executes_side_effect(
@@ -216,3 +232,21 @@ def test_skill_services_do_not_import_agent_base() -> None:
     ):
         source = (root / relative).read_text(encoding="utf-8")
         assert "app.agents.base" not in source
+
+
+def test_data_query_registry_uses_canonical_capability_adapter() -> None:
+    factory = REGISTRY["data_query"].executor_factory
+    assert factory is not None
+    assert isinstance(factory(), DataQuerySkillExecutor)
+
+
+def test_delivery_registry_uses_canonical_capability_adapter() -> None:
+    factory = REGISTRY["deliver"].executor_factory
+    assert factory is not None
+    assert isinstance(factory(), DeliverySkillExecutor)
+
+
+def test_collaboration_registry_uses_canonical_capability_adapter() -> None:
+    factory = REGISTRY["collab"].executor_factory
+    assert factory is not None
+    assert isinstance(factory(), CollabSkillExecutor)

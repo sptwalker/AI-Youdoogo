@@ -40,13 +40,17 @@ async def legacy_collab(
     context: ExecutionContext,
     _exclude: set[str],
 ) -> SkillResult:
-    from app.services import collab_protocol
+    from app.contexts.business.collaboration_requests.entrypoints import agent_capability
 
     kwargs = accepted_kwargs(
-        collab_protocol.execute,
-        {"user_id": context.user_id, "execution_context": context},
+        agent_capability.execute,
+        {
+            "user_id": context.user_id,
+            "exclude": _exclude,
+            "execution_context": context,
+        },
     )
-    return await collab_protocol.execute(db, role, output, **kwargs)
+    return await agent_capability.execute(db, role, output, **kwargs)
 
 
 async def legacy_deliver(
@@ -56,13 +60,15 @@ async def legacy_deliver(
     context: ExecutionContext,
     _exclude: set[str],
 ) -> SkillResult:
-    from app.services import deliver_service
+    from app.contexts.foundations.execution.deliverable_management.entrypoints import (
+        agent_capability,
+    )
 
     kwargs = accepted_kwargs(
-        deliver_service.execute,
+        agent_capability.execute,
         {"user_id": context.user_id, "execution_context": context},
     )
-    return await deliver_service.execute(db, role, output, **kwargs)
+    return await agent_capability.execute(db, role, output, **kwargs)
 
 
 async def legacy_query(
@@ -72,10 +78,12 @@ async def legacy_query(
     context: ExecutionContext,
     exclude: set[str],
 ) -> SkillResult:
-    from app.services import query_skill
+    from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+        agent_capability,
+    )
 
     kwargs = accepted_kwargs(
-        query_skill.execute,
+        agent_capability.execute,
         {
             "user_id": context.user_id,
             "user_intent": context.user_intent,
@@ -83,4 +91,4 @@ async def legacy_query(
             "execution_context": context,
         },
     )
-    return await query_skill.execute(db, role, output, **kwargs)
+    return await agent_capability.execute(db, role, output, **kwargs)

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.knowledge.storage as storage
+import app.platform.object_storage.gateway as storage
 from app.agents.base import run_agent, run_agent_stream
 from app.agents.contracts import ExecutionContext
 from app.agents.skills import execute_all, fold_notes
@@ -38,14 +38,15 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 from app.llm.roles import get_llm_for_role
 from app.models.agent import AgentRole, AgentTaskRecord
-from app.services import outbox_service, proposal_service, realtime_service, task_service
+from app.platform import realtime
+from app.services import outbox_service, proposal_service, task_service
 
 
 class RedisRealtimeDeliveryAdapter:
     async def publish(
         self, channel_id: uuid.UUID, event_name: str, data: dict[str, object]
     ) -> None:
-        await realtime_service.publish(str(channel_id), event_name, data)
+        await realtime.publish(str(channel_id), event_name, data)
 
 
 class RedisRealtimeSubscriptionAdapter:
@@ -68,7 +69,7 @@ class RedisRealtimeSubscriptionAdapter:
                 repository = SQLAlchemyGroupMessagingRepository(session)
                 return await repository.is_member(parsed_channel_id, user_id)
 
-        async for name, data in realtime_service.subscribe(
+        async for name, data in realtime.subscribe(
             [str(channel_id) for channel_id in channel_ids],
             authorize=_still_member,
         ):

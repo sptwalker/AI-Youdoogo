@@ -123,11 +123,15 @@ class ToolDispatcher:
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult:
+        active_context = context.model_copy(update={"dispatcher": self})
         executor = self._executor(request)
-        handler = _LegacyHandlerAdapter(db, role, context, executor)
+        handler = _LegacyHandlerAdapter(db, role, active_context, executor)
         idempotency_key = None
         if executor is not None and executor.requires_idempotency(request):
-            idempotency_key = context.action_key(request.skill_key, request.action_index)
+            idempotency_key = active_context.action_key(
+                request.skill_key,
+                request.action_index,
+            )
         capability_request = CapabilityExecutionRequest(
             capability_key=request.skill_key,
             capability_version="1.0",
@@ -135,17 +139,17 @@ class ToolDispatcher:
             arguments_json=_json_dump(request.arguments),
             raw_text=request.raw_text,
             principal=CapabilityPrincipal(
-                principal_id=context.user_id,
+                principal_id=active_context.user_id,
                 expert_id=role.id,
                 permission_keys=tuple(
                     item for item in (role.tools or []) if isinstance(item, str)
                 ),
             ),
             trace=CapabilityTrace(
-                trace_id=context.trace_id,
-                workflow_run_id=context.workflow_run_id,
-                workflow_step_id=context.workflow_step_id,
-                attempt=context.attempt,
+                trace_id=active_context.trace_id,
+                workflow_run_id=active_context.workflow_run_id,
+                workflow_step_id=active_context.workflow_step_id,
+                attempt=active_context.attempt,
             ),
             idempotency_key=idempotency_key,
         )
@@ -185,9 +189,15 @@ class ToolDispatcher:
         *,
         exclude: set[str] | None = None,
     ) -> SkillResult:
-        excluded = exclude or set()
+        excluded = set(context.excluded_skills)
+        excluded.update(exclude or set())
         merged = SkillResult()
-        active_context = context.model_copy(update={"dispatcher": self})
+        active_context = context.model_copy(
+            update={
+                "dispatcher": self,
+                "excluded_skills": frozenset(excluded),
+            }
+        )
         for skill in enabled_skills(role):
             if skill.key in excluded or skill.legacy_executor is None:
                 continue

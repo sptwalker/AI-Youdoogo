@@ -1,6 +1,6 @@
 import { message } from 'antd'
 import { useCallback, useState } from 'react'
-import { groupChatApi, type MemberToAdd } from './api'
+import { groupChatApi, type AgentRole, type MemberToAdd } from './api'
 import { ChannelActions } from './components/ChannelActions'
 import { MemberList } from './components/MemberList'
 import { MemberPicker } from './components/MemberPicker'
@@ -13,6 +13,7 @@ import { useMessageComposer } from './hooks/useMessageComposer'
 export interface GroupChatProps {
   channelId: string
   channelName: string
+  agents: AgentRole[]
   session: ChannelMessageSession
   isOwner: boolean
   ownerId: string | null
@@ -23,6 +24,7 @@ export interface GroupChatProps {
 export default function GroupChat({
   channelId,
   channelName,
+  agents,
   session,
   isOwner,
   ownerId,
@@ -80,7 +82,7 @@ export default function GroupChat({
       <MemberPicker
         open={pickerOpen}
         existing={membership.memberIds}
-        agents={membership.agents}
+        agents={agents}
         colleagues={membership.colleagues}
         onOpen={membership.loadColleagues}
         onClose={() => setPickerOpen(false)}

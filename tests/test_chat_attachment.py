@@ -83,7 +83,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient,
     app.dependency_overrides[get_db] = _override
     app.dependency_overrides[deps.get_current_user] = _fake_user
     # 打桩 MinIO
-    from app.knowledge import storage
+    from app.platform.object_storage import gateway as storage
 
     async def _put(object_name: str, data: bytes, ct: str = "") -> str:
         return f"youdoo/{object_name}"

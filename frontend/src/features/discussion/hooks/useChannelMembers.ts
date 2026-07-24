@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   groupChatApi,
-  type AgentRole,
   type Colleague,
   type DiscussionMember,
   type GroupChatApi,
@@ -17,7 +16,6 @@ interface UseChannelMembersOptions {
 export interface ChannelMembersState {
   members: DiscussionMember[]
   memberIds: string[]
-  agents: AgentRole[]
   colleagues: Colleague[]
   loadColleagues(): Promise<void>
   addMembers(members: MemberToAdd[]): Promise<boolean>
@@ -30,7 +28,6 @@ export function useChannelMembers({
   api = groupChatApi,
 }: UseChannelMembersOptions): ChannelMembersState {
   const [members, setMembers] = useState<DiscussionMember[]>([])
-  const [agents, setAgents] = useState<AgentRole[]>([])
   const [colleagues, setColleagues] = useState<Colleague[]>([])
   const activeChannelRef = useRef(channelId)
   activeChannelRef.current = channelId
@@ -40,14 +37,6 @@ export function useChannelMembers({
     const items = await api.listMembers(requestedChannelId, { signal, silent: true })
     if (!signal?.aborted && activeChannelRef.current === requestedChannelId) setMembers(items)
   }, [api, channelId])
-
-  useEffect(() => {
-    let disposed = false
-    void api.listAgents()
-      .then((items) => { if (!disposed) setAgents(items) })
-      .catch(() => {})
-    return () => { disposed = true }
-  }, [api])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -90,7 +79,6 @@ export function useChannelMembers({
   return {
     members,
     memberIds,
-    agents,
     colleagues,
     loadColleagues,
     addMembers: addSelectedMembers,

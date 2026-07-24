@@ -85,6 +85,7 @@ async def _send_all(
     add_agent_ids: list[uuid.UUID],
     *,
     agent_stream: AgentStream | None = None,
+    agent_runner: Any = None,
 ) -> tuple[list[dict[str, Any]], list[Event]]:
     """drain send_stream：返回 (message_end 消息列表, 全部事件)。"""
     events = [
@@ -97,6 +98,7 @@ async def _send_all(
                 add_agent_ids=tuple(add_agent_ids),
             ),
             agent_stream=agent_stream,
+            agent_runner=agent_runner,
         )
     ]
     return [d for name, d in events if name == "message_end"], events
@@ -176,11 +178,9 @@ async def test_send_rejects_more_than_two_added(db: AsyncSession) -> None:
 
 
 async def test_send_consult_directive_emits_extra_message(
-    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    db: AsyncSession,
 ) -> None:
     """协作原语集成：助理产出含【咨询 @X】→ 流中出现被咨询 AI 的独立消息。"""
-    from app.services import collab_protocol
-
     async def _stream_with_directive(db_: AsyncSession, role: AgentRole, **kw: Any):
         yield "我先咨询一下。"
         yield AgentTaskRecord(
@@ -200,7 +200,6 @@ async def test_send_consult_directive_emits_extra_message(
             status="success",
         )
 
-    monkeypatch.setattr(collab_protocol, "run_agent", _consult_run)
     u = await _user(db)
     await agent_role_service.create_agent_role(db, name="财务总监", prompt_template="x")
 
@@ -210,6 +209,7 @@ async def test_send_consult_directive_emits_extra_message(
         "预算是多少",
         [],
         agent_stream=_stream_with_directive,
+        agent_runner=_consult_run,
     )
     # user + 助理（1轮1人）+ 被咨询AI答复 = 3
     assert len(msgs) == 3
