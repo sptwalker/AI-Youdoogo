@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from app.contexts.business.group_messaging.application.contracts import (
     MAX_ATTACHMENT_BYTES,
     AgentReplyRequest,
+    AgentReplyStreamEvent,
     ArchiveRequest,
     AttachmentDownloadResult,
     AttachmentResult,
@@ -284,6 +285,23 @@ class GroupMessagingApplication:
     async def post_message_stream(
         self, command: PostMessageCommand
     ) -> AsyncIterator[MessageStreamEvent]:
+        channel, human = await self._save_human_message(command)
+        human_data = _message_result(human).as_dict()
+        yield MessageStreamEvent("message_end", human_data)
+        await self._realtime_delivery.publish(command.channel_id, "message", human_data)
+
+        targets = deduplicate_mentions(command.mentioned_agent_ids)
+        recent_context = await self._recent_context(command.channel_id, targets=targets)
+        for agent_id in targets:
+            async for event in self._stream_agent_reply(
+                command,
+                agent_id=agent_id,
+                channel_name=channel.name,
+                recent_context=recent_context,
+            ):
+                yield event
+
+    async def _save_human_message(self, command: PostMessageCommand) -> tuple[Channel, Message]:
         async with self._uow_factory() as uow:
             channel = await self._get_required(uow.messages, command.channel_id)
             if command.require_member_id is not None:
@@ -304,59 +322,85 @@ class GroupMessagingApplication:
             )
             await uow.messages.add_message(human)
             await uow.commit()
+        return channel, human
 
-        human_data = _message_result(human).as_dict()
-        yield MessageStreamEvent("message_end", human_data)
-        await self._realtime_delivery.publish(command.channel_id, "message", human_data)
+    async def _recent_context(
+        self,
+        channel_id: uuid.UUID,
+        *,
+        targets: tuple[uuid.UUID, ...],
+    ) -> str:
+        if not targets:
+            return "（暂无发言）"
+        history = await self.list_messages(channel_id, limit=_CONTEXT_N)
+        transcript = "\n".join(f"{item.speaker_name}：{item.content}" for item in history)
+        return transcript or "（暂无发言）"
 
-        targets = deduplicate_mentions(command.mentioned_agent_ids)
-        recent_context = "（暂无发言）"
-        if targets:
-            history = await self.list_messages(command.channel_id, limit=_CONTEXT_N)
-            recent_context = (
-                "\n".join(f"{item.speaker_name}：{item.content}" for item in history)
-                or recent_context
+    async def _stream_agent_reply(
+        self,
+        command: PostMessageCommand,
+        *,
+        agent_id: uuid.UUID,
+        channel_name: str,
+        recent_context: str,
+    ) -> AsyncIterator[MessageStreamEvent]:
+        request = AgentReplyRequest(
+            agent_id=agent_id,
+            user_id=command.speaker_id,
+            channel_name=channel_name,
+            content=command.content,
+            recent_context=recent_context,
+        )
+        async for reply_event in self._agent_replies.stream(request):
+            transient = self._transient_reply_event(reply_event)
+            if transient is not None:
+                yield transient
+                continue
+            if reply_event.name != "complete" or reply_event.speaker_agent_id is None:
+                continue
+            ai_message = await self._save_ai_message(command.channel_id, reply_event)
+            ai_data = _message_result(ai_message).as_dict()
+            yield MessageStreamEvent("message_end", ai_data)
+            if reply_event.publish_realtime:
+                await self._realtime_delivery.publish(command.channel_id, "message", ai_data)
+
+    @staticmethod
+    def _transient_reply_event(
+        reply_event: AgentReplyStreamEvent,
+    ) -> MessageStreamEvent | None:
+        if reply_event.name == "start":
+            return MessageStreamEvent(
+                "message_start",
+                {
+                    "speaker_agent_id": str(reply_event.speaker_agent_id),
+                    "speaker_name": reply_event.speaker_name,
+                },
             )
-        for agent_id in targets:
-            request = AgentReplyRequest(
-                agent_id=agent_id,
-                user_id=command.speaker_id,
-                channel_name=channel.name,
-                content=command.content,
-                recent_context=recent_context,
-            )
-            async for reply_event in self._agent_replies.stream(request):
-                if reply_event.name == "start":
-                    yield MessageStreamEvent(
-                        "message_start",
-                        {
-                            "speaker_agent_id": str(reply_event.speaker_agent_id),
-                            "speaker_name": reply_event.speaker_name,
-                        },
-                    )
-                    continue
-                if reply_event.name == "delta":
-                    yield MessageStreamEvent("delta", {"text": reply_event.text})
-                    continue
-                if reply_event.name != "complete" or reply_event.speaker_agent_id is None:
-                    continue
-                ai_message = Message(
-                    id=self._identifiers.new_id(),
-                    channel_id=command.channel_id,
-                    speaker_type=SPEAKER_AI,
-                    speaker_id=reply_event.speaker_agent_id,
-                    speaker_name=reply_event.speaker_name,
-                    content=reply_event.content,
-                    ai_source_record_id=reply_event.source_record_id,
-                    create_time=self._clock.now(),
-                )
-                async with self._uow_factory() as uow:
-                    await uow.messages.add_message(ai_message)
-                    await uow.commit()
-                ai_data = _message_result(ai_message).as_dict()
-                yield MessageStreamEvent("message_end", ai_data)
-                if reply_event.publish_realtime:
-                    await self._realtime_delivery.publish(command.channel_id, "message", ai_data)
+        if reply_event.name == "delta":
+            return MessageStreamEvent("delta", {"text": reply_event.text})
+        return None
+
+    async def _save_ai_message(
+        self,
+        channel_id: uuid.UUID,
+        reply_event: AgentReplyStreamEvent,
+    ) -> Message:
+        if reply_event.speaker_agent_id is None:
+            raise RuntimeError("Completed Agent reply has no speaker id")
+        message = Message(
+            id=self._identifiers.new_id(),
+            channel_id=channel_id,
+            speaker_type=SPEAKER_AI,
+            speaker_id=reply_event.speaker_agent_id,
+            speaker_name=reply_event.speaker_name,
+            content=reply_event.content,
+            ai_source_record_id=reply_event.source_record_id,
+            create_time=self._clock.now(),
+        )
+        async with self._uow_factory() as uow:
+            await uow.messages.add_message(message)
+            await uow.commit()
+        return message
 
     async def subscribe_user_messages(
         self, user_id: uuid.UUID

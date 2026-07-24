@@ -9,7 +9,11 @@ from app.services import feishu_login
 
 def test_prod_rejects_default_secret() -> None:
     with pytest.raises(ValueError, match="JWT_SECRET"):
-        Settings(app_env="production", jwt_secret="change-me-in-phase-1", _env_file=None)
+        Settings(
+            app_env="production",
+            jwt_secret="local-only-jwt-secret-change-in-production",
+            _env_file=None,
+        )
 
 
 def test_prod_rejects_short_secret() -> None:
@@ -23,8 +27,12 @@ def test_prod_accepts_strong_secret() -> None:
 
 
 def test_local_allows_default() -> None:
-    s = Settings(app_env="local", jwt_secret="change-me-in-phase-1", _env_file=None)
-    assert s.jwt_secret == "change-me-in-phase-1"
+    s = Settings(
+        app_env="local",
+        jwt_secret="local-only-jwt-secret-change-in-production",
+        _env_file=None,
+    )
+    assert s.jwt_secret == "local-only-jwt-secret-change-in-production"
 
 
 def test_production_oauth_requires_exact_standalone_redirect(

@@ -108,7 +108,8 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     for command in ("ruff check .", "mypy app"):
         assert f"uv run --frozen {command}" in backend_verify["script"]
     assert (
-        'uv run --frozen pytest -q -m "not delivery_contract"'
+        'uv run --frozen pytest -q -m "not delivery_contract" '
+        "--cov=app --cov-report=term-missing:skip-covered"
         in backend_verify["script"]
     )
     delivery_verify = pipeline["verify_delivery_contract"]

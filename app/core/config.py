@@ -5,7 +5,7 @@ from functools import lru_cache
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_DEFAULT_JWT_SECRET = "change-me-in-phase-1"
+_DEFAULT_JWT_SECRET = "local-only-jwt-secret-change-in-production"
 
 
 class Settings(BaseSettings):

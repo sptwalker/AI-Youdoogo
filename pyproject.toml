@@ -37,6 +37,7 @@ dev = [
     "respx>=0.22",
     "aiosqlite>=0.20",
     "reportlab>=4.2",
+    "pytest-cov>=6.0",
 ]
 
 [tool.uv]
@@ -62,3 +63,17 @@ asyncio_mode = "auto"
 markers = [
     "delivery_contract: delivery tests requiring envsubst and nginx system binaries",
 ]
+# FastAPI currently re-exports Starlette's TestClient. This exact third-party warning remains
+# filtered until FastAPI exposes the recommended httpx2 path; other deprecations stay visible.
+filterwarnings = [
+    'ignore:^Using `httpx` with `starlette\.testclient` is deprecated; install `httpx2` instead\.$:starlette.exceptions.StarletteDeprecationWarning:fastapi\.testclient$',
+]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+# Initial all-source baseline was 88.93%; retain a small margin for platform variance.
+fail_under = 88
+show_missing = true
+skip_covered = true

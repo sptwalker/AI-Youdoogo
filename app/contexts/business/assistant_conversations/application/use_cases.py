@@ -12,6 +12,7 @@ from app.contexts.business.assistant_conversations.application.contracts import 
     AgentResult,
     ArchiveConversationRequest,
     AssistantResult,
+    ConsultedReply,
     ConversationResult,
     ConversationStreamEvent,
     MessageResult,
@@ -175,30 +176,9 @@ class AssistantConversationsApplication:
         self, command: SendMessageCommand
     ) -> AsyncIterator[ConversationStreamEvent]:
         principal = command.principal
-        ensure_added_agent_limit(command.add_agent_ids, max_add=command.max_add)
-        assistant = await self._assistants.get_or_create(principal)
-        added_ids = deduplicate_added_agents(
-            command.add_agent_ids,
-            assistant_id=assistant.id,
-            max_add=command.max_add,
-        )
-        added = await self._assistants.resolve_addable(added_ids)
-        participants = (Participant(assistant.id, assistant.name), *added)
-
-        configured_rounds = await self._configuration.integer(
-            "desktop_roundtable_rounds", command.default_rounds
-        )
-        rounds = round_count(
-            configured_rounds,
-            participant_count=len(participants),
-            maximum=command.max_rounds,
-        )
-        async with self._uow_factory() as uow:
-            recent = await uow.messages.list_recent(
-                principal.id,
-                limit=command.recent_context,
-            )
-        conversation = tuple((message.speaker_name, message.content) for message in recent)
+        participants = await self._resolve_participants(command)
+        rounds = await self._rounds(command, participant_count=len(participants))
+        conversation = await self._recent_conversation(command)
 
         user_message = await self._save_message(
             owner_user_id=principal.id,
@@ -206,80 +186,161 @@ class AssistantConversationsApplication:
             speaker_name=principal.display_name,
             content=command.message,
         )
-        conversation += ((principal.display_name, command.message),)
+        conversation.append((principal.display_name, command.message))
         yield ConversationStreamEvent("message_end", _message_result(user_message).as_dict())
 
-        if len(participants) == 1:
-            orchestration = await self._orchestration.try_start(
+        orchestration = await self._try_start_orchestration(command, participants)
+        if orchestration is not None:
+            async for stream_event in self.emit_orchestration(
                 principal_id=principal.id,
-                assistant_id=assistant.id,
-                message=command.message,
-            )
-            if orchestration is not None:
-                async for stream_event in self.emit_orchestration(
-                    principal_id=principal.id,
-                    assistant=Participant(assistant.id, assistant.name),
-                    orchestration=orchestration,
-                ):
-                    yield stream_event
-                return
+                assistant=participants[0],
+                orchestration=orchestration,
+            ):
+                yield stream_event
+            return
 
+        async for stream_event in self._emit_roundtable(
+            command=command,
+            participants=participants,
+            rounds=rounds,
+            conversation=conversation,
+        ):
+            yield stream_event
+
+    async def _resolve_participants(self, command: SendMessageCommand) -> tuple[Participant, ...]:
+        ensure_added_agent_limit(command.add_agent_ids, max_add=command.max_add)
+        assistant = await self._assistants.get_or_create(command.principal)
+        added_ids = deduplicate_added_agents(
+            command.add_agent_ids,
+            assistant_id=assistant.id,
+            max_add=command.max_add,
+        )
+        added = await self._assistants.resolve_addable(added_ids)
+        return (Participant(assistant.id, assistant.name), *added)
+
+    async def _rounds(self, command: SendMessageCommand, *, participant_count: int) -> int:
+        configured = await self._configuration.integer(
+            "desktop_roundtable_rounds", command.default_rounds
+        )
+        return round_count(
+            configured,
+            participant_count=participant_count,
+            maximum=command.max_rounds,
+        )
+
+    async def _recent_conversation(self, command: SendMessageCommand) -> list[tuple[str, str]]:
+        async with self._uow_factory() as uow:
+            recent = await uow.messages.list_recent(
+                command.principal.id,
+                limit=command.recent_context,
+            )
+        return [(message.speaker_name, message.content) for message in recent]
+
+    async def _try_start_orchestration(
+        self,
+        command: SendMessageCommand,
+        participants: tuple[Participant, ...],
+    ) -> OrchestrationResult | None:
+        if len(participants) != 1:
+            return None
+        return await self._orchestration.try_start(
+            principal_id=command.principal.id,
+            assistant_id=participants[0].id,
+            message=command.message,
+        )
+
+    async def _emit_roundtable(
+        self,
+        *,
+        command: SendMessageCommand,
+        participants: tuple[Participant, ...],
+        rounds: int,
+        conversation: list[tuple[str, str]],
+    ) -> AsyncIterator[ConversationStreamEvent]:
         for _round in range(rounds):
             for participant in participants:
-                prompt = roundtable_prompt(participant, participants, conversation)
-                yield ConversationStreamEvent(
-                    "message_start",
-                    {
-                        "speaker_agent_id": str(participant.id),
-                        "speaker_name": participant.name,
-                    },
-                )
-                completed = None
-                async for agent_event in self._agents.stream(
-                    AgentExecutionRequest(
-                        participant_id=participant.id,
-                        principal_id=principal.id,
-                        original_message=command.message,
-                        prompt=prompt,
-                    )
+                async for stream_event in self._emit_participant_turn(
+                    command=command,
+                    participant=participant,
+                    participants=participants,
+                    conversation=conversation,
                 ):
-                    if agent_event.name == "delta":
-                        yield ConversationStreamEvent("delta", {"text": agent_event.text})
-                    elif agent_event.name == "complete":
-                        completed = agent_event
-                if completed is None:
-                    raise RuntimeError("Agent reply completed without an execution result")
-                ai_message = await self._save_message(
-                    owner_user_id=principal.id,
-                    speaker_type=SPEAKER_AI,
-                    speaker_agent_id=participant.id,
-                    speaker_name=participant.name,
-                    content=completed.content,
-                )
-                conversation += ((participant.name, completed.content),)
-                yield ConversationStreamEvent("message_end", _message_result(ai_message).as_dict())
+                    yield stream_event
 
-                for consulted in completed.consultations:
-                    yield ConversationStreamEvent(
-                        "message_start",
-                        {
-                            "speaker_agent_id": str(consulted.participant_id),
-                            "speaker_name": consulted.participant_name,
-                        },
-                    )
-                    yield ConversationStreamEvent("delta", {"text": consulted.content})
-                    consulted_message = await self._save_message(
-                        owner_user_id=principal.id,
-                        speaker_type=SPEAKER_AI,
-                        speaker_agent_id=consulted.participant_id,
-                        speaker_name=consulted.participant_name,
-                        content=consulted.content,
-                    )
-                    conversation += ((consulted.participant_name, consulted.content),)
-                    yield ConversationStreamEvent(
-                        "message_end",
-                        _message_result(consulted_message).as_dict(),
-                    )
+    async def _emit_participant_turn(
+        self,
+        *,
+        command: SendMessageCommand,
+        participant: Participant,
+        participants: tuple[Participant, ...],
+        conversation: list[tuple[str, str]],
+    ) -> AsyncIterator[ConversationStreamEvent]:
+        prompt = roundtable_prompt(participant, participants, tuple(conversation))
+        yield ConversationStreamEvent(
+            "message_start",
+            {
+                "speaker_agent_id": str(participant.id),
+                "speaker_name": participant.name,
+            },
+        )
+        completed = None
+        async for agent_event in self._agents.stream(
+            AgentExecutionRequest(
+                participant_id=participant.id,
+                principal_id=command.principal.id,
+                original_message=command.message,
+                prompt=prompt,
+            )
+        ):
+            if agent_event.name == "delta":
+                yield ConversationStreamEvent("delta", {"text": agent_event.text})
+            elif agent_event.name == "complete":
+                completed = agent_event
+        if completed is None:
+            raise RuntimeError("Agent reply completed without an execution result")
+
+        ai_message = await self._save_message(
+            owner_user_id=command.principal.id,
+            speaker_type=SPEAKER_AI,
+            speaker_agent_id=participant.id,
+            speaker_name=participant.name,
+            content=completed.content,
+        )
+        conversation.append((participant.name, completed.content))
+        yield ConversationStreamEvent("message_end", _message_result(ai_message).as_dict())
+
+        async for stream_event in self._emit_consulted_replies(
+            principal_id=command.principal.id,
+            consultations=completed.consultations,
+            conversation=conversation,
+        ):
+            yield stream_event
+
+    async def _emit_consulted_replies(
+        self,
+        *,
+        principal_id: uuid.UUID,
+        consultations: tuple[ConsultedReply, ...],
+        conversation: list[tuple[str, str]],
+    ) -> AsyncIterator[ConversationStreamEvent]:
+        for consulted in consultations:
+            yield ConversationStreamEvent(
+                "message_start",
+                {
+                    "speaker_agent_id": str(consulted.participant_id),
+                    "speaker_name": consulted.participant_name,
+                },
+            )
+            yield ConversationStreamEvent("delta", {"text": consulted.content})
+            message = await self._save_message(
+                owner_user_id=principal_id,
+                speaker_type=SPEAKER_AI,
+                speaker_agent_id=consulted.participant_id,
+                speaker_name=consulted.participant_name,
+                content=consulted.content,
+            )
+            conversation.append((consulted.participant_name, consulted.content))
+            yield ConversationStreamEvent("message_end", _message_result(message).as_dict())
 
     async def emit_orchestration(
         self,

@@ -65,7 +65,7 @@ verify_backend:
   script:
     - uv run --frozen ruff check .
     - uv run --frozen mypy app
-    - uv run --frozen pytest -q -m "not delivery_contract"
+    - uv run --frozen pytest -q -m "not delivery_contract" --cov=app --cov-report=term-missing:skip-covered
 
 verify_frontend:
   stage: verify
@@ -75,7 +75,7 @@ verify_frontend:
   extends: .verify_rules
   script:
     - npm --prefix frontend ci
-    - npm --prefix frontend run test
+    - npm --prefix frontend run test:coverage
     - npm --prefix frontend run lint
     - npm --prefix frontend run build
 

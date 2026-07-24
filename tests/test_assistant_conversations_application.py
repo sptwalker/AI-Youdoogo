@@ -12,6 +12,7 @@ from app.contexts.business.assistant_conversations.application.contracts import 
     AgentExecutionEvent,
     AgentExecutionRequest,
     ArchiveConversationRequest,
+    ConsultedReply,
     OrchestrationResult,
     Principal,
     SendMessageCommand,
@@ -135,8 +136,9 @@ class _Configuration:
 
 
 class _Agents:
-    def __init__(self) -> None:
+    def __init__(self, consultations: tuple[ConsultedReply, ...] = ()) -> None:
         self.requests: list[AgentExecutionRequest] = []
+        self.consultations = consultations
 
     def stream(self, request: AgentExecutionRequest) -> AsyncIterator[AgentExecutionEvent]:
         return self._stream(request)
@@ -145,7 +147,11 @@ class _Agents:
         self.requests.append(request)
         reply = f"reply{len(self.requests)}"
         yield AgentExecutionEvent(name="delta", text=reply[:2])
-        yield AgentExecutionEvent(name="complete", content=reply)
+        yield AgentExecutionEvent(
+            name="complete",
+            content=reply,
+            consultations=self.consultations if len(self.requests) == 1 else (),
+        )
 
 
 class _Orchestration:
@@ -296,6 +302,52 @@ async def test_orchestration_preserves_payload_and_short_circuits_agent() -> Non
     assert "红线·待您验收" in events[2].data["content"]
     assert agents.requests == []
     assert store.commits == 2
+
+
+async def test_consulted_reply_streams_and_persists_after_primary_reply() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    expert = Participant(uuid.UUID(int=12), "专家A")
+    consulted = ConsultedReply(uuid.UUID(int=13), "顾问B", "补充意见")
+    store = _Store()
+    agents = _Agents((consulted,))
+    application = _application(
+        store=store,
+        assistants=_Assistants(principal.id, (expert,)),
+        agents=agents,
+    )
+
+    events = [
+        event
+        async for event in application.send_message_stream(
+            SendMessageCommand(principal, "帮我分析", (expert.id,))
+        )
+    ]
+
+    assert [event.name for event in events] == [
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+    ]
+    assert events[4].data == {
+        "speaker_agent_id": str(consulted.participant_id),
+        "speaker_name": consulted.participant_name,
+    }
+    assert events[5].data == {"text": consulted.content}
+    assert [row.content for row in store.messages] == [
+        "帮我分析",
+        "reply1",
+        consulted.content,
+        "reply2",
+    ]
+    assert consulted.content in agents.requests[1].prompt
+    assert store.commits == 4
 
 
 @pytest.mark.parametrize("fails, expected_count", [(False, 0), (True, 1)])

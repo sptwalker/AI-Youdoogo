@@ -69,6 +69,64 @@ export interface SseSubscription {
   restart: () => void
 }
 
+interface SseFrame {
+  event: string
+  data: string
+}
+
+const SSE_FRAME_SEPARATOR = /\r\n\r\n|\n\n|\r\r/
+
+function parseSseFrame(rawFrame: string): SseFrame | null {
+  let event = 'message'
+  let data = ''
+  for (const line of rawFrame.split(/\r\n|\n|\r/)) {
+    const separatorIndex = line.indexOf(':')
+    const field = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line
+    const rawValue = separatorIndex >= 0 ? line.slice(separatorIndex + 1) : ''
+    const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue
+    if (field === 'event') event = value
+    else if (field === 'data') data = value
+  }
+  return data ? { event, data } : null
+}
+
+async function consumeSseStream(
+  body: ReadableStream<Uint8Array>,
+  onFrame: (frame: SseFrame) => void,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const consumeCompleteFrames = () => {
+    for (;;) {
+      const separator = SSE_FRAME_SEPARATOR.exec(buffer)
+      if (!separator || separator.index === undefined) return
+      const rawFrame = buffer.slice(0, separator.index)
+      buffer = buffer.slice(separator.index + separator[0].length)
+      const frame = parseSseFrame(rawFrame)
+      if (frame) onFrame(frame)
+    }
+  }
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    consumeCompleteFrames()
+  }
+  buffer += decoder.decode()
+  consumeCompleteFrames()
+}
+
+function reportMalformedSubscriptionFrame(event: string, error: unknown): void {
+  console.warn(`SSE 订阅忽略了无法解析的 ${event} 数据帧`, error)
+}
+
+function reportSubscriptionCallbackError(event: string, error: unknown): void {
+  console.warn(`SSE 订阅的 ${event} 回调执行失败`, error)
+}
+
 /** POST 一个 SSE 端点并逐事件回调（fetch 手动带 token——EventSource 不支持自定义头）。
  *  协议：message_start / delta / message_end / done / error；error 事件提示后抛出。 */
 export async function sseRequest(url: string, body: unknown, onEvent: SseHandler): Promise<void> {
@@ -95,33 +153,15 @@ export async function sseRequest(url: string, body: unknown, onEvent: SseHandler
     message.error(msg)
     throw new ApiError(msg)
   }
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    let idx: number
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const frame = buf.slice(0, idx)
-      buf = buf.slice(idx + 2)
-      let event = 'message'
-      let data = ''
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('event: ')) event = line.slice(7)
-        else if (line.startsWith('data: ')) data = line.slice(6)
-      }
-      if (!data) continue
-      const parsed = JSON.parse(data) as Record<string, unknown>
-      if (event === 'error') {
-        const msg = String(parsed.msg ?? '服务器错误')
-        message.error(msg)
-        throw new ApiError(msg)
-      }
-      onEvent(event, parsed)
+  await consumeSseStream(resp.body, ({ event, data }) => {
+    const parsed = JSON.parse(data) as Record<string, unknown>
+    if (event === 'error') {
+      const msg = String(parsed.msg ?? '服务器错误')
+      message.error(msg)
+      throw new ApiError(msg)
     }
-  }
+    onEvent(event, parsed)
+  })
 }
 
 /** GET 一个长连 SSE 订阅端点（实时消息推送，I3）。
@@ -184,35 +224,27 @@ export function sseSubscribe(
         }
         if (!resp.ok || !resp.body) throw new ApiError(`实时连接失败（${resp.status}）`)
 
-        const reader = resp.body.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n')
-          let idx: number
-          while ((idx = buf.indexOf('\n\n')) >= 0) {
-            const frame = buf.slice(0, idx)
-            buf = buf.slice(idx + 2)
-            let event = 'message'
-            let data = ''
-            for (const line of frame.split('\n')) {
-              if (line.startsWith('event: ')) event = line.slice(7)
-              else if (line.startsWith('data: ')) data = line.slice(6)
-            }
-            if (!data) continue
-            if (!connected && event !== 'done') {
-              connected = true
-              retryDelayMs = initialRetryDelayMs
-              reportState('connected')
-            }
-            if (event === 'ping' || event === 'ready' || event === 'done') continue
-            try {
-              onEvent(event, JSON.parse(data) as Record<string, unknown>)
-            } catch { /* 跳过无法解析的帧或业务回调异常，保持订阅 */ }
+        await consumeSseStream(resp.body, ({ event, data }) => {
+          if (!connected && event !== 'done') {
+            connected = true
+            retryDelayMs = initialRetryDelayMs
+            reportState('connected')
           }
-        }
+          if (event === 'ping' || event === 'ready' || event === 'done') return
+
+          let parsed: Record<string, unknown>
+          try {
+            parsed = JSON.parse(data) as Record<string, unknown>
+          } catch (error) {
+            reportMalformedSubscriptionFrame(event, error)
+            return
+          }
+          try {
+            onEvent(event, parsed)
+          } catch (error) {
+            reportSubscriptionCallbackError(event, error)
+          }
+        })
       } catch (error) {
         if (stopped) return
         if (error instanceof DOMException && error.name === 'AbortError' && restartRequested) {
