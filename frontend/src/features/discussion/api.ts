@@ -20,7 +20,7 @@ import {
   type DiscussionRequestOptions,
   type Message,
 } from '../../api/discussion'
-import type { SseHandler } from '../../api/client'
+import type { SseHandler, SseRequestOptions } from '../../api/client'
 
 export type { AgentRole, Attachment, Colleague, Message }
 export type { ChannelWithUnread }
@@ -53,6 +53,7 @@ export interface GroupChatApi {
     mentionedAgentIds: string[],
     onEvent: SseHandler,
     attachments?: Attachment[],
+    options?: SseRequestOptions,
   ): Promise<void>
   uploadAttachment(file: File): Promise<Attachment>
   downloadAttachment(attachment: Attachment): Promise<void>

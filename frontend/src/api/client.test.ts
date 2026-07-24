@@ -86,7 +86,28 @@ describe('sseRequest', () => {
       'event: delta\ndata: not-json\n\n',
     )))
 
-    await expect(sseRequest('/desktop/chat', {}, () => {})).rejects.toBeInstanceOf(SyntaxError)
+    await expect(sseRequest('/desktop/chat', {}, () => {}, { silent: true })).rejects.toMatchObject({
+      name: 'ApiError',
+      message: '服务器返回了无法解析的流式数据',
+    })
+  })
+
+  it('cancels an active stream through the caller signal', async () => {
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => new Promise<Response>(
+      (_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const pending = sseRequest('/desktop/chat', {}, () => {}, {
+      signal: controller.signal,
+      silent: true,
+    })
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'ApiError', cancelled: true })
   })
 })
 

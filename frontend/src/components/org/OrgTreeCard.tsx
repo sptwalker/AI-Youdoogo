@@ -51,10 +51,10 @@ export default function OrgTreeCard(props: {
       {props.tree.length === 0 ? (
         <span style={{ color: '#999' }}>暂无组织架构，请到「系统设置」一键初始化公司骨架</span>
       ) : (
-        <Tree
+        <Tree<TreeItem>
           treeData={toTree(props.tree)}
           defaultExpandAll
-          onSelect={(_, { node }) => void props.onSelect((node as unknown as TreeItem).node)}
+          onSelect={(_, { node }) => void props.onSelect(node.node)}
         />
       )}
     </Card>

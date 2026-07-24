@@ -2,11 +2,19 @@
 import { createBrowserRouter } from 'react-router-dom'
 import RequireAuth from './components/RequireAuth'
 import AppLayout from './layouts/AppLayout'
+import RouteErrorPage from './pages/RouteErrorPage'
+
+const ADMIN_ONLY = { roles: ['admin'] as const }
 
 export const router = createBrowserRouter([
-  { path: '/login', lazy: async () => ({ Component: (await import('./pages/Login')).default }) },
+  {
+    path: '/login',
+    errorElement: <RouteErrorPage />,
+    lazy: async () => ({ Component: (await import('./pages/Login')).default }),
+  },
   {
     path: '/',
+    errorElement: <RouteErrorPage />,
     element: (
       <RequireAuth>
         <AppLayout />
@@ -21,14 +29,15 @@ export const router = createBrowserRouter([
       { path: 'proposals', lazy: async () => ({ Component: (await import('./pages/Proposals')).default }) },
       { path: 'meetings', lazy: async () => ({ Component: (await import('./pages/Meetings')).default }) },
       { path: 'discussion', lazy: async () => ({ Component: (await import('./pages/Discussion')).default }) },
-      { path: 'org', lazy: async () => ({ Component: (await import('./pages/OrgAdmin')).default }) },
-      { path: 'users', lazy: async () => ({ Component: (await import('./pages/Users')).default }) },
-      { path: 'knowledge-bases', lazy: async () => ({ Component: (await import('./pages/KnowledgeBases')).default }) },
-      { path: 'data-sources', lazy: async () => ({ Component: (await import('./pages/DataSources')).default }) },
-      { path: 'semantic-terms', lazy: async () => ({ Component: (await import('./pages/SemanticTerms')).default }) },
-      { path: 'ai-providers', lazy: async () => ({ Component: (await import('./pages/AiProviders')).default }) },
-      { path: 'system-config', lazy: async () => ({ Component: (await import('./pages/SystemConfig')).default }) },
-      { path: 'audit-log', lazy: async () => ({ Component: (await import('./pages/AuditLog')).default }) },
+      { path: 'org', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/OrgAdmin')).default }) },
+      { path: 'users', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/Users')).default }) },
+      { path: 'knowledge-bases', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/KnowledgeBases')).default }) },
+      { path: 'data-sources', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/DataSources')).default }) },
+      { path: 'semantic-terms', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/SemanticTerms')).default }) },
+      { path: 'ai-providers', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/AiProviders')).default }) },
+      { path: 'system-config', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/SystemConfig')).default }) },
+      { path: 'audit-log', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/AuditLog')).default }) },
+      { path: '*', lazy: async () => ({ Component: (await import('./pages/NotFound')).default }) },
     ],
   },
 ])

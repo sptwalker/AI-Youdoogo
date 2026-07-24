@@ -1,7 +1,7 @@
 /** 组织架构路由容器：加载树与员工数据，委派树和编辑器组件。 */
 import { PageContainer } from '@ant-design/pro-components'
 import { Button, Popconfirm, Space, message } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listUsers, type UserInfo } from '../api/auth'
 import {
   createEmployee,
@@ -34,27 +34,46 @@ export default function OrgAdmin() {
   const [users, setUsers] = useState<UserInfo[]>([])
   const [selected, setSelected] = useState<OrgNode | null>(null)
   const [employees, setEmployees] = useState<Employee[]>([])
+  const selectedIdRef = useRef<string | null>(null)
+  const treeRequestRef = useRef(0)
+  const employeesRequestRef = useRef(0)
 
-  const refreshTree = async (keepId?: string) => {
+  const selectCurrentNode = (node: OrgNode | null) => {
+    selectedIdRef.current = node?.id ?? null
+    setSelected(node)
+  }
+
+  const refreshTree = async () => {
+    const requestId = ++treeRequestRef.current
     const nextTree = await getTree()
+    if (requestId !== treeRequestRef.current) return
     setTree(nextTree)
-    const id = keepId ?? selected?.id
-    if (id) setSelected(findNode(nextTree, id))
+    const selectedId = selectedIdRef.current
+    if (selectedId) selectCurrentNode(findNode(nextTree, selectedId))
   }
   const refreshEmployees = async (departmentId: string) => {
-    setEmployees(await listEmployees(departmentId))
+    const requestId = ++employeesRequestRef.current
+    const next = await listEmployees(departmentId)
+    if (requestId === employeesRequestRef.current && selectedIdRef.current === departmentId) {
+      setEmployees(next)
+    }
   }
   const refreshDepartment = async (departmentId: string) => {
-    await Promise.all([refreshTree(departmentId), refreshEmployees(departmentId)])
+    await Promise.all([refreshTree(), refreshEmployees(departmentId)])
   }
 
   useEffect(() => {
-    void getTree().then(setTree)
+    void refreshTree().catch(() => {})
     void listUsers().then(setUsers).catch(() => {})
+    return () => {
+      treeRequestRef.current += 1
+      employeesRequestRef.current += 1
+    }
   }, [])
 
   const selectNode = async (node: OrgNode) => {
-    setSelected(node)
+    selectCurrentNode(node)
+    setEmployees([])
     await refreshEmployees(node.id)
   }
 
@@ -105,11 +124,12 @@ export default function OrgAdmin() {
             onDeleteNode={async () => {
               await deleteNode(selected.id)
               message.success('已删除')
-              setSelected(null)
-              await refreshTree('')
+              selectCurrentNode(null)
+              setEmployees([])
+              await refreshTree()
             }}
             onAddEmployee={async (value) => {
-              await createEmployee(selected.id, value as never)
+              await createEmployee(selected.id, value)
               message.success('已新增员工')
               await refreshDepartment(selected.id)
             }}

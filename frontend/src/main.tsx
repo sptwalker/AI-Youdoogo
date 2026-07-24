@@ -8,10 +8,12 @@ import { ApiError } from './api/client'
 import { router } from './router'
 import './index.css'
 
-// API 错误已由拦截器 message.error 提示过；抑制其 unhandledrejection 控制台噪音，
-// 非 API 的真实异常仍照常冒泡（便于排查）。
+// API 错误已由拦截器提示；未被调用方接住时仍留下诊断信息。
 window.addEventListener('unhandledrejection', (e) => {
-  if (e.reason instanceof ApiError) e.preventDefault()
+  if (e.reason instanceof ApiError) {
+    console.error('未处理的 API 请求失败', e.reason)
+    e.preventDefault()
+  }
 })
 
 createRoot(document.getElementById('root')!).render(

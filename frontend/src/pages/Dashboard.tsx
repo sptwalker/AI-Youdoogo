@@ -20,6 +20,7 @@ import {
   reconcileDesktopMessageEnd,
 } from '../components/dashboard/desktopChatModel'
 import { useDashboardData } from '../hooks/useDashboardData'
+import { usePendingActions } from '../hooks/usePendingActions'
 
 export default function Dashboard() {
   const { me } = useOutletContext<{ me: UserInfo | null }>()
@@ -35,6 +36,11 @@ export default function Dashboard() {
   const chatBoxRef = useRef<HTMLDivElement>(null)
   const activeAiTurnIdRef = useRef<string | null>(null)
   const aiTurnSequenceRef = useRef(0)
+  const chatRequestRef = useRef<AbortController | null>(null)
+  const chatSendingRef = useRef(false)
+  const actionState = usePendingActions()
+
+  useEffect(() => () => chatRequestRef.current?.abort(), [])
 
   useEffect(() => {
     const element = chatBoxRef.current
@@ -49,16 +55,22 @@ export default function Dashboard() {
     })
   }, [])
 
-  const act = async (action: () => Promise<unknown>, success: string) => {
-    await action()
-    message.success(success)
-    await reload()
+  const act = async (key: string, action: () => Promise<unknown>, success: string) => {
+    return actionState.run(key, async () => {
+      await action()
+      message.success(success)
+      await reload()
+      return true
+    })
   }
 
   const sendChat = async () => {
-    if (!chatInput.trim() || chatSending) return
+    if (!chatInput.trim() || chatSendingRef.current) return
     const query = chatInput.trim()
     const optimisticId = `tmp-${Date.now()}`
+    const controller = new AbortController()
+    chatRequestRef.current = controller
+    chatSendingRef.current = true
     activeAiTurnIdRef.current = null
     setChatInput('')
     setChatSending(true)
@@ -88,11 +100,13 @@ export default function Dashboard() {
         } else if (event === 'orchestration') {
           setOrchestration(payload as unknown as OrchProgress)
         }
-      })
+      }, { signal: controller.signal })
     } catch {
       setChatMessages((items) => clearFailedDesktopChat(items, optimisticId))
       setChatInput(query)
     } finally {
+      if (chatRequestRef.current === controller) chatRequestRef.current = null
+      chatSendingRef.current = false
       activeAiTurnIdRef.current = null
       setChatSending(false)
       void loadDeliverables()
@@ -101,16 +115,19 @@ export default function Dashboard() {
 
   const acceptStep = async (stepId: string) => {
     if (!orchestration) return
-    await transitionTask(stepId, 'accepted')
-    message.success('已验收，继续推进')
-    setOrchestration(await getOrchestrationProgress(orchestration.parent_id))
-    await reload()
+    const parentId = orchestration.parent_id
+    await actionState.run(`orchestration:${stepId}`, async () => {
+      await transitionTask(stepId, 'accepted')
+      message.success('已验收，继续推进')
+      setOrchestration(await getOrchestrationProgress(parentId))
+      await reload()
+    })
   }
 
   const pendingActions = (pending: PendingItem): ReactNode[] => {
     if (pending.kind === 'task') return [
-      <Popconfirm key="a" title="验收此任务？" onConfirm={() => act(() => transitionTask(pending.id, 'accepted'), '已验收')}><a>验收</a></Popconfirm>,
-      <Popconfirm key="r" title="驳回此任务？" onConfirm={() => act(() => transitionTask(pending.id, 'rejected'), '已驳回')}><a style={{ color: '#cf1322' }}>驳回</a></Popconfirm>,
+      <Popconfirm key="a" title="验收此任务？" onConfirm={() => act(`task:${pending.id}:accepted`, () => transitionTask(pending.id, 'accepted'), '已验收')}><a>验收</a></Popconfirm>,
+      <Popconfirm key="r" title="驳回此任务？" onConfirm={() => act(`task:${pending.id}:rejected`, () => transitionTask(pending.id, 'rejected'), '已驳回')}><a style={{ color: '#cf1322' }}>驳回</a></Popconfirm>,
     ]
     if (pending.kind === 'proposal') return [
       <ModalForm<{ decision: 'approve' | 'reject'; conclusion: string }>
@@ -118,18 +135,18 @@ export default function Dashboard() {
         title={`评审提案 ${pending.meta ?? ''}`}
         trigger={<a>评审</a>}
         modalProps={{ destroyOnHidden: true }}
-        onFinish={async (value) => { await act(() => reviewProposal(pending.id, value.decision, value.conclusion), '已评审'); return true }}
+        onFinish={async (value) => Boolean(await act(`proposal:${pending.id}:review`, () => reviewProposal(pending.id, value.decision, value.conclusion), '已评审'))}
       >
         <ProFormSelect name="decision" label="决定" initialValue="approve" rules={[{ required: true }]} options={[{ value: 'approve', label: '通过' }, { value: 'reject', label: '驳回' }]} />
         <ProFormTextArea name="conclusion" label="评审意见" rules={[{ required: true }]} />
       </ModalForm>,
     ]
     if (pending.kind === 'resolution') return [
-      <Popconfirm key="c" title="确认此决议生效？（红线动作）" onConfirm={() => act(() => confirmResolution(pending.id), '决议已确认')}><a>确认生效</a></Popconfirm>,
+      <Popconfirm key="c" title="确认此决议生效？（红线动作）" onConfirm={() => act(`resolution:${pending.id}:confirm`, () => confirmResolution(pending.id), '决议已确认')}><a>确认生效</a></Popconfirm>,
     ]
     return [
-      <Popconfirm key="a" title="复核通过此协作请求？" onConfirm={() => act(() => reviewCollab(pending.id, 'approve'), '已通过')}><a>通过</a></Popconfirm>,
-      <Popconfirm key="r" title="驳回此协作请求？" onConfirm={() => act(() => reviewCollab(pending.id, 'reject'), '已驳回')}><a style={{ color: '#cf1322' }}>驳回</a></Popconfirm>,
+      <Popconfirm key="a" title="复核通过此协作请求？" onConfirm={() => act(`collab:${pending.id}:approve`, () => reviewCollab(pending.id, 'approve'), '已通过')}><a>通过</a></Popconfirm>,
+      <Popconfirm key="r" title="驳回此协作请求？" onConfirm={() => act(`collab:${pending.id}:reject`, () => reviewCollab(pending.id, 'reject'), '已驳回')}><a style={{ color: '#cf1322' }}>驳回</a></Popconfirm>,
     ]
   }
 

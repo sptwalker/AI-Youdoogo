@@ -31,7 +31,7 @@ export function EventNamingCard() {
             type="primary"
             onClick={() => { void naming.save() }}
             loading={naming.saving}
-            disabled={!hasValidDate}
+            disabled={!hasValidDate || naming.groups.length === 0}
           >
             保存命名
           </Button>
@@ -42,6 +42,11 @@ export function EventNamingCard() {
         列出各产品当日全部事件码（按次数降序），填中文名用于报表/界面显示。别名永久保存，与日期无关；
         某天没发生的事件换日期即可补命名。
       </Typography.Paragraph>
+      {naming.loadedDate && naming.loadedDate !== naming.statDate && (
+        <Typography.Paragraph type="warning">
+          当前仍显示 {naming.loadedDate} 的事件；点击“查该日事件”后再查看 {naming.statDate}。
+        </Typography.Paragraph>
+      )}
       {naming.loading && <Spin />}
       {!naming.loading && naming.groups.length === 0 && (
         <Empty description="无数据，检查 TD 配置或换个日期" />

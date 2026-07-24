@@ -90,6 +90,7 @@ export default function DesktopConversations({
       }}>
         {active.type === 'group' ? (
           <GroupChat
+            key={active.id}
             channelId={active.id}
             channelName={active.name}
             agents={agents}

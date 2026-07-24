@@ -3,9 +3,10 @@ import { LogoutOutlined } from '@ant-design/icons'
 import { ProLayout } from '@ant-design/pro-components'
 import { Button, Dropdown, Result, Spin } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation, useMatches, useNavigate } from 'react-router-dom'
 import { fetchMe, ROLE_LABELS, type UserInfo } from '../api/auth'
 import { TOKEN_KEY } from '../api/client'
+import { routeAllowsRole } from '../auth/authorization'
 
 const BIZ_ROUTES = [
   { path: '/knowledge', name: '知识库' },
@@ -43,6 +44,7 @@ function buildMenu(isAdmin: boolean) {
 export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
+  const matches = useMatches()
   const [me, setMe] = useState<UserInfo | null>(null)
   const [meLoading, setMeLoading] = useState(true)
   const [meError, setMeError] = useState(false)
@@ -87,6 +89,8 @@ export default function AppLayout() {
     )
   }
 
+  const routeAllowed = routeAllowsRole(me.role_code, matches.map((match) => match.handle))
+
   return (
     <ProLayout
       title="创想悦动AI决策大脑"
@@ -113,7 +117,16 @@ export default function AppLayout() {
         ),
       }}
     >
-      <Outlet context={{ me }} />
+      {routeAllowed ? (
+        <Outlet context={{ me }} />
+      ) : (
+        <Result
+          status="403"
+          title="无权访问此页面"
+          subTitle="当前账号没有该管理功能的访问权限。"
+          extra={<Button type="primary" onClick={() => navigate('/', { replace: true })}>返回工作桌面</Button>}
+        />
+      )}
     </ProLayout>
   )
 }

@@ -28,13 +28,14 @@ export function MessageComposer({ members, composer }: MessageComposerProps) {
           placeholder="@成员（真人/AI）"
           value={composer.mentions}
           onChange={composer.setMentions}
+          disabled={composer.sending}
           optionFilterProp="label"
           options={members.map((member) => ({
             value: member.member_id,
             label: `${member.member_type === 'ai' ? '🤖' : '👤'} ${member.member_name || '（未命名）'}`,
           }))}
         />
-        <Upload beforeUpload={composer.upload} showUploadList={false} multiple>
+        <Upload beforeUpload={composer.upload} showUploadList={false} multiple disabled={composer.sending}>
           <Button
             icon={<PaperClipOutlined />}
             loading={composer.uploading}
@@ -46,8 +47,14 @@ export function MessageComposer({ members, composer }: MessageComposerProps) {
           value={composer.text}
           onChange={(event) => composer.setText(event.target.value)}
           onPressEnter={() => { void composer.send() }}
+          disabled={composer.sending}
         />
-        <Button type="primary" loading={composer.sending} onClick={() => { void composer.send() }}>
+        <Button
+          type="primary"
+          loading={composer.sending}
+          disabled={composer.uploading}
+          onClick={() => { void composer.send() }}
+        >
           发送
         </Button>
       </Space.Compact>

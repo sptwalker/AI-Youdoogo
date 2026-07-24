@@ -71,18 +71,18 @@ export function deleteNode(id: string): Promise<null> {
   return request({ method: 'DELETE', url: `/org/nodes/${id}` })
 }
 
-export interface EmployeePayload {
+export interface EmployeeUpdatePayload {
   name?: string
   prompt_template?: string
   title?: string
   tier?: string
   model_role?: string
-  duty?: string
-  report_to_id?: string
+  duty?: string | null
+  report_to_id?: string | null
   is_active?: boolean
 }
 
-export function updateEmployee(id: string, payload: EmployeePayload) {
+export function updateEmployee(id: string, payload: EmployeeUpdatePayload) {
   return request({ method: 'PATCH', url: `/org/employees/${id}`, data: payload })
 }
 
@@ -96,17 +96,19 @@ export function listEmployees(deptId: string): Promise<Employee[]> {
 
 export function createEmployee(
   deptId: string,
-  payload: {
-    name: string
-    prompt_template: string
-    title?: string
-    tier?: string
-    model_role?: string
-    duty?: string
-    report_to_id?: string
-  },
+  payload: EmployeeCreatePayload,
 ) {
   return request({ method: 'POST', url: `/org/nodes/${deptId}/employees`, data: payload })
+}
+
+export interface EmployeeCreatePayload {
+  name: string
+  prompt_template: string
+  title?: string
+  tier?: string
+  model_role?: string
+  duty?: string | null
+  report_to_id?: string | null
 }
 
 export function deleteEmployee(id: string): Promise<null> {

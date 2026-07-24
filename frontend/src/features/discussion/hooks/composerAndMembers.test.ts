@@ -23,6 +23,15 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+function uploadedAttachment(name: string) {
+  return {
+    type: 'file' as const,
+    name,
+    storage_path: `chat/${name}`,
+    size: 64,
+  }
+}
+
 function createApi(overrides: Partial<GroupChatApi> = {}): GroupChatApi {
   return {
     listAgents: vi.fn().mockResolvedValue([]),
@@ -51,6 +60,7 @@ interface ComposerProps {
   channelId: string
   members: DiscussionMember[]
   ingestStreamEvent(event: string, data: Record<string, unknown>): void
+  clearStreamingMessage(): void
   onFileTooLarge(): void
   onUploadFailed(): void
   api: GroupChatApi
@@ -90,6 +100,7 @@ describe('useMessageComposer', () => {
       channelId: 'channel-a',
       members: [],
       ingestStreamEvent: vi.fn(),
+      clearStreamingMessage: vi.fn(),
       onFileTooLarge,
       onUploadFailed,
       api,
@@ -109,6 +120,41 @@ describe('useMessageComposer', () => {
     await rendered.unmount()
   })
 
+  it('keeps uploading true until every concurrent attachment finishes', async () => {
+    const first = deferred<ReturnType<typeof uploadedAttachment>>()
+    const second = deferred<ReturnType<typeof uploadedAttachment>>()
+    const api = createApi({
+      uploadAttachment: vi.fn()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise),
+    })
+    const rendered = await renderComposer({
+      channelId: 'channel-a',
+      members: [],
+      ingestStreamEvent: vi.fn(),
+      clearStreamingMessage: vi.fn(),
+      onFileTooLarge: vi.fn(),
+      onUploadFailed: vi.fn(),
+      api,
+    })
+
+    await act(async () => {
+      void rendered.current.upload(new File(['a'], 'a.txt'))
+      void rendered.current.upload(new File(['b'], 'b.txt'))
+      await Promise.resolve()
+    })
+    expect(rendered.current.uploading).toBe(true)
+
+    first.resolve(uploadedAttachment('a.txt'))
+    await flushEffects()
+    expect(rendered.current.uploading).toBe(true)
+
+    second.resolve(uploadedAttachment('b.txt'))
+    await flushEffects()
+    expect(rendered.current.uploading).toBe(false)
+    await rendered.unmount()
+  })
+
   it('clears the submitted draft and prevents concurrent duplicate sends', async () => {
     const posted = deferred<void>()
     const api = createApi({ postMessage: vi.fn(() => posted.promise) })
@@ -120,6 +166,7 @@ describe('useMessageComposer', () => {
       channelId: 'channel-a',
       members,
       ingestStreamEvent: vi.fn(),
+      clearStreamingMessage: vi.fn(),
       onFileTooLarge: vi.fn(),
       onUploadFailed: vi.fn(),
       api,
@@ -142,14 +189,38 @@ describe('useMessageComposer', () => {
       ['ai-1'],
       expect.any(Function),
       [],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
-    expect(rendered.current.text).toBe('')
-    expect(rendered.current.mentions).toEqual([])
+    expect(rendered.current.text).toBe('review this')
+    expect(rendered.current.mentions).toEqual(['human-1', 'ai-1'])
     expect(rendered.current.sending).toBe(true)
 
     posted.resolve()
     await flushEffects()
     expect(rendered.current.sending).toBe(false)
+    expect(rendered.current.text).toBe('')
+    expect(rendered.current.mentions).toEqual([])
+    await rendered.unmount()
+  })
+
+  it('preserves the draft and clears a partial stream when sending fails', async () => {
+    const clearStreamingMessage = vi.fn()
+    const api = createApi({ postMessage: vi.fn().mockRejectedValue(new Error('failed')) })
+    const rendered = await renderComposer({
+      channelId: 'channel-a',
+      members: [],
+      ingestStreamEvent: vi.fn(),
+      clearStreamingMessage,
+      onFileTooLarge: vi.fn(),
+      onUploadFailed: vi.fn(),
+      api,
+    })
+
+    await act(async () => rendered.current.setText('keep me'))
+    await act(async () => { await rendered.current.send() })
+
+    expect(rendered.current.text).toBe('keep me')
+    expect(clearStreamingMessage).toHaveBeenCalledOnce()
     await rendered.unmount()
   })
 })
@@ -177,7 +248,8 @@ describe('useAdvisorComposer', () => {
     await act(async () => { await current?.send() })
 
     expect(api.postMessage).toHaveBeenCalledWith(
-      'channel-a', 'review this', ['ai-1', 'ai-2', 'ai-3'], ingestStreamEvent,
+      'channel-a', 'review this', ['ai-1', 'ai-2', 'ai-3'], ingestStreamEvent, [],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
     expect(clearStreamingMessage).toHaveBeenCalledOnce()
     expect(current?.text).toBe('  review this  ')

@@ -9,6 +9,7 @@ import {
   TOKEN_KEY,
   type SseConnectionState,
   type SseHandler,
+  type SseRequestOptions,
   type SseSubscription,
 } from './client'
 
@@ -118,8 +119,14 @@ export function postMessage(
   mentioned_agent_ids: string[],
   onEvent: SseHandler,
   attachments: Attachment[] = [],
+  options?: SseRequestOptions,
 ): Promise<void> {
-  return sseRequest(`/channels/${channelId}/messages`, { content, mentioned_agent_ids, attachments }, onEvent)
+  return sseRequest(
+    `/channels/${channelId}/messages`,
+    { content, mentioned_agent_ids, attachments },
+    onEvent,
+    options,
+  )
 }
 
 /** 上传群聊附件（图片/文件，I6）→ 返回附件元数据。 */

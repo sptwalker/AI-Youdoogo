@@ -3,6 +3,17 @@ import type { ReactElement, ReactNode } from 'react'
 import { listRoles } from '../../api/agents'
 import type { Employee } from '../../api/org'
 
+export interface EmployeeFormValues {
+  name: string
+  prompt_template: string
+  title?: string
+  tier?: string
+  model_role?: string
+  duty?: string | null
+  report_to_id?: string | null
+  is_active?: boolean
+}
+
 const TIER_OPTIONS = [
   { value: 'exec', label: '公司顾问' },
   { value: 'director', label: '总监助理' },
@@ -19,12 +30,12 @@ async function reportToOptions() {
 
 export default function EmployeeForm(props: {
   trigger: ReactNode
-  initial?: Partial<Employee> & { prompt_template?: string }
+  initial?: Partial<Employee>
   isEdit?: boolean
-  onFinish: (value: Record<string, unknown>) => Promise<void>
+  onFinish: (value: EmployeeFormValues) => Promise<void>
 }) {
   return (
-    <ModalForm
+    <ModalForm<EmployeeFormValues>
       title={props.isEdit ? '编辑智能体员工' : '新增智能体员工'}
       trigger={props.trigger as ReactElement}
       initialValues={props.initial ?? { tier: 'member', model_role: 'daily' }}

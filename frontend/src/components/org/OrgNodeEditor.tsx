@@ -2,7 +2,7 @@ import { ProTable, type ProColumns } from '@ant-design/pro-components'
 import { Button, Card, Popconfirm, Select, Space, Tag } from 'antd'
 import type { UserInfo } from '../../api/auth'
 import { TIER_LABEL, type Employee, type OrgNode } from '../../api/org'
-import EmployeeForm from './EmployeeForm'
+import EmployeeForm, { type EmployeeFormValues } from './EmployeeForm'
 
 const TIER_COLOR: Record<string, string> = { exec: 'red', director: 'blue', member: 'default' }
 
@@ -10,13 +10,13 @@ export default function OrgNodeEditor(props: {
   employees: Employee[]
   node: OrgNode
   users: UserInfo[]
-  onAddEmployee: (value: Record<string, unknown>) => Promise<void>
+  onAddEmployee: (value: EmployeeFormValues) => Promise<void>
   onAddSubDepartment: (label: string) => Promise<void>
   onDeleteEmployee: (employeeId: string) => Promise<void>
   onDeleteNode: () => Promise<void>
   onRename: () => Promise<void>
   onSetSupervisor: (userId: string | null) => Promise<void>
-  onUpdateEmployee: (employeeId: string, value: Record<string, unknown>) => Promise<void>
+  onUpdateEmployee: (employeeId: string, value: EmployeeFormValues) => Promise<void>
 }) {
   const { employees, node, users } = props
   const columns: ProColumns<Employee>[] = [

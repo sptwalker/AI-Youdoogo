@@ -37,26 +37,58 @@ export default function Knowledge() {
   const [query, setQuery] = useState('')
   const [asking, setAsking] = useState(false)
   const [answer, setAnswer] = useState<AskResponse | null>(null)
+  const [answerQuery, setAnswerQuery] = useState('')
+  const [uploading, setUploading] = useState(false)
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [targetKb, setTargetKb] = useState<string | undefined>()
+  const askRequestRef = useRef(0)
+  const uploadRef = useRef(false)
 
   useEffect(() => {
-    void listKnowledgeBases().then((list) => {
-      setKbs(list)
-      setTargetKb(list.find((k) => k.is_default)?.id ?? list[0]?.id)
-    })
+    let disposed = false
+    void listKnowledgeBases()
+      .then((list) => {
+        if (disposed) return
+        setKbs(list)
+        setTargetKb(list.find((k) => k.is_default)?.id ?? list[0]?.id)
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      askRequestRef.current += 1
+    }
   }, [])
   const kbOptions = kbs.map((k) => ({ value: k.id, label: k.is_default ? `${k.name}（默认）` : k.name }))
 
   const ask = async () => {
-    if (!query.trim()) return
+    const submittedQuery = query.trim()
+    if (!submittedQuery) return
+    const requestId = ++askRequestRef.current
     setAsking(true)
     try {
-      setAnswer(await askKnowledge(query))
+      const next = await askKnowledge(submittedQuery)
+      if (requestId === askRequestRef.current) {
+        setAnswer(next)
+        setAnswerQuery(submittedQuery)
+      }
     } catch {
       /* 错误已由拦截器提示 */
     } finally {
-      setAsking(false)
+      if (requestId === askRequestRef.current) setAsking(false)
+    }
+  }
+
+  const uploadFile = async (file: File) => {
+    if (uploadRef.current) return
+    uploadRef.current = true
+    setUploading(true)
+    try {
+      await uploadKnowledgeFile(file, { knowledgeBaseId: targetKb })
+      message.success('已上传并入库')
+      actionRef.current?.reload()
+    } finally {
+      uploadRef.current = false
+      setUploading(false)
     }
   }
 
@@ -119,6 +151,7 @@ export default function Knowledge() {
         {asking && <Spin style={{ marginTop: 16 }} />}
         {answer && !asking && (
           <div style={{ marginTop: 16 }}>
+            <Typography.Text type="secondary">问题：{answerQuery}</Typography.Text>
             <Typography.Paragraph>
               <Markdown>{answer.answer}</Markdown>
             </Typography.Paragraph>
@@ -158,18 +191,11 @@ export default function Knowledge() {
             accept=".txt,.md,.markdown,.docx,.pdf"
             showUploadList={false}
             beforeUpload={(file) => {
-              uploadKnowledgeFile(file, { knowledgeBaseId: targetKb })
-                .then(() => {
-                  message.success('已上传并入库')
-                  actionRef.current?.reload()
-                })
-                .catch(() => {
-                  /* 错误已由拦截器提示 */
-                })
+              void uploadFile(file).catch(() => {})
               return false
             }}
           >
-            <Button>上传文档 (txt/md/docx/pdf)</Button>
+            <Button loading={uploading}>上传文档 (txt/md/docx/pdf)</Button>
           </Upload>,
           <ModalForm<{ title: string; text: string; category?: string }>
             key="text"

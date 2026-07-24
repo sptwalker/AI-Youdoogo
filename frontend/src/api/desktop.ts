@@ -7,6 +7,7 @@ import {
   sseRequest,
   TOKEN_KEY,
   type SseHandler,
+  type SseRequestOptions,
 } from './client'
 
 export interface PendingItem {
@@ -73,8 +74,9 @@ export function sendDesktopChat(
   message: string,
   addAgentIds: string[],
   onEvent: SseHandler,
+  options?: SseRequestOptions,
 ): Promise<void> {
-  return sseRequest('/desktop/chat', { message, add_agent_ids: addAgentIds }, onEvent)
+  return sseRequest('/desktop/chat', { message, add_agent_ids: addAgentIds }, onEvent, options)
 }
 
 // ── 文件交付区（AI 交付的文档/表格）──────────────────────────

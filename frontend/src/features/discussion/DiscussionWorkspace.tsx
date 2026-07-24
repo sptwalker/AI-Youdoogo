@@ -186,6 +186,7 @@ function AdvisorChannel({
           mode="multiple"
           allowClear
           maxCount={3}
+          disabled={composer.sending}
           placeholder="@顾问（最多3位）"
           style={{ width: 260 }}
           value={composer.mentions}
@@ -197,6 +198,7 @@ function AdvisorChannel({
           value={composer.text}
           onChange={(event) => composer.setText(event.target.value)}
           onPressEnter={() => { void composer.send() }}
+          disabled={composer.sending}
         />
         <Button
           type="primary"

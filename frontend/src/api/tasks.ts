@@ -6,7 +6,7 @@ export interface TaskCard {
   title: string
   task_type: string
   priority: string
-  status: string
+  status: TaskStatus
   creator_id: string
   assignee_agent_id: string | null
   parent_id: string | null
@@ -14,6 +14,15 @@ export interface TaskCard {
   result_content: string | null
   create_time: string
 }
+
+export type TaskStatus =
+  | 'created'
+  | 'dispatched'
+  | 'executing'
+  | 'reported'
+  | 'accepted'
+  | 'rejected'
+  | 'cancelled'
 
 export interface TaskLog {
   id: string
@@ -54,7 +63,7 @@ export function createTask(payload: {
 
 export function transitionTask(
   id: string,
-  to_status: string,
+  to_status: TaskStatus,
   note?: string,
 ): Promise<TaskCard> {
   return request({ method: 'POST', url: `/tasks/${id}/transition`, data: { to_status, note } })
@@ -87,4 +96,3 @@ export interface OrchProgress {
 export function getOrchestrationProgress(parentId: string): Promise<OrchProgress> {
   return request({ method: 'GET', url: `/tasks/${parentId}/orchestration` })
 }
-

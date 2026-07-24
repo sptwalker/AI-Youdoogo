@@ -21,6 +21,8 @@ import {
   transitionTask,
   type TaskCard,
 } from '../api/tasks'
+import { taskHumanActions } from '../features/tasks/model'
+import { usePendingActions } from '../hooks/usePendingActions'
 
 const STATUS_COLOR: Record<string, string> = {
   created: 'default',
@@ -32,17 +34,6 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'default',
 }
 
-/** 当前状态下真人可执行的快捷流转（验收/驳回/终止）。 */
-const NEXT_ACTIONS: Record<string, Array<{ to: string; label: string }>> = {
-  reported: [
-    { to: 'accepted', label: '验收' },
-    { to: 'rejected', label: '驳回' },
-  ],
-  created: [{ to: 'cancelled', label: '终止' }],
-  dispatched: [{ to: 'cancelled', label: '终止' }],
-  rejected: [{ to: 'dispatched', label: '重新分发' }],
-}
-
 async function agentRoleOptions() {
   const roles = await listRoles()
   return roles.map((r) => ({ label: r.name, value: r.id }))
@@ -50,6 +41,7 @@ async function agentRoleOptions() {
 
 export default function Tasks() {
   const actionRef = useRef<ActionType>(null)
+  const pending = usePendingActions()
   const reload = () => actionRef.current?.reload()
 
   const columns: ProColumns<TaskCard>[] = [
@@ -71,31 +63,44 @@ export default function Tasks() {
       render: (_, r) => {
         const actions = []
         if (r.assignee_agent_id && (r.status === 'created' || r.status === 'dispatched')) {
+          const runKey = `run:${r.id}`
           actions.push(
-            <a
+            <Button
               key="run"
-              onClick={async () => {
-                await runTask(r.id)
-                message.success('已调度执行')
-                reload()
+              type="link"
+              size="small"
+              loading={pending.isPending(runKey)}
+              onClick={() => {
+                void pending.run(runKey, async () => {
+                  await runTask(r.id)
+                  message.success('已调度执行')
+                  reload()
+                }).catch(() => {})
               }}
             >
               运行
-            </a>,
+            </Button>,
           )
         }
-        for (const a of NEXT_ACTIONS[r.status] || []) {
+        for (const action of taskHumanActions(r.status)) {
+          const transitionKey = `transition:${r.id}:${action.to}`
           actions.push(
-            <a
-              key={a.to}
-              onClick={async () => {
-                await transitionTask(r.id, a.to)
-                message.success(`已${a.label}`)
-                reload()
+            <Button
+              key={action.to}
+              type="link"
+              size="small"
+              danger={action.danger}
+              loading={pending.isPending(transitionKey)}
+              onClick={() => {
+                void pending.run(transitionKey, async () => {
+                  await transitionTask(r.id, action.to)
+                  message.success(`已${action.label}`)
+                  reload()
+                }).catch(() => {})
               }}
             >
-              {a.label}
-            </a>,
+              {action.label}
+            </Button>,
           )
         }
         return actions.length ? actions : '-'

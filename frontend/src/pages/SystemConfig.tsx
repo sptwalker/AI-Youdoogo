@@ -4,6 +4,8 @@
 import {
   ModalForm,
   PageContainer,
+  ProFormDigit,
+  ProFormSwitch,
   ProFormText,
   ProFormTextArea,
 } from '@ant-design/pro-components'
@@ -13,6 +15,12 @@ import { Link } from 'react-router-dom'
 import { listConfigs, testConnectivity, updateConfig, type ConnResult, type SysConfig } from '../api/admin'
 import { testReadOpsData, type TestReadResult } from '../api/opsData'
 import { initTemplate } from '../api/org'
+import {
+  InvalidConfigValue,
+  configInitialValue,
+  localDateInputValue,
+  normalizeConfigValue,
+} from './systemConfigModel'
 
 const CAT_LABEL: Record<string, string> = {
   llm: 'AI 大模型', embedding: '向量模型 (Embedding)', dataif: '外部数据 (ThinkingData)',
@@ -38,10 +46,9 @@ const KEY_LABEL: Record<string, string> = {
   agent_global_prompt: 'AI 全局红线提示词',
 }
 
-const asText = (v: unknown): string => {
-  if (v == null) return ''
-  return typeof v === 'string' ? v : JSON.stringify(v)
-}
+const asText = (v: unknown): string => v == null
+  ? ''
+  : typeof v === 'string' ? v : JSON.stringify(v)
 const label = (k: string) => KEY_LABEL[k] ?? k
 
 /** 连通性测试目标的中文名。 */
@@ -56,17 +63,11 @@ const EFFECTIVE_DEFAULT: Record<string, string> = {
   rerank_model: 'BAAI/bge-reranker-v2-m3（SiliconFlow 默认）',
 }
 
-function coerce(valueType: string, raw: string): unknown {
-  if (valueType === 'int') return Number(raw)
-  if (valueType === 'bool') return raw.trim().toLowerCase() === 'true'
-  return raw
-}
-
 export default function SystemConfig() {
   const [configs, setConfigs] = useState<SysConfig[]>([])
   const [conn, setConn] = useState<ConnResult[] | null>(null)
   const [testing, setTesting] = useState(false)
-  const [readDate, setReadDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [readDate, setReadDate] = useState(localDateInputValue)
   const [readResult, setReadResult] = useState<TestReadResult | null>(null)
   const [reading, setReading] = useState(false)
 
@@ -99,18 +100,32 @@ export default function SystemConfig() {
   } as const
 
   const cats = [...new Set(configs.map((c) => c.category))].sort(
-    (a, b) => (CAT_ORDER.indexOf(a) + 99) - (CAT_ORDER.indexOf(b) + 99),
+    (a, b) => {
+      const rank = (category: string) => {
+        const index = CAT_ORDER.indexOf(category)
+        return index < 0 ? Number.POSITIVE_INFINITY : index
+      }
+      return rank(a) - rank(b) || a.localeCompare(b)
+    },
   )
 
   const editForm = (c: SysConfig) => (
-    <ModalForm<{ value: string }>
+    <ModalForm<{ value: string | number | boolean }>
       key="e"
       title={`编辑 ${label(c.key)}`}
       trigger={<a>{c.is_secret ? '设置' : '编辑'}</a>}
-      initialValues={c.is_secret ? {} : { value: asText(c.value) }}
+      initialValues={c.is_secret ? {} : { value: configInitialValue(c.value_type, c.value) }}
       modalProps={{ destroyOnHidden: true }}
       onFinish={async (v) => {
-        await updateConfig(c.key, coerce(c.value_type, v.value))
+        try {
+          await updateConfig(c.key, normalizeConfigValue(c.value_type, v.value))
+        } catch (error) {
+          if (error instanceof InvalidConfigValue) {
+            message.error(error.message)
+            return false
+          }
+          throw error
+        }
         message.success('已保存，即时生效')
         await load()
         return true
@@ -119,6 +134,15 @@ export default function SystemConfig() {
       {c.is_secret ? (
         <ProFormText.Password name="value" label="新值（不回显旧值）" rules={[{ required: true }]}
           tooltip="密钥存于系统，读取时脱敏；请勿硬编码" />
+      ) : c.value_type === 'bool' ? (
+        <ProFormSwitch name="value" label="值" />
+      ) : c.value_type === 'int' ? (
+        <ProFormDigit
+          name="value"
+          label="值"
+          fieldProps={{ precision: 0 }}
+          rules={[{ required: true, message: '请输入整数' }]}
+        />
       ) : (
         <ProFormTextArea name="value" label="值" rules={[{ required: true }]} />
       )}

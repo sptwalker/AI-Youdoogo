@@ -1,5 +1,5 @@
 /** 会议 API（对应后端 app/api/v1/meetings.py）。 */
-import { request, sseRequest, type SseHandler } from './client'
+import { request, sseRequest, type SseHandler, type SseRequestOptions } from './client'
 
 export interface Meeting {
   id: string
@@ -59,8 +59,13 @@ export function discuss(id: string, content: string) {
 }
 
 /** AI 专家发言，SSE 逐字流式回调：message_start → delta* → message_end。 */
-export function aiSpeak(id: string, topic: string, onEvent: SseHandler): Promise<void> {
-  return sseRequest(`/meetings/${id}/ai-speak`, { topic }, onEvent)
+export function aiSpeak(
+  id: string,
+  topic: string,
+  onEvent: SseHandler,
+  options?: SseRequestOptions,
+): Promise<void> {
+  return sseRequest(`/meetings/${id}/ai-speak`, { topic }, onEvent, options)
 }
 
 export function vote(id: string, subject: string, choice: string) {

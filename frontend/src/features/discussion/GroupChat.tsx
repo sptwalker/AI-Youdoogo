@@ -40,6 +40,7 @@ export default function GroupChat({
     channelId,
     members: membership.members,
     ingestStreamEvent: session.ingestStreamEvent,
+    clearStreamingMessage: session.clearStreamingMessage,
     onFileTooLarge: notifyFileTooLarge,
     onUploadFailed: notifyUploadFailed,
   })

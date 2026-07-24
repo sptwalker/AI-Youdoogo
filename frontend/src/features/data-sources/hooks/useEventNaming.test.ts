@@ -51,8 +51,10 @@ describe('useEventNaming', () => {
 
     await act(async () => current?.setStatDate('2026-07-01'))
     expect(listEvents).toHaveBeenCalledTimes(1)
+    expect(current?.loadedDate).toBe(expectedInitialDate)
     await act(async () => { await current?.load() })
     expect(listEvents).toHaveBeenLastCalledWith('2026-07-01')
+    expect(current?.loadedDate).toBe('2026-07-01')
 
     await act(async () => current?.updateEdit(eventEditKey('game_a', 'login'), '用户登录'))
     await act(async () => { await current?.save() })
@@ -60,6 +62,33 @@ describe('useEventNaming', () => {
       { view: 'game_a', event_code: 'login', display_name: '用户登录' },
     ])
     expect(listEvents).toHaveBeenLastCalledWith('2026-07-01')
+    await act(async () => root.unmount())
+  })
+
+  it('ignores a slower stale date response', async () => {
+    let resolveFirst!: (value: OpsEventGroup[]) => void
+    const first = new Promise<OpsEventGroup[]>((resolve) => { resolveFirst = resolve })
+    const listEvents = vi.spyOn(dataSourcesApi, 'listOpsEvents')
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce(groups)
+    const root = createRoot(document.createElement('div'))
+    let current: ReturnType<typeof useEventNaming> | undefined
+
+    function Probe() {
+      current = useEventNaming()
+      return null
+    }
+
+    await act(async () => root.render(createElement(Probe)))
+    await act(async () => current?.setStatDate('2026-07-01'))
+    await act(async () => { await current?.load() })
+    expect(current?.loadedDate).toBe('2026-07-01')
+
+    resolveFirst([{ ...groups[0], product: 'stale' }])
+    await flushEffects()
+    expect(listEvents).toHaveBeenCalledTimes(2)
+    expect(current?.loadedDate).toBe('2026-07-01')
+    expect(current?.groups[0]?.product).toBe('Game A')
     await act(async () => root.unmount())
   })
 })

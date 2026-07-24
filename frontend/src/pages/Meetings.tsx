@@ -1,7 +1,7 @@
 /** 会议：列表 + 详情抽屉（开始/结束、发言、AI专家、投票、纪要、决议→确认→转任务卡）。 */
 import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
 import { Button, Card, Drawer, Input, List, Space, Tag, message } from 'antd'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
 import Markdown from '../components/Markdown'
@@ -26,6 +26,7 @@ import {
   type Tally,
 } from '../api/meetings'
 import { hasManagerRole } from './managementPermissions'
+import { usePendingActions } from '../hooks/usePendingActions'
 
 const STATUS_COLOR: Record<string, string> = {
   scheduled: 'default',
@@ -47,7 +48,14 @@ export default function Meetings() {
   const [speech, setSpeech] = useState('')
   const [resText, setResText] = useState('')
   const [tally, setTally] = useState<Tally | null>(null)
+  const [aiSpeaking, setAiSpeaking] = useState(false)
+  const openRequestRef = useRef(0)
+  const aiSpeakControllerRef = useRef<AbortController | null>(null)
+  const tallyRequestRef = useRef(0)
+  const pending = usePendingActions()
   const canManage = hasManagerRole(me?.role_code)
+
+  useEffect(() => () => aiSpeakControllerRef.current?.abort(), [])
 
   const resetDrafts = () => {
     setSubject('')
@@ -56,10 +64,19 @@ export default function Meetings() {
     setTally(null)
   }
   const open = async (id: string) => {
+    const requestId = ++openRequestRef.current
+    tallyRequestRef.current += 1
+    aiSpeakControllerRef.current?.abort()
     resetDrafts()
-    setDetail(await getMeeting(id))
+    const next = await getMeeting(id)
+    if (requestId === openRequestRef.current) setDetail(next)
   }
   const close = () => {
+    openRequestRef.current += 1
+    tallyRequestRef.current += 1
+    aiSpeakControllerRef.current?.abort()
+    aiSpeakControllerRef.current = null
+    setAiSpeaking(false)
     setDetail(null)
     resetDrafts()
   }
@@ -72,7 +89,10 @@ export default function Meetings() {
   const inProgress = detail?.meeting.status === 'in_progress'
 
   const showTally = async (mid: string, subj: string) => {
-    if (subj) setTally(await getTally(mid, subj))
+    if (!subj) return
+    const requestId = ++tallyRequestRef.current
+    const next = await getTally(mid, subj)
+    if (requestId === tallyRequestRef.current) setTally(next)
   }
 
   const columns: ProColumns<Meeting>[] = [
@@ -110,13 +130,21 @@ export default function Meetings() {
             {canManage && (
               <Space>
               {detail.meeting.status === 'scheduled' && (
-                <Button type="primary" onClick={async () => {
-                  await setMeetingStatus(detail.meeting.id, 'in_progress'); message.success('会议开始'); await refresh()
+                <Button type="primary" loading={pending.isPending(`meeting:${detail.meeting.id}:start`)} onClick={() => {
+                  void pending.run(`meeting:${detail.meeting.id}:start`, async () => {
+                    await setMeetingStatus(detail.meeting.id, 'in_progress')
+                    message.success('会议开始')
+                    await refresh()
+                  }).catch(() => {})
                 }}>开始会议</Button>
               )}
               {inProgress && (
-                <Button onClick={async () => {
-                  await setMeetingStatus(detail.meeting.id, 'closed'); message.success('会议结束'); await refresh()
+                <Button loading={pending.isPending(`meeting:${detail.meeting.id}:close`)} onClick={() => {
+                  void pending.run(`meeting:${detail.meeting.id}:close`, async () => {
+                    await setMeetingStatus(detail.meeting.id, 'closed')
+                    message.success('会议结束')
+                    await refresh()
+                  }).catch(() => {})
                 }}>结束会议</Button>
               )}
               </Space>
@@ -134,15 +162,22 @@ export default function Meetings() {
                 <Space.Compact style={{ width: '100%', marginTop: 8 }}>
                   <Input placeholder="真人发言 / 或输入议题给AI专家" value={speech}
                     onChange={(e) => setSpeech(e.target.value)} />
-                  <Button onClick={async () => {
+                  <Button loading={pending.isPending(`meeting:${detail.meeting.id}:discuss`)} onClick={() => {
                     const content = speech.trim()
                     if (!content) return
-                    await discuss(detail.meeting.id, content); setSpeech(''); await refresh()
+                    void pending.run(`meeting:${detail.meeting.id}:discuss`, async () => {
+                      await discuss(detail.meeting.id, content)
+                      setSpeech('')
+                      await refresh()
+                    }).catch(() => {})
                   }}>发言</Button>
-                  {canManage && <Button type="primary" onClick={async () => {
+                  {canManage && <Button type="primary" loading={aiSpeaking} onClick={async () => {
                     const topic = speech.trim()
-                    if (!topic) return
-                    const streamId = '__streaming__'
+                    if (!topic || aiSpeakControllerRef.current) return
+                    const controller = new AbortController()
+                    aiSpeakControllerRef.current = controller
+                    setAiSpeaking(true)
+                    const streamId = `__streaming__-${detail.meeting.id}`
                     try {
                       await aiSpeak(detail.meeting.id, topic, (event, data) => {
                         if (event === 'message_start') {
@@ -155,10 +190,15 @@ export default function Meetings() {
                           const msg = data as unknown as Discuss
                           setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? msg : x)) }))
                         }
-                      })
+                      }, { signal: controller.signal })
                       setSpeech('')
                     } catch {
                       setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.filter((x) => x.id !== streamId) }))
+                    } finally {
+                      if (aiSpeakControllerRef.current === controller) {
+                        aiSpeakControllerRef.current = null
+                        setAiSpeaking(false)
+                      }
                     }
                   }}>AI专家</Button>}
                 </Space.Compact>
@@ -169,9 +209,33 @@ export default function Meetings() {
               <Card size="small" title="投票（真人票决定，AI票仅参考）">
                 <Space.Compact style={{ width: '100%' }}>
                   <Input placeholder="表决对象" value={subject} onChange={(e) => setSubject(e.target.value)} />
-                  <Button onClick={async () => { const value = subject.trim(); if (value) { setSubject(value); await vote(detail.meeting.id, value, 'approve'); await showTally(detail.meeting.id, value) } }}>赞成</Button>
-                  <Button danger onClick={async () => { const value = subject.trim(); if (value) { setSubject(value); await vote(detail.meeting.id, value, 'reject'); await showTally(detail.meeting.id, value) } }}>反对</Button>
-                  {canManage && <Button type="primary" onClick={async () => { const value = subject.trim(); if (value) { setSubject(value); await aiVote(detail.meeting.id, value); await showTally(detail.meeting.id, value) } }}>AI参考票</Button>}
+                  <Button loading={pending.isPending(`meeting:${detail.meeting.id}:vote:approve`)} onClick={() => {
+                    const value = subject.trim()
+                    if (!value) return
+                    setSubject(value)
+                    void pending.run(`meeting:${detail.meeting.id}:vote:approve`, async () => {
+                      await vote(detail.meeting.id, value, 'approve')
+                      await showTally(detail.meeting.id, value)
+                    }).catch(() => {})
+                  }}>赞成</Button>
+                  <Button danger loading={pending.isPending(`meeting:${detail.meeting.id}:vote:reject`)} onClick={() => {
+                    const value = subject.trim()
+                    if (!value) return
+                    setSubject(value)
+                    void pending.run(`meeting:${detail.meeting.id}:vote:reject`, async () => {
+                      await vote(detail.meeting.id, value, 'reject')
+                      await showTally(detail.meeting.id, value)
+                    }).catch(() => {})
+                  }}>反对</Button>
+                  {canManage && <Button type="primary" loading={pending.isPending(`meeting:${detail.meeting.id}:ai-vote`)} onClick={() => {
+                    const value = subject.trim()
+                    if (!value) return
+                    setSubject(value)
+                    void pending.run(`meeting:${detail.meeting.id}:ai-vote`, async () => {
+                      await aiVote(detail.meeting.id, value)
+                      await showTally(detail.meeting.id, value)
+                    }).catch(() => {})
+                  }}>AI参考票</Button>}
                   <Button onClick={() => { const value = subject.trim(); if (value) { setSubject(value); void showTally(detail.meeting.id, value) } }}>统计</Button>
                 </Space.Compact>
                 {tally && tally.subject === subject && (
@@ -186,10 +250,25 @@ export default function Meetings() {
             )}
 
             <Card size="small" title="会议纪要"
-              extra={canManage ? <Button size="small" disabled={detail.discussions.length === 0} onClick={async () => {
-                message.loading({ content: '生成中…', key: 'm' })
-                await generateMinutes(detail.meeting.id); message.success({ content: '已生成', key: 'm' }); await refresh()
-              }}>生成纪要</Button> : undefined}>
+              extra={canManage ? <Button
+                size="small"
+                disabled={detail.discussions.length === 0}
+                loading={pending.isPending(`meeting:${detail.meeting.id}:minutes`)}
+                onClick={() => {
+                  const key = `meeting:${detail.meeting.id}:minutes`
+                  void pending.run(key, async () => {
+                    message.loading({ content: '生成中…', key, duration: 0 })
+                    try {
+                      await generateMinutes(detail.meeting.id)
+                      message.success({ content: '已生成', key })
+                      await refresh()
+                    } catch (error) {
+                      message.destroy(key)
+                      throw error
+                    }
+                  }).catch(() => {})
+                }}
+              >生成纪要</Button> : undefined}>
               <Markdown>{detail.meeting.summary || '（暂无纪要）'}</Markdown>
             </Card>
 
@@ -200,8 +279,20 @@ export default function Meetings() {
                     r.is_confirmed
                       ? (r.converted_task_id
                           ? <Tag color="success" key="t">已转任务卡</Tag>
-                          : <a key="cv" onClick={async () => { await convertResolution(r.id); message.success('已转任务卡'); await refresh() }}>转任务卡</a>)
-                      : <a key="cf" onClick={async () => { await confirmResolution(r.id); message.success('已确认生效'); await refresh() }}>确认生效</a>,
+                          : <Button key="cv" type="link" size="small" loading={pending.isPending(`resolution:${r.id}:convert`)} onClick={() => {
+                            void pending.run(`resolution:${r.id}:convert`, async () => {
+                              await convertResolution(r.id)
+                              message.success('已转任务卡')
+                              await refresh()
+                            }).catch(() => {})
+                          }}>转任务卡</Button>)
+                      : <Button key="cf" type="link" size="small" loading={pending.isPending(`resolution:${r.id}:confirm`)} onClick={() => {
+                        void pending.run(`resolution:${r.id}:confirm`, async () => {
+                          await confirmResolution(r.id)
+                          message.success('已确认生效')
+                          await refresh()
+                        }).catch(() => {})
+                      }}>确认生效</Button>,
                   ] : []}>
                     <Tag color={r.is_confirmed ? 'green' : 'orange'}>{r.is_confirmed ? '已确认' : '待确认'}</Tag>
                     <Markdown>{r.content}</Markdown>
@@ -209,10 +300,14 @@ export default function Meetings() {
                 )} />
               {canManage && <Space.Compact style={{ width: '100%', marginTop: 8 }}>
                 <Input placeholder="登记决议内容" value={resText} onChange={(e) => setResText(e.target.value)} />
-                <Button onClick={async () => {
+                <Button loading={pending.isPending(`meeting:${detail.meeting.id}:resolution`)} onClick={() => {
                   const content = resText.trim()
                   if (!content) return
-                  await createResolution(detail.meeting.id, content); setResText(''); await refresh()
+                  void pending.run(`meeting:${detail.meeting.id}:resolution`, async () => {
+                    await createResolution(detail.meeting.id, content)
+                    setResText('')
+                    await refresh()
+                  }).catch(() => {})
                 }}>登记决议</Button>
               </Space.Compact>}
             </Card>

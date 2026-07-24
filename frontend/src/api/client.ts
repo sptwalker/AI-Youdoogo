@@ -17,8 +17,29 @@ export interface RequestConfig<D = unknown> extends AxiosRequestConfig<D> {
 
 const http = axios.create({ baseURL: '/api/v1', timeout: 15000 })
 
-/** 已由拦截器/request 向用户提示过的 API 错误：全局据此抑制 unhandledrejection 噪音。 */
-export class ApiError extends Error {}
+export interface ApiErrorOptions {
+  status?: number
+  code?: number
+  cancelled?: boolean
+  cause?: unknown
+}
+
+/** 可由页面按状态码、业务码或取消状态做局部恢复的统一 API 错误。 */
+export class ApiError extends Error {
+  readonly status?: number
+  readonly code?: number
+  readonly cancelled: boolean
+  readonly cause?: unknown
+
+  constructor(messageText: string, options: ApiErrorOptions = {}) {
+    super(messageText)
+    this.name = 'ApiError'
+    this.status = options.status
+    this.code = options.code
+    this.cancelled = options.cancelled ?? false
+    this.cause = options.cause
+  }
+}
 
 interface BrowserLocation {
   pathname: string
@@ -49,8 +70,16 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (resp) => resp,
   (error) => {
+    if (axios.isCancel(error)) {
+      return Promise.reject(new ApiError('请求已取消', { cancelled: true, cause: error }))
+    }
     const status = error.response?.status
-    const msg: string = error.response?.data?.msg ?? '网络错误'
+    const responseData = error.response?.data as {
+      msg?: string
+      detail?: string
+      code?: number
+    } | undefined
+    const msg = responseData?.msg ?? responseData?.detail ?? '网络错误'
     const silent = Boolean((error.config as RequestConfig | undefined)?.silent)
     if (status === 401) {
       const redirected = clearSessionAndRedirectToLogin()
@@ -59,7 +88,11 @@ http.interceptors.response.use(
     } else if (!silent) {
       message.error(msg)
     }
-    return Promise.reject(new ApiError(msg))
+    return Promise.reject(new ApiError(msg, {
+      status,
+      code: responseData?.code,
+      cause: error,
+    }))
   },
 )
 
@@ -68,7 +101,7 @@ export async function request<T>(config: RequestConfig): Promise<T> {
   const resp = await http.request<ApiEnvelope<T>>(config)
   if (resp.data.code !== 0) {
     if (!config.silent) message.error(resp.data.msg)
-    throw new ApiError(resp.data.msg)
+    throw new ApiError(resp.data.msg, { code: resp.data.code })
   }
   return resp.data.data
 }
@@ -82,6 +115,13 @@ export interface SseSubscribeOptions {
   onStateChange?: (state: SseConnectionState) => void
   initialRetryDelayMs?: number
   maxRetryDelayMs?: number
+}
+
+export interface SseRequestOptions {
+  signal?: AbortSignal
+  /** 最长无数据帧时间；设为 0 可关闭。 */
+  idleTimeoutMs?: number
+  silent?: boolean
 }
 
 /** 兼容原有“取消函数”用法，同时允许成员集合变化后立即重建订阅。 */
@@ -114,6 +154,7 @@ function parseSseFrame(rawFrame: string): SseFrame | null {
 async function consumeSseStream(
   body: ReadableStream<Uint8Array>,
   onFrame: (frame: SseFrame) => void,
+  onActivity?: () => void,
 ): Promise<void> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -130,14 +171,26 @@ async function consumeSseStream(
     }
   }
 
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      onActivity?.()
+      buffer += decoder.decode(value, { stream: true })
+      consumeCompleteFrames()
+    }
+    buffer += decoder.decode()
     consumeCompleteFrames()
+  } catch (error) {
+    try {
+      await reader.cancel(error)
+    } catch {
+      // The transport may already be closed by AbortController.
+    }
+    throw error
+  } finally {
+    reader.releaseLock()
   }
-  buffer += decoder.decode()
-  consumeCompleteFrames()
 }
 
 function reportMalformedSubscriptionFrame(event: string, error: unknown): void {
@@ -150,38 +203,89 @@ function reportSubscriptionCallbackError(event: string, error: unknown): void {
 
 /** POST 一个 SSE 端点并逐事件回调（fetch 手动带 token——EventSource 不支持自定义头）。
  *  协议：message_start / delta / message_end / done / error；error 事件提示后抛出。 */
-export async function sseRequest(url: string, body: unknown, onEvent: SseHandler): Promise<void> {
+export async function sseRequest(
+  url: string,
+  body: unknown,
+  onEvent: SseHandler,
+  options: SseRequestOptions = {},
+): Promise<void> {
+  const controller = new AbortController()
+  const idleTimeoutMs = Math.max(0, options.idleTimeoutMs ?? 180000)
+  let timeoutId: number | undefined
+  let timedOut = false
+
+  const clearIdleTimeout = () => {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+    timeoutId = undefined
+  }
+  const armIdleTimeout = () => {
+    clearIdleTimeout()
+    if (idleTimeoutMs === 0) return
+    timeoutId = window.setTimeout(() => {
+      timedOut = true
+      controller.abort(new DOMException('SSE idle timeout', 'TimeoutError'))
+    }, idleTimeoutMs)
+  }
+  const abortFromCaller = () => controller.abort(options.signal?.reason)
+  if (options.signal?.aborted) abortFromCaller()
+  else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
+
   const token = localStorage.getItem(TOKEN_KEY)
-  const resp = await fetch(`/api/v1${url}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  })
-  if (resp.status === 401) {
-    // 复刻 axios 拦截器的 401 处理
-    clearSessionAndRedirectToLogin()
-    throw new ApiError('未登录或登录已过期')
-  }
-  if (!resp.ok || !resp.body) {
-    let msg = '网络错误'
-    try {
-      msg = (await resp.json())?.msg ?? msg
-    } catch { /* 非 JSON 响应体 */ }
-    message.error(msg)
-    throw new ApiError(msg)
-  }
-  await consumeSseStream(resp.body, ({ event, data }) => {
-    const parsed = JSON.parse(data) as Record<string, unknown>
-    if (event === 'error') {
-      const msg = String(parsed.msg ?? '服务器错误')
-      message.error(msg)
-      throw new ApiError(msg)
+  armIdleTimeout()
+  try {
+    const resp = await fetch(`/api/v1${url}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (resp.status === 401) {
+      clearSessionAndRedirectToLogin()
+      throw new ApiError('未登录或登录已过期', { status: 401 })
     }
-    onEvent(event, parsed)
-  })
+    if (!resp.ok || !resp.body) {
+      let msg = '网络错误'
+      try {
+        const responseData = await resp.json() as { msg?: string; detail?: string }
+        msg = responseData.msg ?? responseData.detail ?? msg
+      } catch { /* 非 JSON 响应体 */ }
+      if (!options.silent) message.error(msg)
+      throw new ApiError(msg, { status: resp.status })
+    }
+    await consumeSseStream(resp.body, ({ event, data }) => {
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(data) as Record<string, unknown>
+      } catch (error) {
+        const msg = '服务器返回了无法解析的流式数据'
+        if (!options.silent) message.error(msg)
+        throw new ApiError(msg, { cause: error })
+      }
+      if (event === 'error') {
+        const msg = String(parsed.msg ?? '服务器错误')
+        if (!options.silent) message.error(msg)
+        throw new ApiError(msg)
+      }
+      onEvent(event, parsed)
+    }, armIdleTimeout)
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (timedOut) {
+      const msg = '流式请求长时间没有响应，已自动停止'
+      if (!options.silent) message.error(msg)
+      throw new ApiError(msg, { cancelled: true, cause: error })
+    }
+    if (controller.signal.aborted) {
+      throw new ApiError('请求已取消', { cancelled: true, cause: error })
+    }
+    throw error
+  } finally {
+    clearIdleTimeout()
+    options.signal?.removeEventListener('abort', abortFromCaller)
+  }
 }
 
 /** GET 一个长连 SSE 订阅端点（实时消息推送，I3）。

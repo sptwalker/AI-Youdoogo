@@ -9,16 +9,22 @@ export function useEventNaming() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [edits, setEdits] = useState<Record<string, string>>({})
+  const [loadedDate, setLoadedDate] = useState<string | null>(null)
   const initialDateRef = useRef(statDate)
+  const loadRequestRef = useRef(0)
 
   const loadForDate = useCallback(async (date: string) => {
+    const requestId = ++loadRequestRef.current
     setLoading(true)
     try {
       const items = await dataSourcesApi.listOpsEvents(date)
-      setGroups(items)
-      setEdits(editsFromGroups(items))
+      if (requestId === loadRequestRef.current) {
+        setGroups(items)
+        setEdits(editsFromGroups(items))
+        setLoadedDate(date)
+      }
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }, [])
 
@@ -31,15 +37,16 @@ export function useEventNaming() {
   }, [loadForDate, statDate])
 
   const save = useCallback(async () => {
+    const dateToReload = loadedDate ?? statDate
     setSaving(true)
     try {
       const { saved } = await dataSourcesApi.saveEventAliases(aliasesFromEdits(edits))
       message.success(`已保存 ${saved} 条命名`)
-      await loadForDate(statDate)
+      await loadForDate(dateToReload)
     } finally {
       setSaving(false)
     }
-  }, [edits, loadForDate, statDate])
+  }, [edits, loadForDate, loadedDate, statDate])
 
   const updateEdit = useCallback((key: string, value: string) => {
     setEdits((current) => ({ ...current, [key]: value }))
@@ -49,6 +56,7 @@ export function useEventNaming() {
     statDate,
     setStatDate,
     groups,
+    loadedDate,
     loading,
     saving,
     edits,

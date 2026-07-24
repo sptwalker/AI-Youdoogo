@@ -26,6 +26,8 @@ import {
   type Review,
 } from '../api/proposals'
 import { hasManagerRole } from './managementPermissions'
+import { canResearchProposal } from '../features/proposals/model'
+import { usePendingActions } from '../hooks/usePendingActions'
 
 const STATUS_COLOR: Record<string, string> = {
   draft: 'default',
@@ -39,12 +41,15 @@ export default function Proposals() {
   const { me } = useOutletContext<{ me: UserInfo | null }>()
   const actionRef = useRef<ActionType>(null)
   const [reviews, setReviews] = useState<Review[] | null>(null)
+  const detailRequestRef = useRef(0)
+  const pending = usePendingActions()
   const canManage = hasManagerRole(me?.role_code)
   const reload = () => actionRef.current?.reload()
 
   const openDetail = async (id: string) => {
+    const requestId = ++detailRequestRef.current
     const { reviews } = await getProposal(id)
-    setReviews(reviews)
+    if (requestId === detailRequestRef.current) setReviews(reviews)
   }
 
   const columns: ProColumns<Proposal>[] = [
@@ -69,18 +74,28 @@ export default function Proposals() {
       valueType: 'option',
       render: (_, r) => {
         const a = [<a key="d" onClick={() => openDetail(r.id)}>详情</a>]
-        if (canManage && ['draft', 'researching', 'reviewed'].includes(r.status)) {
+        if (canManage && canResearchProposal(r.status)) {
+          const researchKey = `research:${r.id}`
           a.push(
-            <a key="ai" onClick={async () => {
-              message.loading({ content: 'AI 预研中…', key: 'ai' })
-              try {
-                await aiResearch(r.id)
-                message.success({ content: '预研完成', key: 'ai' })
-                reload()
-              } catch {
-                message.destroy('ai')
-              }
-            }}>AI预研</a>,
+            <Button
+              key="ai"
+              type="link"
+              size="small"
+              loading={pending.isPending(researchKey)}
+              onClick={() => {
+                void pending.run(researchKey, async () => {
+                  message.loading({ content: 'AI 预研中…', key: researchKey, duration: 0 })
+                  try {
+                    await aiResearch(r.id)
+                    message.success({ content: '预研完成', key: researchKey })
+                    reload()
+                  } catch (error) {
+                    message.destroy(researchKey)
+                    throw error
+                  }
+                }).catch(() => {})
+              }}
+            >AI预研</Button>,
           )
         }
         if (canManage && r.status === 'reviewed') {
@@ -105,11 +120,19 @@ export default function Proposals() {
         }
         if (canManage && r.status === 'approved' && !r.converted_task_id) {
           a.push(
-            <a key="cv" onClick={async () => {
-              await convertProposal(r.id)
-              message.success('已转任务卡')
-              reload()
-            }}>转任务卡</a>,
+            <Button
+              key="cv"
+              type="link"
+              size="small"
+              loading={pending.isPending(`convert:${r.id}`)}
+              onClick={() => {
+                void pending.run(`convert:${r.id}`, async () => {
+                  await convertProposal(r.id)
+                  message.success('已转任务卡')
+                  reload()
+                }).catch(() => {})
+              }}
+            >转任务卡</Button>,
           )
         }
         return a
@@ -146,7 +169,7 @@ export default function Proposals() {
           </ModalForm>,
         ]}
       />
-      <Modal open={reviews !== null} onCancel={() => setReviews(null)} footer={null} title="评审记录" width={640}>
+      <Modal open={reviews !== null} onCancel={() => { detailRequestRef.current += 1; setReviews(null) }} footer={null} title="评审记录" width={640}>
         {(reviews || []).map((rv) => (
           <div key={rv.id} style={{ marginBottom: 12 }}>
             <Tag color={rv.review_type === 'ai_research' ? 'blue' : 'green'}>

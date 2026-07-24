@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { groupChatApi, type GroupChatApi } from '../api'
 
 interface UseAdvisorComposerOptions {
@@ -27,10 +27,15 @@ export function useAdvisorComposer({
   const [mentions, setMentions] = useState<string[]>([])
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)
+  const activeRequestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => activeRequestRef.current?.abort(), [])
 
   const send = useCallback(async () => {
     const content = text.trim()
     if (!content || sendingRef.current) return
+    const controller = new AbortController()
+    activeRequestRef.current = controller
     sendingRef.current = true
     setSending(true)
     try {
@@ -39,12 +44,15 @@ export function useAdvisorComposer({
         content,
         mentions.slice(0, 3),
         ingestStreamEvent,
+        [],
+        { signal: controller.signal },
       )
       setText('')
       setMentions([])
     } catch {
       clearStreamingMessage()
     } finally {
+      if (activeRequestRef.current === controller) activeRequestRef.current = null
       sendingRef.current = false
       setSending(false)
     }
