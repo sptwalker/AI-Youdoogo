@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import AgentRunner, ExecutionContext, SkillRequest, SkillResult
+from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.foundations.integration.governed_data_query.contracts import (
     GovernedQueryRequest,
 )
@@ -30,6 +31,12 @@ FallbackExecutor = Callable[
 ]
 ExecutorFactory = Callable[[], "DataQuerySkillExecutor"]
 RunnerProvider = Callable[[], AgentRunner | None]
+
+
+def _query_failure_note(request: SkillRequest) -> str:
+    sql = str(request.arguments.get("sql", ""))
+    logger.warning("取数执行失败 sql=%s", sql[:80], exc_info=True)
+    return f"取数执行异常，已忽略:{sql[:80]}"
 
 
 class ReadonlyQuery(Protocol):
@@ -262,23 +269,13 @@ async def execute(
     executor_factory: ExecutorFactory = DataQuerySkillExecutor,
 ) -> SkillResult:
     """Parse and execute governed-query directives without breaking the message flow."""
-    context = execution_context or ExecutionContext(
+    context = merge_execution_context(
+        execution_context,
         user_id=user_id,
         user_intent=user_intent,
         agent_runner=agent_runner,
+        exclude=exclude,
     )
-    updates: dict[str, Any] = {}
-    if context.user_id is None and user_id is not None:
-        updates["user_id"] = user_id
-    if context.user_intent is None and user_intent is not None:
-        updates["user_intent"] = user_intent
-    if agent_runner is not None:
-        updates["agent_runner"] = agent_runner
-    requested_exclusions = frozenset(exclude or ())
-    if requested_exclusions:
-        updates["excluded_skills"] = context.excluded_skills | requested_exclusions
-    if updates:
-        context = context.model_copy(update=updates)
     result = SkillResult()
     try:
         sqls = parse(output)
@@ -287,24 +284,23 @@ async def execute(
         if not await _enabled(db, feature_flag_resolver):
             return result
 
-        for index, sql in enumerate(sqls):
-            try:
-                request = SkillRequest(
-                    skill_key="data_query",
-                    action_index=index,
-                    arguments={"sql": sql},
-                    raw_text=output,
-                )
-                executor = executor_factory()
-                part = (
-                    await context.dispatcher.dispatch(db, initiator, request, context)
-                    if context.dispatcher is not None
-                    else await executor.execute(db, initiator, request, context)
-                )
-                result.merge(part)
-            except Exception:  # noqa: BLE001 - one query must not break the remaining queries
-                logger.warning("取数执行失败 sql=%s", sql[:80], exc_info=True)
-                result.notes.append(f"取数执行异常，已忽略:{sql[:80]}")
+        requests = [
+            SkillRequest(
+                skill_key="data_query",
+                action_index=index,
+                arguments={"sql": sql},
+                raw_text=output,
+            )
+            for index, sql in enumerate(sqls)
+        ]
+        return await dispatch_requests(
+            db,
+            initiator,
+            requests,
+            context,
+            executor_factory=executor_factory,
+            failure_note=_query_failure_note,
+        )
     except Exception:  # noqa: BLE001 - query protocol failure must not break the message flow
         logger.warning("取数协议处理失败", exc_info=True)
     return result

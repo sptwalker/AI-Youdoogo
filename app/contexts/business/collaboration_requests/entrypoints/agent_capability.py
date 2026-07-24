@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import AgentRunner, ExecutionContext, SkillRequest, SkillResult
+from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.business.collaboration_requests.application.contracts import (
     CollaborationRequestResult,
 )
@@ -82,6 +83,16 @@ FallbackExecutor = Callable[
     Awaitable[SkillResult],
 ]
 ExecutorFactory = Callable[[], "CollabSkillExecutor"]
+
+
+def _collab_failure_note(request: SkillRequest) -> str:
+    if request.arguments.get("kind") == "consult":
+        name = str(request.arguments.get("name", ""))
+        logger.warning("咨询指令执行失败 target=%s", name, exc_info=True)
+        return f"咨询「{name}」执行失败，已忽略"
+    department = str(request.arguments.get("department", ""))
+    logger.warning("协作指令执行失败 dept=%s", department, exc_info=True)
+    return f"向「{department}」发起协作失败，已忽略"
 
 
 def parse(output: str) -> ParsedDirectives:
@@ -300,18 +311,13 @@ async def execute(
     executor_factory: ExecutorFactory = CollabSkillExecutor,
 ) -> SkillResult:
     """Parse and execute collaboration directives without breaking message flow."""
-    context = execution_context or ExecutionContext(user_id=user_id)
-    updates: dict[str, Any] = {}
-    if context.user_id is None and user_id is not None:
-        updates["user_id"] = user_id
     runner = runner_provider() if runner_provider is not None else None
-    if runner is not None:
-        updates["agent_runner"] = runner
-    requested_exclusions = frozenset(exclude or ())
-    if requested_exclusions:
-        updates["excluded_skills"] = context.excluded_skills | requested_exclusions
-    if updates:
-        context = context.model_copy(update=updates)
+    context = merge_execution_context(
+        execution_context,
+        user_id=user_id,
+        agent_runner=runner,
+        exclude=exclude,
+    )
     result = SkillResult()
     try:
         directives = parse(output)
@@ -319,52 +325,43 @@ async def execute(
             return result
         if not await _enabled(db, feature_flag_resolver):
             return result
-        for index, (name, question) in enumerate(directives.consults):
-            try:
-                request = SkillRequest(
-                    skill_key="collab",
-                    action_index=index,
-                    arguments={
-                        "kind": "consult",
-                        "name": name,
-                        "question": question,
-                    },
-                    raw_text=output,
-                )
-                part = (
-                    await context.dispatcher.dispatch(db, initiator, request, context)
-                    if context.dispatcher is not None
-                    else await executor_factory().execute(db, initiator, request, context)
-                )
-                result.merge(part)
-            except Exception:  # noqa: BLE001 - isolate each directive
-                logger.warning("咨询指令执行失败 target=%s", name, exc_info=True)
-                result.notes.append(f"咨询「{name}」执行失败，已忽略")
-        for collab_index, (department, category, content) in enumerate(
-            directives.collabs
-        ):
-            try:
-                action_index = len(directives.consults) + collab_index
-                request = SkillRequest(
-                    skill_key="collab",
-                    action_index=action_index,
-                    arguments={
-                        "kind": "request",
-                        "department": department,
-                        "category": category,
-                        "content": content,
-                    },
-                    raw_text=output,
-                )
-                part = (
-                    await context.dispatcher.dispatch(db, initiator, request, context)
-                    if context.dispatcher is not None
-                    else await executor_factory().execute(db, initiator, request, context)
-                )
-                result.merge(part)
-            except Exception:  # noqa: BLE001 - isolate each directive
-                logger.warning("协作指令执行失败 dept=%s", department, exc_info=True)
-                result.notes.append(f"向「{department}」发起协作失败，已忽略")
+        requests = [
+            SkillRequest(
+                skill_key="collab",
+                action_index=index,
+                arguments={
+                    "kind": "consult",
+                    "name": name,
+                    "question": question,
+                },
+                raw_text=output,
+            )
+            for index, (name, question) in enumerate(directives.consults)
+        ]
+        requests.extend(
+            SkillRequest(
+                skill_key="collab",
+                action_index=len(directives.consults) + collab_index,
+                arguments={
+                    "kind": "request",
+                    "department": department,
+                    "category": category,
+                    "content": content,
+                },
+                raw_text=output,
+            )
+            for collab_index, (department, category, content) in enumerate(
+                directives.collabs
+            )
+        )
+        return await dispatch_requests(
+            db,
+            initiator,
+            requests,
+            context,
+            executor_factory=executor_factory,
+            failure_note=_collab_failure_note,
+        )
     except Exception:  # noqa: BLE001 - protocol failure is never fatal
         logger.warning("协作协议处理失败", exc_info=True)
     return result

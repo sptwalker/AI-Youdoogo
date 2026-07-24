@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.platform.object_storage.gateway as object_storage
 from app.agents.contracts import ExecutionContext, SkillRequest, SkillResult
+from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.foundations.execution.deliverable_management.contracts.delivery import (
     DeliverableFormat,
     PublishDeliverableCommand,
@@ -124,6 +125,18 @@ class DeliverySkillExecutor:
 ExecutorFactory = Callable[[], DeliverySkillExecutor]
 
 
+def _delivery_failure_note(request: SkillRequest) -> str:
+    name = str(request.arguments.get("name", ""))
+    file_format = str(request.arguments.get("format", ""))
+    logger.warning(
+        "交付执行失败 name=%s fmt=%s",
+        name,
+        file_format,
+        exc_info=True,
+    )
+    return f"交付「{name}」失败，已忽略"
+
+
 async def execute(
     db: AsyncSession,
     initiator: AgentRole,
@@ -135,9 +148,7 @@ async def execute(
     executor_factory: ExecutorFactory = DeliverySkillExecutor,
 ) -> SkillResult:
     """Execute delivery directives without allowing protocol failures to escape."""
-    context = execution_context or ExecutionContext(user_id=user_id)
-    if context.user_id is None and user_id is not None:
-        context = context.model_copy(update={"user_id": user_id})
+    context = merge_execution_context(execution_context, user_id=user_id)
     result = SkillResult()
     try:
         items = parse(output)
@@ -148,32 +159,27 @@ async def execute(
                 "交付需指定接收人，自动任务无桌面归属，已跳过文件交付"
             )
             return result
-        for index, (name, file_format, body) in enumerate(items):
-            try:
-                request = SkillRequest(
-                    skill_key="deliver",
-                    action_index=index,
-                    arguments={
-                        "name": name,
-                        "format": file_format,
-                        "body": body,
-                    },
-                    raw_text=output,
-                )
-                part = (
-                    await context.dispatcher.dispatch(db, initiator, request, context)
-                    if context.dispatcher is not None
-                    else await executor_factory().execute(db, initiator, request, context)
-                )
-                result.merge(part)
-            except Exception:  # noqa: BLE001 - isolate each delivery action
-                logger.warning(
-                    "交付执行失败 name=%s fmt=%s",
-                    name,
-                    file_format,
-                    exc_info=True,
-                )
-                result.notes.append(f"交付「{name}」失败，已忽略")
+        requests = [
+            SkillRequest(
+                skill_key="deliver",
+                action_index=index,
+                arguments={
+                    "name": name,
+                    "format": file_format,
+                    "body": body,
+                },
+                raw_text=output,
+            )
+            for index, (name, file_format, body) in enumerate(items)
+        ]
+        return await dispatch_requests(
+            db,
+            initiator,
+            requests,
+            context,
+            executor_factory=executor_factory,
+            failure_note=_delivery_failure_note,
+        )
     except Exception:  # noqa: BLE001 - never break the business message flow
         logger.warning("交付协议处理失败", exc_info=True)
     return result

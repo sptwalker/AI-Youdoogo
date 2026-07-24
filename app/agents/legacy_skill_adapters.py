@@ -14,6 +14,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import ExecutionContext, SkillResult
+from app.agents.directive_dispatch import dispatch_requests as dispatch_requests
+from app.agents.directive_dispatch import (
+    merge_execution_context as merge_execution_context,
+)
 from app.models.agent import AgentRole
 
 LegacyExecutor = Callable[

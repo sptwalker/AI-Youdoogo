@@ -14,33 +14,18 @@ from app.contexts.foundations.integration.connector_management.infrastructure im
 from app.contexts.foundations.integration.connector_management.infrastructure.adapters import (
     SourceChangePublisher,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
-class SQLAlchemyConnectorUnitOfWork:
+class SQLAlchemyConnectorUnitOfWork(SessionUnitOfWork):
     connectors: ConnectorRepository
     changes: ConnectorChangePublisher
 
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        super().__init__(session)
         self.connectors = sqlalchemy_repository.SQLAlchemyConnectorRepository(session)
         self.changes = SourceChangePublisher(session)
 
-    async def __aenter__(self) -> SQLAlchemyConnectorUnitOfWork:
+    def _prepare_for_use(self) -> None:
         self.connectors = sqlalchemy_repository.SQLAlchemyConnectorRepository(self._session)
         self.changes = SourceChangePublisher(self._session)
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: object | None,
-    ) -> None:
-        if exc_type is not None:
-            await self.rollback()
-
-    async def commit(self) -> None:
-        await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()

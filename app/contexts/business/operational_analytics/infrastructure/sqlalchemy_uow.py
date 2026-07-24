@@ -14,33 +14,18 @@ from app.contexts.business.operational_analytics.infrastructure.sqlalchemy_event
 from app.contexts.business.operational_analytics.infrastructure.sqlalchemy_repository import (
     SQLAlchemyDailyMetricRepository,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
-class SQLAlchemyOperationalAnalyticsUnitOfWork:
+class SQLAlchemyOperationalAnalyticsUnitOfWork(SessionUnitOfWork):
     metrics: DailyMetricRepository
     aliases: EventAliasRepository
 
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        super().__init__(session)
         self.metrics = SQLAlchemyDailyMetricRepository(session)
         self.aliases = SQLAlchemyEventAliasRepository(session)
 
-    async def __aenter__(self) -> SQLAlchemyOperationalAnalyticsUnitOfWork:
+    def _prepare_for_use(self) -> None:
         self.metrics = SQLAlchemyDailyMetricRepository(self._session)
         self.aliases = SQLAlchemyEventAliasRepository(self._session)
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: object | None,
-    ) -> None:
-        if exc_type is not None:
-            await self.rollback()
-
-    async def commit(self) -> None:
-        await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()

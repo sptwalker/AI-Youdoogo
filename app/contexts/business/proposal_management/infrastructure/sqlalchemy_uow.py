@@ -7,34 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.business.proposal_management.infrastructure.sqlalchemy_repository import (
     SQLAlchemyProposalRepository,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
-class SQLAlchemyProposalUnitOfWork:
+class SQLAlchemyProposalUnitOfWork(SessionUnitOfWork):
     """Keep transaction decisions in Application while preserving request session lifetime."""
 
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        super().__init__(session)
         self._proposals = SQLAlchemyProposalRepository(session)
 
     @property
     def proposals(self) -> SQLAlchemyProposalRepository:
         return self._proposals
 
-    async def __aenter__(self) -> SQLAlchemyProposalUnitOfWork:
+    def _prepare_for_use(self) -> None:
         self._proposals = SQLAlchemyProposalRepository(self._session)
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: object | None,
-    ) -> None:
-        if exc_type is not None:
-            await self.rollback()
-
-    async def commit(self) -> None:
-        await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()

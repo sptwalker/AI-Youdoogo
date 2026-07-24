@@ -25,6 +25,7 @@ from app.models.workflow import (
     TOOL_SUCCEEDED,
     ToolExecution,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
 def _json_items(values: tuple[str, ...]) -> list[Any]:
@@ -170,20 +171,14 @@ class SQLAlchemyCapabilityInvocationRepository:
         }
 
 
-class SQLAlchemyCapabilityExecutionUnitOfWork:
+class SQLAlchemyCapabilityExecutionUnitOfWork(SessionUnitOfWork):
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        super().__init__(session)
         self._invocations = SQLAlchemyCapabilityInvocationRepository(session)
 
     @property
     def invocations(self) -> SQLAlchemyCapabilityInvocationRepository:
         return self._invocations
-
-    async def commit(self) -> None:
-        await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()
 
 
 def failed_result(

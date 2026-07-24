@@ -1,9 +1,8 @@
-"""SQLAlchemy adapters for Task records and Workflow progress projections."""
+"""Compatibility facade for Task Management SQLAlchemy infrastructure."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_, select
@@ -15,24 +14,30 @@ from app.contexts.business.task_management.application.contracts import (
     TaskView,
     TaskVisibility,
 )
-from app.contexts.business.task_management.contracts.tasks import (
-    TASK_DECISION_RECORDED_V1,
-    TaskDecisionRecordedV1,
-)
 from app.contexts.business.task_management.domain import state_machine
 from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
     WorkflowProgressedV1,
-    WorkflowRunStatus,
-    WorkflowStepStatus,
 )
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
 from app.models.task import TaskCard, TaskCardLog
-from app.platform.outbox.repository import enqueue
+
+from .task_decisions import (
+    SQLAlchemyTaskDecisionPublisher,
+    task_decision_from_payload,
+    task_decision_to_payload,
+)
+from .transaction import SQLAlchemyTaskTransaction
+from .workflow_projection import SQLAlchemyWorkflowTaskProjection
 
 if TYPE_CHECKING:
     from app.models.system import SysUser
 
-_PROJECTION_VERSIONS = "_workflow_projection_versions"
+__all__ = [
+    "SQLAlchemyTaskManagementAdapter",
+    "SQLAlchemyTaskTransaction",
+    "task_decision_from_payload",
+    "task_decision_to_payload",
+]
 
 
 class SQLAlchemyTaskManagementAdapter:
@@ -40,6 +45,8 @@ class SQLAlchemyTaskManagementAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._decision_publisher = SQLAlchemyTaskDecisionPublisher(session)
+        self._workflow_projection = SQLAlchemyWorkflowTaskProjection(session, self)
 
     @staticmethod
     def _task_view(task: TaskCard) -> TaskView:
@@ -258,164 +265,10 @@ class SQLAlchemyTaskManagementAdapter:
         return list((await self._session.execute(statement)).scalars())
 
     async def apply_workflow_progress(self, event: WorkflowProgressedV1) -> bool:
-        task_id = event.task_card_id or event.parent_task_id
-        task = await self._session.get(TaskCard, task_id)
-        stream = f"step:{event.step_id}" if event.step_id else "run"
-        incoming_version = event.step_version if event.step_id else event.run_version
-        if incoming_version is None:
-            incoming_version = 0
-        if task is not None and self._projection_version(task, stream) >= incoming_version:
-            return False
-        if task is None:
-            task = await self._create_projection_record(event, task_id)
-        if event.transition == "step.claimed":
-            await self._drive(
-                task,
-                (state_machine.DISPATCHED, state_machine.EXECUTING),
-                note="workflow worker 执行",
-            )
-        elif event.transition in {"step.completed", "step.waiting_human"}:
-            await self._drive(
-                task,
-                (state_machine.DISPATCHED, state_machine.EXECUTING),
-                note="workflow worker 执行",
-            )
-            if task.status == state_machine.EXECUTING:
-                await self.transition_record(
-                    task.id,
-                    state_machine.REPORTED,
-                    operator_id=event.expert_id,
-                    note=(
-                        "workflow step 完成"
-                        if event.step_status != WorkflowStepStatus.FAILED
-                        else "workflow step 失败"
-                    ),
-                    result_content=event.result_content,
-                    publish_decision=False,
-                )
-            if (
-                event.step_status == WorkflowStepStatus.SUCCEEDED
-                and not event.red_line
-                and task.status == state_machine.REPORTED
-            ):
-                await self.transition_record(
-                    task.id,
-                    state_machine.ACCEPTED,
-                    operator_id=None,
-                    note="非红线步骤自动验收",
-                    publish_decision=False,
-                )
-        elif event.step_id is None:
-            await self._apply_parent_status(task, event)
-        self._record_projection_version(task, stream, incoming_version)
-        if event.step_id is not None:
-            payload = dict(task.payload or {})
-            payload.update(
-                {
-                    "workflow_run_id": str(event.workflow_id),
-                    "workflow_step_id": str(event.step_id),
-                    "workflow_step_version": event.step_version,
-                    "red_line": event.red_line,
-                }
-            )
-            task.payload = payload
-        await self._session.flush()
-        return True
+        return await self._workflow_projection.apply(event)
 
     async def apply(self, event: WorkflowProgressedV1) -> bool:
         return await self.apply_workflow_progress(event)
-
-    async def _create_projection_record(
-        self, event: WorkflowProgressedV1, task_id: uuid.UUID
-    ) -> TaskCard:
-        is_step = event.step_id is not None
-        task = await self.create_record(
-            task_id=task_id,
-            title=(event.step_title if is_step else event.title) or event.title,
-            task_type=(event.capability_key if is_step else "orchestration") or "other",
-            creator_id=event.creator_id,
-            assignee_agent_id=event.expert_id,
-            parent_id=event.parent_task_id if is_step else None,
-            step_no=event.step_number if is_step else None,
-            payload={
-                "origin": "workflow",
-                "request": event.request_text,
-                "instruction": event.instruction,
-                "skill": event.capability_key,
-                "red_line": event.red_line,
-                "workflow_run_id": str(event.workflow_id),
-                "workflow_step_id": str(event.step_id) if event.step_id else None,
-                "workflow_step_version": event.step_version,
-            },
-        )
-        task.depends_on = [str(item) for item in event.depends_on_task_ids]
-        return task
-
-    async def _apply_parent_status(self, task: TaskCard, event: WorkflowProgressedV1) -> None:
-        if event.run_status in {
-            WorkflowRunStatus.RUNNING,
-            WorkflowRunStatus.WAITING_HUMAN,
-            WorkflowRunStatus.SUCCEEDED,
-            WorkflowRunStatus.FAILED,
-            WorkflowRunStatus.CANCELLED,
-        }:
-            await self._drive(
-                task,
-                (state_machine.DISPATCHED, state_machine.EXECUTING),
-                note="工作流执行中",
-            )
-        if (
-            event.run_status in {WorkflowRunStatus.SUCCEEDED, WorkflowRunStatus.FAILED}
-            and task.status == state_machine.EXECUTING
-        ):
-            await self.transition_record(
-                task.id,
-                state_machine.REPORTED,
-                operator_id=None,
-                note=(
-                    "工作流完成"
-                    if event.run_status == WorkflowRunStatus.SUCCEEDED
-                    else "工作流失败"
-                ),
-                result_content=(
-                    "工作流已完成"
-                    if event.run_status == WorkflowRunStatus.SUCCEEDED
-                    else event.error
-                ),
-                publish_decision=False,
-            )
-        if (
-            event.run_status == WorkflowRunStatus.SUCCEEDED
-            and task.status == state_machine.REPORTED
-        ):
-            await self.transition_record(
-                task.id,
-                state_machine.ACCEPTED,
-                operator_id=None,
-                note="工作流聚合完成",
-                publish_decision=False,
-            )
-        if event.run_status == WorkflowRunStatus.CANCELLED and state_machine.can_transition(
-            task.status, state_machine.CANCELLED
-        ):
-            await self.transition_record(
-                task.id,
-                state_machine.CANCELLED,
-                operator_id=None,
-                note="工作流已取消",
-                publish_decision=False,
-            )
-
-    async def _drive(self, task: TaskCard, targets: tuple[str, ...], *, note: str) -> None:
-        for target in targets:
-            if state_machine.can_transition(task.status, target):
-                await self.transition_record(
-                    task.id,
-                    target,
-                    operator_id=None,
-                    note=note,
-                    publish_decision=False,
-                )
 
     async def _publish_decision(
         self,
@@ -423,36 +276,7 @@ class SQLAlchemyTaskManagementAdapter:
         decision: str,
         principal_id: uuid.UUID | None,
     ) -> None:
-        payload = task.payload or {}
-        raw_workflow_id = payload.get("workflow_run_id")
-        raw_step_id = payload.get("workflow_step_id")
-        raw_version = payload.get("workflow_step_version")
-        if (
-            principal_id is None
-            or raw_workflow_id is None
-            or raw_step_id is None
-            or not isinstance(raw_version, int)
-        ):
-            return
-        event = TaskDecisionRecordedV1(
-            event_id=uuid.uuid4(),
-            task_id=task.id,
-            workflow_id=uuid.UUID(str(raw_workflow_id)),
-            workflow_step_id=uuid.UUID(str(raw_step_id)),
-            expected_step_version=raw_version,
-            decision=decision,
-            principal_id=principal_id,
-            occurred_at=datetime.now(UTC),
-        )
-        await enqueue(
-            self._session,
-            event_id=event.event_id,
-            aggregate_type="task",
-            aggregate_id=task.id,
-            event_type=TASK_DECISION_RECORDED_V1,
-            dedupe_key=(f"task-decision:{task.id}:{decision}:step-v{event.expected_step_version}"),
-            payload=task_decision_to_payload(event),
-        )
+        await self._decision_publisher.publish_transition(task, decision, principal_id)
 
     async def _log(
         self,
@@ -471,58 +295,3 @@ class SQLAlchemyTaskManagementAdapter:
                 note=note,
             )
         )
-
-    @staticmethod
-    def _projection_version(task: TaskCard, stream: str) -> int:
-        versions = (task.payload or {}).get(_PROJECTION_VERSIONS, {})
-        if not isinstance(versions, dict):
-            return -1
-        value = versions.get(stream, -1)
-        return value if isinstance(value, int) else -1
-
-    @staticmethod
-    def _record_projection_version(task: TaskCard, stream: str, version: int) -> None:
-        payload = dict(task.payload or {})
-        versions = dict(payload.get(_PROJECTION_VERSIONS, {}))
-        versions[stream] = version
-        payload[_PROJECTION_VERSIONS] = versions
-        task.payload = payload
-
-
-def task_decision_to_payload(event: TaskDecisionRecordedV1) -> dict[str, object]:
-    return {
-        "event_id": str(event.event_id),
-        "task_id": str(event.task_id),
-        "workflow_id": str(event.workflow_id),
-        "workflow_step_id": str(event.workflow_step_id),
-        "expected_step_version": event.expected_step_version,
-        "decision": event.decision,
-        "principal_id": str(event.principal_id),
-        "occurred_at": event.occurred_at.isoformat(),
-        "contract_version": event.contract_version,
-    }
-
-
-def task_decision_from_payload(payload: dict[str, Any]) -> TaskDecisionRecordedV1:
-    return TaskDecisionRecordedV1(
-        event_id=uuid.UUID(str(payload["event_id"])),
-        task_id=uuid.UUID(str(payload["task_id"])),
-        workflow_id=uuid.UUID(str(payload["workflow_id"])),
-        workflow_step_id=uuid.UUID(str(payload["workflow_step_id"])),
-        expected_step_version=int(payload["expected_step_version"]),
-        decision=str(payload["decision"]),
-        principal_id=uuid.UUID(str(payload["principal_id"])),
-        occurred_at=datetime.fromisoformat(str(payload["occurred_at"])),
-        contract_version=int(payload.get("contract_version", 1)),
-    )
-
-
-class SQLAlchemyTaskTransaction:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def commit(self) -> None:
-        await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()

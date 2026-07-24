@@ -24,6 +24,23 @@ from app.contexts.foundations.workforce.expert_management.application.errors imp
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_uow import (
     SQLAlchemyExpertUnitOfWork,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
+
+
+class _HealthySessionSpy:
+    def __init__(self) -> None:
+        self.commits = 0
+        self.flushes = 0
+        self.rollbacks = 0
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def flush(self) -> None:
+        self.flushes += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
 
 
 class _SessionSpy:
@@ -38,6 +55,26 @@ class _SessionSpy:
 
     async def rollback(self) -> None:
         self.rollbacks += 1
+
+
+async def test_session_unit_of_work_owns_only_transaction_lifecycle() -> None:
+    session = _HealthySessionSpy()
+    uow = SessionUnitOfWork(cast(AsyncSession, session))
+
+    async with uow as entered:
+        assert entered is uow
+        await entered.flush()
+        await entered.commit()
+
+    assert session.flushes == 1
+    assert session.commits == 1
+    assert session.rollbacks == 0
+
+    with pytest.raises(RuntimeError, match="application failure"):
+        async with uow:
+            raise RuntimeError("application failure")
+
+    assert session.rollbacks == 1
 
 
 @pytest.mark.parametrize("operation", ["commit", "flush"])
