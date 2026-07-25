@@ -14,6 +14,12 @@ function persisted(id: string, speakerType: 'user' | 'ai', content: string): Des
     speaker_name: speakerType === 'ai' ? 'AI' : '我',
     content,
     create_time: '2026-07-24T00:00:00Z',
+    reply_to_message_id: null,
+    reply_preview: null,
+    attachments: [],
+    is_pinned: false,
+    pinned_at: null,
+    pinned_by_user_id: null,
   }
 }
 

@@ -235,7 +235,7 @@ export default function Dashboard() {
             const activeTurnId = activeAiTurnIdRef.current
             setChatMessages((items) => appendDesktopAiDelta(items, activeTurnId, text))
           } else if (event === 'message_end') {
-            const persisted = payload as DesktopMessage
+            const persisted = payload as unknown as DesktopMessage
             const activeTurnId = activeAiTurnIdRef.current
             setChatMessages((items) => reconcileDesktopStreamMessageEnd(
               items,
@@ -245,7 +245,7 @@ export default function Dashboard() {
             ))
             if (persisted.speaker_type === 'ai') activeAiTurnIdRef.current = null
           } else if (event === 'orchestration') {
-            setOrchestration(payload as OrchProgress)
+            setOrchestration(payload as unknown as OrchProgress)
           }
         },
         { signal: controller.signal },

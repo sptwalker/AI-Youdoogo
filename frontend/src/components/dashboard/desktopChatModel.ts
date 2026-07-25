@@ -18,6 +18,12 @@ export function beginDesktopAiTurn(
     speaker_name: speaker.speaker_name,
     content: '',
     create_time: '',
+    reply_to_message_id: null,
+    reply_preview: null,
+    attachments: [],
+    is_pinned: false,
+    pinned_at: null,
+    pinned_by_user_id: null,
   }]
 }
 
