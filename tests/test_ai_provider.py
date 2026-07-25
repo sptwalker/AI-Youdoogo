@@ -59,8 +59,10 @@ async def test_seed_from_env_creates_two_cards(
     n = await svc.seed_from_env(db)
     assert n == 2
     cards = await svc.list_providers(db)
-    tiers = {c["tier"] for c in cards}
-    assert tiers == {"daily", "reasoning"} and len(cards) == 2
+    by_tier = {c["tier"]: c for c in cards}
+    assert set(by_tier) == {"daily", "reasoning"}
+    assert by_tier["daily"]["model"] == "deepseek-v4-flash"
+    assert by_tier["reasoning"]["model"] == "deepseek-v4-pro"
 
 
 async def test_seed_from_env_idempotent(

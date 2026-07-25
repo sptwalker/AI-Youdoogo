@@ -16,6 +16,9 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 from app.contexts.business.assistant_conversations.entrypoints import (
     operations as assistant_conversations,
 )
+from app.contexts.business.assistant_conversations.infrastructure.sqlalchemy_repository import (
+    SQLAlchemyConversationRepository,
+)
 from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
@@ -30,6 +33,18 @@ from app.models.system import SysUser
 from app.services import agent_role_service
 
 AgentStream = Callable[..., AsyncIterator[str | AgentTaskRecord]]
+
+
+class _FakeAttachmentStorage:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    async def put(self, *, object_name: str, content: bytes, content_type: str) -> str:
+        self.objects[object_name] = content
+        return f"bucket/{object_name}"
+
+    async def get(self, *, object_name: str) -> bytes:
+        return self.objects[object_name]
 
 
 @pytest.fixture
@@ -84,6 +99,8 @@ async def _send_all(
     message: str,
     add_agent_ids: list[uuid.UUID],
     *,
+    reply_to_message_id: uuid.UUID | None = None,
+    attachments: tuple[dict[str, Any], ...] = (),
     agent_stream: AgentStream | None = None,
     agent_runner: Any = None,
 ) -> tuple[list[dict[str, Any]], list[Event]]:
@@ -96,6 +113,8 @@ async def _send_all(
                 principal=_principal(user),
                 message=message,
                 add_agent_ids=tuple(add_agent_ids),
+                reply_to_message_id=reply_to_message_id,
+                attachments=attachments,
             ),
             agent_stream=agent_stream,
             agent_runner=agent_runner,
@@ -217,6 +236,163 @@ async def test_send_consult_directive_emits_extra_message(
     assert msgs[2]["content"] == "预算上限100万。"
 
 
+async def test_send_reply_and_attachment_round_trip(db: AsyncSession) -> None:
+    """引用快照和附件元数据应随用户消息持久化并流回前端。"""
+    u = await _user(db)
+    replied = DesktopMessage(
+        owner_user_id=u.id,
+        speaker_type="ai",
+        speaker_name="助理",
+        content="  原始引用内容  ",
+    )
+    db.add(replied)
+    await db.commit()
+    await db.refresh(replied)
+
+    msgs, _ = await _send_all(
+        db,
+        u,
+        "收到图片",
+        [],
+        reply_to_message_id=replied.id,
+        attachments=(
+            {
+                "type": "image",
+                "name": "demo.png",
+                "storage_path": "bucket/desktop-chat/token/demo.png",
+                "size": 12,
+            },
+        ),
+    )
+
+    assert msgs[0]["reply_to_message_id"] == str(replied.id)
+    assert msgs[0]["reply_preview"] == {
+        "id": str(replied.id),
+        "speaker_name": "助理",
+        "content": "原始引用内容",
+    }
+    assert msgs[0]["attachments"] == [
+        {
+            "type": "image",
+            "name": "demo.png",
+            "storage_path": "bucket/desktop-chat/token/demo.png",
+            "size": 12,
+        }
+    ]
+
+    stored = (
+        await db.execute(
+            select(DesktopMessage).where(DesktopMessage.id == uuid.UUID(msgs[0]["id"]))
+        )
+    ).scalar_one()
+    assert stored.reply_to_message_id == replied.id
+    assert stored.reply_preview_content == "原始引用内容"
+    assert stored.attachments == [
+        {
+            "type": "image",
+            "name": "demo.png",
+            "storage_path": "bucket/desktop-chat/token/demo.png",
+            "size": 12,
+        }
+    ]
+
+
+async def test_pin_and_unpin_only_touch_owned_message(db: AsyncSession) -> None:
+    """置顶/取消置顶只允许操作自己的桌面对话消息。"""
+    u = await _user(db)
+    other = await _user(db, "bob", "鲍勃")
+    own = DesktopMessage(
+        owner_user_id=u.id,
+        speaker_type="user",
+        speaker_name="爱丽丝",
+        content="我的消息",
+    )
+    alien = DesktopMessage(
+        owner_user_id=other.id,
+        speaker_type="user",
+        speaker_name="鲍勃",
+        content="别人的消息",
+    )
+    db.add_all([own, alien])
+    await db.commit()
+    await db.refresh(own)
+    await db.refresh(alien)
+
+    pinned = await assistant_conversations.pin_message(
+        db,
+        owner_user_id=u.id,
+        message_id=own.id,
+        pinned_by_user_id=u.id,
+    )
+    assert pinned["is_pinned"] is True
+    assert pinned["pinned_by_user_id"] == str(u.id)
+
+    unpinned = await assistant_conversations.unpin_message(
+        db,
+        owner_user_id=u.id,
+        message_id=own.id,
+    )
+    assert unpinned["is_pinned"] is False
+    assert unpinned["pinned_by_user_id"] is None
+
+    with pytest.raises(ApplicationError, match="消息不存在"):
+        await assistant_conversations.pin_message(
+            db,
+            owner_user_id=u.id,
+            message_id=alien.id,
+            pinned_by_user_id=u.id,
+        )
+
+
+async def test_upload_and_download_attachment_visibility(db: AsyncSession) -> None:
+    """附件上传后仅消息所属用户可下载。"""
+    u = await _user(db)
+    other = await _user(db, "bob", "鲍勃")
+    storage = _FakeAttachmentStorage()
+
+    attachment = await assistant_conversations.upload_attachment(
+        db,
+        name="demo.png",
+        content=b"png-bytes",
+        content_type="image/png",
+        attachment_storage=storage,
+    )
+    assert attachment["type"] == "image"
+    assert attachment["name"] == "demo.png"
+    assert attachment["size"] == 9
+    assert attachment["storage_path"].startswith("bucket/desktop-chat/")
+    assert attachment["storage_path"].endswith("/demo.png")
+
+    db.add(
+        DesktopMessage(
+            owner_user_id=u.id,
+            speaker_type="user",
+            speaker_name="爱丽丝",
+            content="见图",
+            attachments=[attachment],
+        )
+    )
+    await db.commit()
+
+    downloaded = await assistant_conversations.download_attachment(
+        db,
+        storage_path=attachment["storage_path"],
+        name=attachment["name"],
+        user_id=u.id,
+        attachment_storage=storage,
+    )
+    assert downloaded.content == b"png-bytes"
+
+    with pytest.raises(ApplicationError, match="无权访问"):
+        await assistant_conversations.download_attachment(
+            db,
+            storage_path=attachment["storage_path"],
+            name=attachment["name"],
+            user_id=other.id,
+            attachment_storage=storage,
+        )
+
+
 async def _add_msg(db: AsyncSession, user_id: uuid.UUID, content: str, days_ago: int) -> None:
     db.add(
         DesktopMessage(
@@ -285,3 +461,44 @@ async def test_archive_old_keeps_on_ingest_failure(
         ).scalars()
     )
     assert len(remaining) == 1  # 未删，保留重试
+
+
+async def test_repository_list_messages_excludes_soft_deleted_and_stabilizes_equal_times(
+    db: AsyncSession,
+) -> None:
+    """历史读取应过滤软删消息，并在同时间戳下保持稳定顺序。"""
+    u = await _user(db)
+    same_time = datetime(2026, 7, 24, 8, 0, tzinfo=UTC)
+    hidden = DesktopMessage(
+        owner_user_id=u.id,
+        speaker_type="user",
+        speaker_name="爱丽丝",
+        content="隐藏消息",
+        create_time=same_time,
+        is_delete=True,
+    )
+    first = DesktopMessage(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000101"),
+        owner_user_id=u.id,
+        speaker_type="user",
+        speaker_name="爱丽丝",
+        content="第一条",
+        create_time=same_time,
+    )
+    second = DesktopMessage(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000202"),
+        owner_user_id=u.id,
+        speaker_type="ai",
+        speaker_name="助理",
+        content="第二条",
+        create_time=same_time,
+    )
+    db.add_all([hidden, second, first])
+    await db.commit()
+
+    repo = SQLAlchemyConversationRepository(db)
+    listed = await repo.list_since(u.id, since=same_time - timedelta(minutes=1))
+    recent = await repo.list_recent(u.id, limit=10)
+
+    assert [message.content for message in listed] == ["第一条", "第二条"]
+    assert [message.content for message in recent] == ["第一条", "第二条"]

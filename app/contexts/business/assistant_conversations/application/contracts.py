@@ -37,6 +37,20 @@ class AgentResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplyPreviewResult:
+    id: uuid.UUID
+    speaker_name: str
+    content: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "id": str(self.id),
+            "speaker_name": self.speaker_name,
+            "content": self.content,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class MessageResult:
     id: uuid.UUID
     speaker_type: str
@@ -44,6 +58,12 @@ class MessageResult:
     content: str
     create_time: datetime
     speaker_agent_id: uuid.UUID | None = None
+    reply_to_message_id: uuid.UUID | None = None
+    reply_preview: ReplyPreviewResult | None = None
+    attachments: tuple[dict[str, Any], ...] = ()
+    is_pinned: bool = False
+    pinned_at: datetime | None = None
+    pinned_by_user_id: uuid.UUID | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +73,16 @@ class MessageResult:
             "speaker_name": self.speaker_name,
             "content": self.content,
             "create_time": self.create_time.isoformat(),
+            "reply_to_message_id": (
+                str(self.reply_to_message_id) if self.reply_to_message_id else None
+            ),
+            "reply_preview": self.reply_preview.as_dict() if self.reply_preview else None,
+            "attachments": [dict(value) for value in self.attachments],
+            "is_pinned": self.is_pinned,
+            "pinned_at": self.pinned_at.isoformat() if self.pinned_at else None,
+            "pinned_by_user_id": (
+                str(self.pinned_by_user_id) if self.pinned_by_user_id else None
+            ),
         }
 
 
@@ -75,10 +105,34 @@ class SendMessageCommand:
     principal: Principal
     message: str
     add_agent_ids: tuple[uuid.UUID, ...] = ()
+    reply_to_message_id: uuid.UUID | None = None
+    attachments: tuple[dict[str, Any], ...] = ()
     default_rounds: int = 2
     max_add: int = 2
     max_rounds: int = 3
     recent_context: int = 20
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentResult:
+    attachment_type: str
+    name: str
+    storage_path: str
+    size: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.attachment_type,
+            "name": self.name,
+            "storage_path": self.storage_path,
+            "size": self.size,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentDownloadResult:
+    name: str
+    content: bytes
 
 
 @dataclass(frozen=True, slots=True)

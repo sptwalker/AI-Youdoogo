@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from app.contexts.shared_kernel import RuleViolation
 
@@ -29,6 +30,13 @@ class Participant:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplyPreview:
+    id: uuid.UUID
+    speaker_name: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationMessage:
     id: uuid.UUID
     owner_user_id: uuid.UUID
@@ -37,6 +45,12 @@ class ConversationMessage:
     content: str
     create_time: datetime
     speaker_agent_id: uuid.UUID | None = None
+    reply_to_message_id: uuid.UUID | None = None
+    reply_preview: ReplyPreview | None = None
+    attachments: tuple[dict[str, Any], ...] = ()
+    is_pinned: bool = False
+    pinned_at: datetime | None = None
+    pinned_by_user_id: uuid.UUID | None = None
 
 
 def deduplicate_added_agents(
@@ -77,6 +91,42 @@ def transcript(conversation: tuple[tuple[str, str], ...]) -> str:
     return "\n".join(f"{name}：{content}" for name, content in conversation)
 
 
+_IMAGE_ATTACHMENT_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+def describe_user_turn(content: str, attachments: tuple[dict[str, Any], ...]) -> str:
+    """把用户这一轮的正文与附件合成模型可读文本。
+
+    当前模型无视觉能力，纯图片消息正文只是「[附件]」占位符，若直接进对话记录，
+    模型会因为"最后一条没有实质内容"而顺着上一条乱答。这里显式告诉模型收到了
+    图片/文件、无法查看图片内容，让它据此回应而不是续答旧话题。
+    """
+    if not attachments:
+        return content
+    images = [a for a in attachments if _is_image_attachment(a)]
+    files = [a for a in attachments if not _is_image_attachment(a)]
+    notes: list[str] = []
+    if images:
+        names = "、".join(str(a.get("name", "")) for a in images)
+        notes.append(f"发来{len(images)}张图片（{names}），你暂时无法查看图片内容")
+    if files:
+        names = "、".join(str(a.get("name", "")) for a in files)
+        notes.append(f"发来{len(files)}个文件（{names}）")
+    note = "；".join(notes)
+    body = content.strip()
+    # 纯附件时正文是占位符，去掉以免干扰
+    if body in ("", "[附件]"):
+        return f"（{note}）"
+    return f"{body}\n（{note}）"
+
+
+def _is_image_attachment(attachment: dict[str, Any]) -> bool:
+    if str(attachment.get("type", "")).lower() == "image":
+        return True
+    name = str(attachment.get("name", "")).lower()
+    return name.endswith(_IMAGE_ATTACHMENT_EXTENSIONS)
+
+
 def roundtable_prompt(
     participant: Participant,
     participants: tuple[Participant, ...],
@@ -88,6 +138,16 @@ def roundtable_prompt(
         f"请以「{participant.name}」的身份，结合以上讨论"
         + (f"（在座还有{others}）" if others else "")
         + "简明发表你的看法，不要重复他人已说过的内容。"
+    )
+
+
+def direct_chat_prompt(
+    participant: Participant,
+    conversation: tuple[tuple[str, str], ...],
+) -> str:
+    return (
+        f"以下是你与同事的最近对话记录：\n{transcript(conversation)}\n\n"
+        f"请以「{participant.name}」的身份，直接回复同事最后一条消息。"
     )
 
 

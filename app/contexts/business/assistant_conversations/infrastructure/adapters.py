@@ -34,6 +34,7 @@ from app.contexts.shared_kernel import ResourceNotFound
 from app.llm.roles import get_llm_for_role
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
+from app.platform.object_storage import gateway as storage
 from app.services import config_service, orchestration_service
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,14 @@ class LegacyConversationArchiveAdapter:
         )
 
 
+class KnowledgeAttachmentStorageAdapter:
+    async def put(self, *, object_name: str, content: bytes, content_type: str) -> str:
+        return await storage.put_object(object_name, content, content_type)
+
+    async def get(self, *, object_name: str) -> bytes:
+        return await storage.get_object_bytes(object_name)
+
+
 class SystemClock:
     def now(self) -> datetime:
         return datetime.now(UTC)
@@ -302,6 +311,9 @@ class SystemClock:
 class UUIDIdentifier:
     def new_id(self) -> uuid.UUID:
         return uuid.uuid4()
+
+    def new_object_token(self) -> str:
+        return uuid.uuid4().hex
 
 
 async def legacy_try_orchestrate(

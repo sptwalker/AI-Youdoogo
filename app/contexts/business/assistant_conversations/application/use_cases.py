@@ -5,24 +5,28 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.contexts.business.assistant_conversations.application.contracts import (
     AgentExecutionRequest,
     AgentResult,
     ArchiveConversationRequest,
     AssistantResult,
+    AttachmentDownloadResult,
+    AttachmentResult,
     ConsultedReply,
     ConversationResult,
     ConversationStreamEvent,
     MessageResult,
     OrchestrationResult,
     Principal,
+    ReplyPreviewResult,
     SendMessageCommand,
 )
 from app.contexts.business.assistant_conversations.application.ports import (
     AgentExecutionPort,
     AssistantDirectoryPort,
+    AttachmentStoragePort,
     Clock,
     ConfigurationPort,
     ConversationArchivePort,
@@ -36,14 +40,26 @@ from app.contexts.business.assistant_conversations.domain.models import (
     Assistant,
     ConversationMessage,
     Participant,
+    ReplyPreview,
     deduplicate_added_agents,
+    describe_user_turn,
+    direct_chat_prompt,
     ensure_added_agent_limit,
     progress_text,
     round_count,
     roundtable_prompt,
 )
+from app.contexts.shared_kernel import (
+    InvalidInput,
+    PermissionDenied,
+    ResourceNotFound,
+    RuleViolation,
+)
 
 _DEFAULT_HISTORY_DAYS = 10
+_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+_MAX_REPLY_PREVIEW_CHARS = 120
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +76,16 @@ def _agent_result(agent: Participant) -> AgentResult:
     return AgentResult(id=agent.id, name=agent.name, title=agent.title)
 
 
+def _reply_preview_result(preview: ReplyPreview | None) -> ReplyPreviewResult | None:
+    if preview is None:
+        return None
+    return ReplyPreviewResult(
+        id=preview.id,
+        speaker_name=preview.speaker_name,
+        content=preview.content,
+    )
+
+
 def _message_result(message: ConversationMessage) -> MessageResult:
     return MessageResult(
         id=message.id,
@@ -68,6 +94,12 @@ def _message_result(message: ConversationMessage) -> MessageResult:
         speaker_name=message.speaker_name,
         content=message.content,
         create_time=message.create_time,
+        reply_to_message_id=message.reply_to_message_id,
+        reply_preview=_reply_preview_result(message.reply_preview),
+        attachments=message.attachments,
+        is_pinned=message.is_pinned,
+        pinned_at=message.pinned_at,
+        pinned_by_user_id=message.pinned_by_user_id,
     )
 
 
@@ -83,6 +115,7 @@ class AssistantConversationsApplication:
         agents: AgentExecutionPort,
         orchestration: OrchestrationPort,
         archive_port: ConversationArchivePort,
+        attachment_storage: AttachmentStoragePort,
         clock: Clock,
         identifiers: IdentifierPort,
     ) -> None:
@@ -92,6 +125,7 @@ class AssistantConversationsApplication:
         self._agents = agents
         self._orchestration = orchestration
         self._archive_port = archive_port
+        self._attachment_storage = attachment_storage
         self._clock = clock
         self._identifiers = identifiers
 
@@ -130,6 +164,108 @@ class AssistantConversationsApplication:
     async def archive_old(self, principal: Principal, *, days: int | None = None) -> int:
         retention_days = days if days is not None else await self._history_days()
         return await self._archive_old(principal, days=retention_days)
+
+    async def upload_attachment(
+        self,
+        *,
+        name: str,
+        content: bytes,
+        content_type: str,
+    ) -> AttachmentResult:
+        if len(content) > _MAX_ATTACHMENT_BYTES:
+            raise RuleViolation(f"文件过大（>{_MAX_ATTACHMENT_BYTES // 1024 // 1024}MB）")
+        safe_name = name or "未命名"
+        object_name = f"desktop-chat/{self._identifiers.new_object_token()}/{safe_name}"
+        storage_path = await self._attachment_storage.put(
+            object_name=object_name,
+            content=content,
+            content_type=content_type or "application/octet-stream",
+        )
+        return AttachmentResult(
+            attachment_type=("image" if safe_name.lower().endswith(_IMAGE_EXTENSIONS) else "file"),
+            name=safe_name,
+            storage_path=storage_path,
+            size=len(content),
+        )
+
+    async def download_attachment(
+        self,
+        *,
+        storage_path: str,
+        name: str,
+        user_id: uuid.UUID,
+    ) -> AttachmentDownloadResult:
+        _, _, object_name = storage_path.partition("/")
+        if not object_name.startswith("desktop-chat/"):
+            raise InvalidInput("非法附件路径")
+        async with self._uow_factory() as uow:
+            visible = await uow.messages.attachment_visible_to_user(
+                storage_path=storage_path,
+                user_id=user_id,
+            )
+        if not visible:
+            raise PermissionDenied("无权访问该附件")
+        content = await self._attachment_storage.get(object_name=object_name)
+        return AttachmentDownloadResult(name=name, content=content)
+
+    async def pin_message(
+        self,
+        *,
+        owner_user_id: uuid.UUID,
+        message_id: uuid.UUID,
+        pinned_by_user_id: uuid.UUID,
+    ) -> MessageResult:
+        message = await self._require_owned_message(owner_user_id, message_id)
+        if message.is_pinned:
+            return _message_result(message)
+        updated = ConversationMessage(
+            id=message.id,
+            owner_user_id=message.owner_user_id,
+            speaker_type=message.speaker_type,
+            speaker_agent_id=message.speaker_agent_id,
+            speaker_name=message.speaker_name,
+            content=message.content,
+            create_time=message.create_time,
+            reply_to_message_id=message.reply_to_message_id,
+            reply_preview=message.reply_preview,
+            attachments=message.attachments,
+            is_pinned=True,
+            pinned_at=self._clock.now(),
+            pinned_by_user_id=pinned_by_user_id,
+        )
+        async with self._uow_factory() as uow:
+            await uow.messages.save(updated)
+            await uow.commit()
+        return _message_result(updated)
+
+    async def unpin_message(
+        self,
+        *,
+        owner_user_id: uuid.UUID,
+        message_id: uuid.UUID,
+    ) -> MessageResult:
+        message = await self._require_owned_message(owner_user_id, message_id)
+        if not message.is_pinned:
+            return _message_result(message)
+        updated = ConversationMessage(
+            id=message.id,
+            owner_user_id=message.owner_user_id,
+            speaker_type=message.speaker_type,
+            speaker_agent_id=message.speaker_agent_id,
+            speaker_name=message.speaker_name,
+            content=message.content,
+            create_time=message.create_time,
+            reply_to_message_id=message.reply_to_message_id,
+            reply_preview=message.reply_preview,
+            attachments=message.attachments,
+            is_pinned=False,
+            pinned_at=None,
+            pinned_by_user_id=None,
+        )
+        async with self._uow_factory() as uow:
+            await uow.messages.save(updated)
+            await uow.commit()
+        return _message_result(updated)
 
     async def _archive_old(
         self,
@@ -179,14 +315,19 @@ class AssistantConversationsApplication:
         participants = await self._resolve_participants(command)
         rounds = await self._rounds(command, participant_count=len(participants))
         conversation = await self._recent_conversation(command)
+        reply_preview = await self._resolve_reply_preview(principal.id, command.reply_to_message_id)
 
         user_message = await self._save_message(
             owner_user_id=principal.id,
             speaker_type=SPEAKER_USER,
             speaker_name=principal.display_name,
             content=command.message,
+            reply_to_message_id=command.reply_to_message_id,
+            reply_preview=reply_preview,
+            attachments=command.attachments,
         )
-        conversation.append((principal.display_name, command.message))
+        model_turn = describe_user_turn(command.message, command.attachments)
+        conversation.append((principal.display_name, model_turn))
         yield ConversationStreamEvent("message_end", _message_result(user_message).as_dict())
 
         orchestration = await self._try_start_orchestration(command, participants)
@@ -241,7 +382,7 @@ class AssistantConversationsApplication:
         command: SendMessageCommand,
         participants: tuple[Participant, ...],
     ) -> OrchestrationResult | None:
-        if len(participants) != 1:
+        if len(participants) != 1 or command.attachments:
             return None
         return await self._orchestration.try_start(
             principal_id=command.principal.id,
@@ -275,7 +416,10 @@ class AssistantConversationsApplication:
         participants: tuple[Participant, ...],
         conversation: list[tuple[str, str]],
     ) -> AsyncIterator[ConversationStreamEvent]:
-        prompt = roundtable_prompt(participant, participants, tuple(conversation))
+        if len(participants) == 1:
+            prompt = direct_chat_prompt(participant, tuple(conversation))
+        else:
+            prompt = roundtable_prompt(participant, participants, tuple(conversation))
         yield ConversationStreamEvent(
             "message_start",
             {
@@ -362,6 +506,35 @@ class AssistantConversationsApplication:
     async def _history_days(self) -> int:
         return await self._configuration.integer("desktop_history_days", _DEFAULT_HISTORY_DAYS)
 
+    async def _require_owned_message(
+        self, owner_user_id: uuid.UUID, message_id: uuid.UUID
+    ) -> ConversationMessage:
+        async with self._uow_factory() as uow:
+            message = await uow.messages.get_owned_message(owner_user_id, message_id)
+        if message is None:
+            raise ResourceNotFound("消息不存在")
+        return message
+
+    async def _resolve_reply_preview(
+        self,
+        owner_user_id: uuid.UUID,
+        reply_to_message_id: uuid.UUID | None,
+    ) -> ReplyPreview | None:
+        if reply_to_message_id is None:
+            return None
+        message = await self._require_owned_message(owner_user_id, reply_to_message_id)
+        return ReplyPreview(
+            id=message.id,
+            speaker_name=message.speaker_name,
+            content=self._preview_text(message.content),
+        )
+
+    def _preview_text(self, content: str) -> str:
+        compact = " ".join(content.split())
+        if len(compact) <= _MAX_REPLY_PREVIEW_CHARS:
+            return compact
+        return compact[: _MAX_REPLY_PREVIEW_CHARS - 1] + "…"
+
     async def _save_message(
         self,
         *,
@@ -370,6 +543,12 @@ class AssistantConversationsApplication:
         speaker_name: str,
         content: str,
         speaker_agent_id: uuid.UUID | None = None,
+        reply_to_message_id: uuid.UUID | None = None,
+        reply_preview: ReplyPreview | None = None,
+        attachments: tuple[dict[str, object], ...] = (),
+        is_pinned: bool = False,
+        pinned_at: datetime | None = None,
+        pinned_by_user_id: uuid.UUID | None = None,
     ) -> ConversationMessage:
         message = ConversationMessage(
             id=self._identifiers.new_id(),
@@ -379,6 +558,12 @@ class AssistantConversationsApplication:
             speaker_name=speaker_name,
             content=content,
             create_time=self._clock.now(),
+            reply_to_message_id=reply_to_message_id,
+            reply_preview=reply_preview,
+            attachments=tuple(dict(value) for value in attachments),
+            is_pinned=is_pinned,
+            pinned_at=pinned_at,
+            pinned_by_user_id=pinned_by_user_id,
         )
         async with self._uow_factory() as uow:
             await uow.messages.add(message)

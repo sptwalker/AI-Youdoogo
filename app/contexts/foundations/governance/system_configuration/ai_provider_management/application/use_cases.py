@@ -193,7 +193,7 @@ class AIProviderManagement:
                 tier=TIER_DAILY,
                 base_url="https://api.deepseek.com",
                 api_key=key,
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
             )
         )
         await self.create(
@@ -202,7 +202,7 @@ class AIProviderManagement:
                 tier=TIER_REASONING,
                 base_url="https://api.deepseek.com",
                 api_key=key,
-                model="deepseek-reasoner",
+                model="deepseek-v4-pro",
             )
         )
         return 2

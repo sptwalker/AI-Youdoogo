@@ -6,11 +6,16 @@
 """
 
 import uuid
+from datetime import datetime
+from typing import Any
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, CommonMixin
+
+_JSONB = JSON().with_variant(JSONB(), "postgresql")
 
 SPEAKER_USER = "user"
 SPEAKER_AI = "ai"
@@ -20,7 +25,10 @@ class DesktopMessage(CommonMixin, Base):
     """一条工作桌面对话消息（真人或某 AI 的发言）。"""
 
     __tablename__ = "desktop_message"
-    __table_args__ = (Index("ix_desktop_msg_owner_time", "owner_user_id", "create_time"),)
+    __table_args__ = (
+        Index("ix_desktop_msg_owner_time", "owner_user_id", "create_time"),
+        Index("ix_desktop_msg_owner_pinned", "owner_user_id", "is_pinned", "pinned_at"),
+    )
 
     owner_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sys_user.id"))
     speaker_type: Mapped[str] = mapped_column(String(8))  # user / ai
@@ -29,3 +37,14 @@ class DesktopMessage(CommonMixin, Base):
     )  # AI 发言时=哪个智能体；user 发言为 NULL
     speaker_name: Mapped[str] = mapped_column(String(64), default="", server_default="")
     content: Mapped[str] = mapped_column(Text)
+    reply_to_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("desktop_message.id"), nullable=True
+    )
+    reply_preview_speaker_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reply_preview_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachments: Mapped[list[Any]] = mapped_column(_JSONB, default=list, server_default="[]")
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pinned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sys_user.id"), nullable=True
+    )

@@ -5,10 +5,23 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
 import { reviewCollab } from '../api/collab'
-import { downloadDeliverable, getDesktopChat, sendDesktopChat, type AddableAgent, type DesktopMessage, type PendingItem } from '../api/desktop'
+import {
+  downloadDeliverable,
+  downloadDesktopAttachment,
+  getDesktopChat,
+  pinDesktopMessage,
+  sendDesktopChat,
+  unpinDesktopMessage,
+  uploadDesktopAttachment,
+  type AddableAgent,
+  type Attachment,
+  type DesktopMessage,
+  type PendingItem,
+} from '../api/desktop'
 import { confirmResolution } from '../api/meetings'
 import { reviewProposal } from '../api/proposals'
 import { getOrchestrationProgress, transitionTask, type OrchProgress } from '../api/tasks'
+import { buildOutgoingMessage, isAttachmentTooLarge } from '../features/discussion/model'
 import DashboardSidebar from '../components/dashboard/DashboardSidebar'
 import DesktopConversations from '../components/dashboard/DesktopConversations'
 import PendingCard from '../components/dashboard/PendingCard'
@@ -17,10 +30,79 @@ import {
   appendDesktopAiDelta,
   beginDesktopAiTurn,
   clearFailedDesktopChat,
-  reconcileDesktopMessageEnd,
+  reconcileDesktopMessageEnd as reconcileDesktopStreamMessageEnd,
 } from '../components/dashboard/desktopChatModel'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { usePendingActions } from '../hooks/usePendingActions'
+
+const STREAMING_MESSAGE_ID = '__streaming__'
+const MAX_REPLY_PREVIEW_CHARS = 120
+
+function upsertDesktopMessage(items: DesktopMessage[], persisted: DesktopMessage): DesktopMessage[] {
+  const persistedIndex = items.findIndex((item) => item.id === persisted.id)
+  if (persistedIndex < 0) return [...items, persisted]
+  return items.map((item, index) => (index === persistedIndex ? persisted : item))
+}
+
+export function startDesktopStreamingMessage(
+  items: DesktopMessage[],
+  start: { speaker_agent_id: string | null; speaker_name: string },
+): DesktopMessage[] {
+  return [
+    ...items.filter((item) => item.id !== STREAMING_MESSAGE_ID),
+    {
+      id: STREAMING_MESSAGE_ID,
+      speaker_type: 'ai',
+      speaker_agent_id: start.speaker_agent_id,
+      speaker_name: start.speaker_name,
+      content: '',
+      create_time: '',
+      reply_to_message_id: null,
+      reply_preview: null,
+      attachments: [],
+      is_pinned: false,
+      pinned_at: null,
+      pinned_by_user_id: null,
+    },
+  ]
+}
+
+export function reconcileDesktopMessageEnd(
+  items: DesktopMessage[],
+  persisted: DesktopMessage,
+  optimisticId: string,
+): DesktopMessage[] {
+  const placeholderId = persisted.speaker_type === 'user' ? optimisticId : STREAMING_MESSAGE_ID
+  const withoutPlaceholder = items.filter((item) => item.id !== placeholderId)
+  return upsertDesktopMessage(withoutPlaceholder, persisted)
+}
+
+function buildReplyPreview(messageRow: DesktopMessage): DesktopMessage['reply_preview'] {
+  const compact = messageRow.content.split(/\s+/).filter(Boolean).join(' ')
+  return {
+    id: messageRow.id,
+    speaker_name: messageRow.speaker_name,
+    content: compact.length <= MAX_REPLY_PREVIEW_CHARS
+      ? compact
+      : `${compact.slice(0, MAX_REPLY_PREVIEW_CHARS - 1)}…`,
+  }
+}
+
+export function mergeDesktopChatMessages(
+  fetched: DesktopMessage[],
+  current: DesktopMessage[],
+): DesktopMessage[] {
+  if (current.length === 0) return fetched
+  let merged = [...fetched]
+  for (const item of current) {
+    if (item.id === STREAMING_MESSAGE_ID || item.id.startsWith('tmp-')) {
+      if (!merged.some((message) => message.id === item.id)) merged = [...merged, item]
+      continue
+    }
+    merged = upsertDesktopMessage(merged, item)
+  }
+  return merged
+}
 
 export default function Dashboard() {
   const { me } = useOutletContext<{ me: UserInfo | null }>()
@@ -32,6 +114,9 @@ export default function Dashboard() {
   const [chatMessages, setChatMessages] = useState<DesktopMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [chatUploading, setChatUploading] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
+  const [replyingTo, setReplyingTo] = useState<DesktopMessage | null>(null)
   const [orchestration, setOrchestration] = useState<OrchProgress | null>(null)
   const chatBoxRef = useRef<HTMLDivElement>(null)
   const activeAiTurnIdRef = useRef<string | null>(null)
@@ -50,7 +135,7 @@ export default function Dashboard() {
   useEffect(() => {
     void getDesktopChat().then((chat) => {
       setAssistant(chat.assistant)
-      setChatMessages(chat.messages)
+      setChatMessages((items) => mergeDesktopChatMessages(chat.messages, items))
       setAddable(chat.addable_agents)
     })
   }, [])
@@ -64,46 +149,112 @@ export default function Dashboard() {
     })
   }
 
+  const uploadChatAttachment = async (file: File): Promise<boolean> => {
+    if (isAttachmentTooLarge(file.size)) {
+      message.error('文件过大（>20MB）')
+      return false
+    }
+    setChatUploading(true)
+    try {
+      const attachment = await uploadDesktopAttachment(file)
+      setPendingAttachments((items) => [...items, attachment])
+    } catch {
+      // request() 已统一提示
+    } finally {
+      setChatUploading(false)
+    }
+    return false
+  }
+
+  const togglePin = async (messageRow: DesktopMessage) => {
+    const updated = messageRow.is_pinned
+      ? await unpinDesktopMessage(messageRow.id)
+      : await pinDesktopMessage(messageRow.id)
+    setChatMessages((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+  }
+
   const sendChat = async () => {
-    if (!chatInput.trim() || chatSendingRef.current) return
-    const query = chatInput.trim()
+    if (chatSendingRef.current) return
+    const draftInput = chatInput
+    const draftAttachments = pendingAttachments
+    const outgoing = buildOutgoingMessage({
+      members: [],
+      mentionIds: [],
+      text: draftInput,
+      attachments: draftAttachments,
+    })
+    if (!outgoing) {
+      message.warning('请先输入文字或附带图片、文件')
+      return
+    }
+
+    const query = outgoing.content
     const optimisticId = `tmp-${Date.now()}`
+    const draftReply = replyingTo
     const controller = new AbortController()
+    const optimisticMessage: DesktopMessage = {
+      id: optimisticId,
+      speaker_type: 'user',
+      speaker_agent_id: null,
+      speaker_name: '我',
+      content: query,
+      create_time: '',
+      reply_to_message_id: draftReply?.id ?? null,
+      reply_preview: draftReply ? buildReplyPreview(draftReply) : null,
+      attachments: draftAttachments,
+      is_pinned: false,
+      pinned_at: null,
+      pinned_by_user_id: null,
+    }
+
     chatRequestRef.current = controller
     chatSendingRef.current = true
     activeAiTurnIdRef.current = null
     setChatInput('')
+    setPendingAttachments([])
+    setReplyingTo(null)
     setChatSending(true)
-    setChatMessages((items) => [...items, { id: optimisticId, speaker_type: 'user', speaker_agent_id: null, speaker_name: '我', content: query, create_time: '' }])
+    setChatMessages((items) => [...items, optimisticMessage])
     try {
-      await sendDesktopChat(query, addAgentIds, (event, payload) => {
-        if (event === 'message_start') {
-          const start = payload as unknown as { speaker_agent_id: string | null; speaker_name: string }
-          const previousTurnId = activeAiTurnIdRef.current
-          const turnId = `${DESKTOP_STREAMING_MESSAGE_PREFIX}${++aiTurnSequenceRef.current}`
-          activeAiTurnIdRef.current = turnId
-          setChatMessages((items) => beginDesktopAiTurn(items, previousTurnId, turnId, start))
-        } else if (event === 'delta') {
-          const text = String((payload as { text?: unknown }).text ?? '')
-          const activeTurnId = activeAiTurnIdRef.current
-          setChatMessages((items) => appendDesktopAiDelta(items, activeTurnId, text))
-        } else if (event === 'message_end') {
-          const persisted = payload as unknown as DesktopMessage
-          const activeTurnId = activeAiTurnIdRef.current
-          setChatMessages((items) => reconcileDesktopMessageEnd(
-            items,
-            persisted,
-            optimisticId,
-            activeTurnId,
-          ))
-          if (persisted.speaker_type === 'ai') activeAiTurnIdRef.current = null
-        } else if (event === 'orchestration') {
-          setOrchestration(payload as unknown as OrchProgress)
-        }
-      }, { signal: controller.signal })
+      await sendDesktopChat(
+        {
+          message: query,
+          addAgentIds,
+          replyToMessageId: draftReply?.id,
+          attachments: draftAttachments,
+        },
+        (event, payload) => {
+          if (event === 'message_start') {
+            const start = payload as { speaker_agent_id: string | null; speaker_name: string }
+            const previousTurnId = activeAiTurnIdRef.current
+            const turnId = `${DESKTOP_STREAMING_MESSAGE_PREFIX}${++aiTurnSequenceRef.current}`
+            activeAiTurnIdRef.current = turnId
+            setChatMessages((items) => beginDesktopAiTurn(items, previousTurnId, turnId, start))
+          } else if (event === 'delta') {
+            const text = String((payload as { text?: unknown }).text ?? '')
+            const activeTurnId = activeAiTurnIdRef.current
+            setChatMessages((items) => appendDesktopAiDelta(items, activeTurnId, text))
+          } else if (event === 'message_end') {
+            const persisted = payload as DesktopMessage
+            const activeTurnId = activeAiTurnIdRef.current
+            setChatMessages((items) => reconcileDesktopStreamMessageEnd(
+              items,
+              persisted,
+              optimisticId,
+              activeTurnId,
+            ))
+            if (persisted.speaker_type === 'ai') activeAiTurnIdRef.current = null
+          } else if (event === 'orchestration') {
+            setOrchestration(payload as OrchProgress)
+          }
+        },
+        { signal: controller.signal },
+      )
     } catch {
       setChatMessages((items) => clearFailedDesktopChat(items, optimisticId))
-      setChatInput(query)
+      setChatInput(draftInput)
+      setPendingAttachments(draftAttachments)
+      setReplyingTo(draftReply)
     } finally {
       if (chatRequestRef.current === controller) chatRequestRef.current = null
       chatSendingRef.current = false
@@ -174,9 +325,18 @@ export default function Dashboard() {
                   chatInput,
                   chatMessages,
                   chatSending,
+                  chatUploading,
+                  pendingAttachments,
+                  replyingTo,
                   orchestration,
                   onAcceptStep: acceptStep,
+                  onCancelReply: () => setReplyingTo(null),
+                  onDownloadAttachment: downloadDesktopAttachment,
+                  onPinToggle: togglePin,
+                  onRemoveAttachment: (index) => setPendingAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index)),
+                  onReply: setReplyingTo,
                   onSend: sendChat,
+                  onUpload: uploadChatAttachment,
                   setAddAgentIds,
                   setChatInput,
                   setOrchestration,

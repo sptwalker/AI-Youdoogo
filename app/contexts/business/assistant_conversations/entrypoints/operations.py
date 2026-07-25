@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.business.assistant_conversations.application.contracts import (
     AgentResult,
     AssistantResult,
+    AttachmentDownloadResult,
     MessageResult,
     OrchestrationResult,
     Principal,
@@ -19,6 +20,7 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 from app.contexts.business.assistant_conversations.application.ports import (
     AgentExecutionPort,
     AssistantDirectoryPort,
+    AttachmentStoragePort,
     ConversationArchivePort,
 )
 from app.contexts.business.assistant_conversations.application.use_cases import (
@@ -40,6 +42,7 @@ def _application(
     assistants: AssistantDirectoryPort | None = None,
     agents: AgentExecutionPort | None = None,
     archive_port: ConversationArchivePort | None = None,
+    attachment_storage: AttachmentStoragePort | None = None,
     agent_stream: AgentStream | None = None,
     agent_runner: AgentRunner | None = None,
 ) -> AssistantConversationsApplication:
@@ -48,6 +51,7 @@ def _application(
         assistants=assistants,
         agents=agents,
         archive_port=archive_port,
+        attachment_storage=attachment_storage,
         agent_stream=agent_stream,
         agent_runner=agent_runner,
     )
@@ -89,6 +93,65 @@ async def archive_old(
         principal,
         days=days,
     )
+
+
+async def upload_attachment(
+    session: AsyncSession,
+    *,
+    name: str,
+    content: bytes,
+    content_type: str,
+    attachment_storage: AttachmentStoragePort | None = None,
+) -> dict[str, Any]:
+    result = await _application(session, attachment_storage=attachment_storage).upload_attachment(
+        name=name,
+        content=content,
+        content_type=content_type,
+    )
+    return result.as_dict()
+
+
+async def download_attachment(
+    session: AsyncSession,
+    *,
+    storage_path: str,
+    name: str,
+    user_id: uuid.UUID,
+    attachment_storage: AttachmentStoragePort | None = None,
+) -> AttachmentDownloadResult:
+    return await _application(session, attachment_storage=attachment_storage).download_attachment(
+        storage_path=storage_path,
+        name=name,
+        user_id=user_id,
+    )
+
+
+async def pin_message(
+    session: AsyncSession,
+    *,
+    owner_user_id: uuid.UUID,
+    message_id: uuid.UUID,
+    pinned_by_user_id: uuid.UUID,
+) -> dict[str, Any]:
+    result = await _application(session).pin_message(
+        owner_user_id=owner_user_id,
+        message_id=message_id,
+        pinned_by_user_id=pinned_by_user_id,
+    )
+    return result.as_dict()
+
+
+async def unpin_message(
+    session: AsyncSession,
+    *,
+    owner_user_id: uuid.UUID,
+    message_id: uuid.UUID,
+) -> dict[str, Any]:
+    result = await _application(session).unpin_message(
+        owner_user_id=owner_user_id,
+        message_id=message_id,
+    )
+    return result.as_dict()
 
 
 async def send_message_stream(

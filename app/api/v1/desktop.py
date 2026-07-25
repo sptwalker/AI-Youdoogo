@@ -8,7 +8,7 @@ import uuid
 from typing import Annotated, Protocol
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +55,12 @@ class ChatSend(BaseModel):
 
     message: str = Field(min_length=1, max_length=4000)
     add_agent_ids: list[uuid.UUID] = Field(default_factory=list, max_length=2)
+    reply_to_message_id: uuid.UUID | None = None
+    attachments: list[dict[str, object]] = Field(default_factory=list)
+
+
+class _MessagePin(BaseModel):
+    message_id: uuid.UUID
 
 
 def _conversation_principal(user: _UserLike) -> Principal:
@@ -96,7 +102,72 @@ async def send_chat(body: ChatSend, db: DB, user: CurrentUser) -> StreamingRespo
                 principal=_conversation_principal(user),
                 message=body.message,
                 add_agent_ids=tuple(body.add_agent_ids),
+                reply_to_message_id=body.reply_to_message_id,
+                attachments=tuple(dict(value) for value in body.attachments),
             ),
+        )
+    )
+
+
+@router.post("/chat/attachments")
+async def upload_chat_attachment(
+    db: DB,
+    user: CurrentUser,
+    file: Annotated[UploadFile, File()],
+) -> dict:
+    """上传桌面对话附件（图片/文件）→ MinIO → 返回附件元数据供发消息带上。"""
+    return ok(
+        await assistant_conversations.upload_attachment(
+            db,
+            name=file.filename or "未命名",
+            content=await file.read(),
+            content_type=file.content_type or "application/octet-stream",
+        )
+    )
+
+
+@router.get("/chat/attachments/download")
+async def download_chat_attachment(
+    storage_path: Annotated[str, Query()],
+    name: Annotated[str, Query()],
+    db: DB,
+    user: CurrentUser,
+) -> StreamingResponse:
+    """下载桌面对话附件（storage_path=bucket/object）。"""
+    result = await assistant_conversations.download_attachment(
+        db,
+        storage_path=storage_path,
+        name=name,
+        user_id=user.id,
+    )
+    return StreamingResponse(
+        io.BytesIO(result.content),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(result.name)}"},
+    )
+
+
+@router.post("/chat/pin")
+async def pin_chat_message(body: _MessagePin, db: DB, user: CurrentUser) -> dict:
+    """置顶本人桌面对话中的一条消息。"""
+    return ok(
+        await assistant_conversations.pin_message(
+            db,
+            owner_user_id=user.id,
+            message_id=body.message_id,
+            pinned_by_user_id=user.id,
+        )
+    )
+
+
+@router.post("/chat/unpin")
+async def unpin_chat_message(body: _MessagePin, db: DB, user: CurrentUser) -> dict:
+    """取消置顶本人桌面对话中的一条消息。"""
+    return ok(
+        await assistant_conversations.unpin_message(
+            db,
+            owner_user_id=user.id,
+            message_id=body.message_id,
         )
     )
 

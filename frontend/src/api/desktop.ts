@@ -9,6 +9,9 @@ import {
   type SseHandler,
   type SseRequestOptions,
 } from './client'
+import type { Attachment } from './discussion'
+
+export type { Attachment } from './discussion'
 
 export interface PendingItem {
   kind: 'task' | 'proposal' | 'resolution' | 'collab'
@@ -42,6 +45,12 @@ export function getDesktop(userId?: string): Promise<Desktop> {
 }
 
 // ── 工作桌面对话（专属助理 + 圆桌多AI）──────────────────────────
+export interface ReplyPreview {
+  id: string
+  speaker_name: string
+  content: string
+}
+
 export interface DesktopMessage {
   id: string
   speaker_type: 'user' | 'ai'
@@ -49,6 +58,12 @@ export interface DesktopMessage {
   speaker_name: string
   content: string
   create_time: string
+  reply_to_message_id: string | null
+  reply_preview: ReplyPreview | null
+  attachments: Attachment[]
+  is_pinned: boolean
+  pinned_at: string | null
+  pinned_by_user_id: string | null
 }
 
 export interface AddableAgent {
@@ -71,12 +86,90 @@ export function getDesktopChat(): Promise<DesktopChat> {
 /** 发一条消息（可再加最多2个AI圆桌讨论），SSE 逐字流式回调：
  *  message_end(用户回显) → 每个 AI 依次 message_start → delta* → message_end。 */
 export function sendDesktopChat(
-  message: string,
-  addAgentIds: string[],
+  payload: {
+    message: string
+    addAgentIds: string[]
+    replyToMessageId?: string | null
+    attachments?: Attachment[]
+  },
   onEvent: SseHandler,
   options?: SseRequestOptions,
 ): Promise<void> {
-  return sseRequest('/desktop/chat', { message, add_agent_ids: addAgentIds }, onEvent, options)
+  return sseRequest(
+    '/desktop/chat',
+    {
+      message: payload.message,
+      add_agent_ids: payload.addAgentIds,
+      reply_to_message_id: payload.replyToMessageId ?? undefined,
+      attachments: payload.attachments ?? [],
+    },
+    onEvent,
+    options,
+  )
+}
+
+/** 上传桌面对话附件（图片/文件）→ 返回附件元数据。 */
+export async function uploadDesktopAttachment(file: File): Promise<Attachment> {
+  const form = new FormData()
+  form.append('file', file)
+  return request({ method: 'POST', url: '/desktop/chat/attachments', data: form })
+}
+
+function desktopAttachmentUrl(att: Attachment): string {
+  return `/api/v1/desktop/chat/attachments/download?storage_path=${encodeURIComponent(att.storage_path)}&name=${encodeURIComponent(att.name)}`
+}
+
+async function fetchProtectedBlob(url: string, defaultErrorMessage = '下载失败'): Promise<Blob> {
+  const token = localStorage.getItem(TOKEN_KEY)
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (resp.status === 401) {
+    if (!clearSessionAndRedirectToLogin()) message.error('未登录或登录已过期')
+    throw new ApiError('未登录或登录已过期')
+  }
+  if (!resp.ok) {
+    let errorMessage = defaultErrorMessage
+    try {
+      const body = await resp.json() as { msg?: string; detail?: string }
+      errorMessage = body.msg ?? body.detail ?? errorMessage
+    } catch {
+      // 非 JSON 错误体
+    }
+    message.error(errorMessage)
+    throw new ApiError(errorMessage)
+  }
+  return resp.blob()
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+/** 拉取桌面对话附件二进制，供图片预览和下载复用。 */
+export async function fetchDesktopAttachment(att: Attachment): Promise<Blob> {
+  return fetchProtectedBlob(desktopAttachmentUrl(att))
+}
+
+/** 下载桌面对话附件：Bearer 在 header 无法用 <a href> 直链，故 fetch 取 blob 触发保存。 */
+export async function downloadDesktopAttachment(att: Attachment): Promise<void> {
+  const blob = await fetchDesktopAttachment(att)
+  triggerBlobDownload(blob, att.name)
+}
+
+export function pinDesktopMessage(messageId: string): Promise<DesktopMessage> {
+  return request({ method: 'POST', url: '/desktop/chat/pin', data: { message_id: messageId } })
+}
+
+export function unpinDesktopMessage(messageId: string): Promise<DesktopMessage> {
+  return request({ method: 'POST', url: '/desktop/chat/unpin', data: { message_id: messageId } })
 }
 
 // ── 文件交付区（AI 交付的文档/表格）──────────────────────────
@@ -100,30 +193,6 @@ export function listDeliverables(userId?: string): Promise<Deliverable[]> {
 
 /** 下载一份交付物：Bearer 在 header 无法用 <a href> 直链，故 fetch 取 blob 触发保存。 */
 export async function downloadDeliverable(id: string, fileName: string): Promise<void> {
-  const token = localStorage.getItem(TOKEN_KEY)
-  const resp = await fetch(`/api/v1/desktop/deliverables/${id}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (resp.status === 401) {
-    if (!clearSessionAndRedirectToLogin()) message.error('未登录或登录已过期')
-    throw new ApiError('未登录或登录已过期')
-  }
-  if (!resp.ok) {
-    let errorMessage = '下载失败'
-    try {
-      const body = await resp.json() as { msg?: string; detail?: string }
-      errorMessage = body.msg ?? body.detail ?? errorMessage
-    } catch { /* 非 JSON 错误体 */ }
-    message.error(errorMessage)
-    throw new ApiError(errorMessage)
-  }
-  const blob = await resp.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = fileName
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  const blob = await fetchProtectedBlob(`/api/v1/desktop/deliverables/${id}/download`)
+  triggerBlobDownload(blob, fileName)
 }

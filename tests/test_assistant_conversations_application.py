@@ -25,14 +25,18 @@ from app.contexts.business.assistant_conversations.domain.models import (
     Assistant,
     ConversationMessage,
     Participant,
+    describe_user_turn,
+    direct_chat_prompt,
+    roundtable_prompt,
 )
-from app.contexts.shared_kernel import RuleViolation
+from app.contexts.shared_kernel import InvalidInput, PermissionDenied, RuleViolation
 
 
 class _Store:
     def __init__(self, messages: list[ConversationMessage] | None = None) -> None:
         self.messages = list(messages or [])
         self.commits = 0
+        self.objects: dict[str, bytes] = {}
 
 
 class _Repository:
@@ -63,12 +67,46 @@ class _Repository:
             if row.owner_user_id == owner_user_id and row.create_time < before
         ]
 
+    async def get_owned_message(
+        self, owner_user_id: uuid.UUID, message_id: uuid.UUID
+    ) -> ConversationMessage | None:
+        return next(
+            (
+                row
+                for row in self._store.messages
+                if row.owner_user_id == owner_user_id and row.id == message_id
+            ),
+            None,
+        )
+
+    async def list_pinned(self, owner_user_id: uuid.UUID) -> list[ConversationMessage]:
+        return [
+            row
+            for row in self._store.messages
+            if row.owner_user_id == owner_user_id and row.is_pinned
+        ]
+
     async def add(self, message: ConversationMessage) -> None:
         self._store.messages.append(message)
+
+    async def save(self, message: ConversationMessage) -> None:
+        for index, row in enumerate(self._store.messages):
+            if row.id == message.id:
+                self._store.messages[index] = message
+                return
 
     async def delete(self, message_ids: tuple[uuid.UUID, ...]) -> None:
         ids = set(message_ids)
         self._store.messages = [row for row in self._store.messages if row.id not in ids]
+
+    async def attachment_visible_to_user(self, *, storage_path: str, user_id: uuid.UUID) -> bool:
+        return any(
+            row.owner_user_id == user_id
+            and any(
+                attachment.get("storage_path") == storage_path for attachment in row.attachments
+            )
+            for row in self._store.messages
+        )
 
 
 class _UnitOfWork:
@@ -175,6 +213,18 @@ class _Archive:
             raise RuntimeError("index unavailable")
 
 
+class _Storage:
+    def __init__(self, store: _Store) -> None:
+        self._store = store
+
+    async def put(self, *, object_name: str, content: bytes, content_type: str) -> str:
+        self._store.objects[object_name] = content
+        return f"bucket/{object_name}"
+
+    async def get(self, *, object_name: str) -> bytes:
+        return self._store.objects[object_name]
+
+
 class _Clock:
     def __init__(self, now: datetime) -> None:
         self._now = now
@@ -188,10 +238,15 @@ class _Clock:
 class _Identifiers:
     def __init__(self) -> None:
         self._next = 100
+        self._object = 0
 
     def new_id(self) -> uuid.UUID:
         self._next += 1
         return uuid.UUID(int=self._next)
+
+    def new_object_token(self) -> str:
+        self._object += 1
+        return f"token-{self._object}"
 
 
 def _application(
@@ -210,6 +265,7 @@ def _application(
         agents=agents or _Agents(),
         orchestration=orchestration or _Orchestration(),
         archive_port=archive or _Archive(),
+        attachment_storage=_Storage(store),
         clock=_Clock(now or datetime(2026, 7, 23, tzinfo=UTC)),
         identifiers=_Identifiers(),
     )
@@ -248,8 +304,16 @@ async def test_roundtable_stream_owns_order_history_and_single_writes() -> None:
         "message_end",
     ]
     assert events[0].data["speaker_type"] == "user"
-    assert "之前的消息" in agents.requests[0].prompt
-    assert "reply1" in agents.requests[1].prompt
+    assert agents.requests[0].prompt == roundtable_prompt(
+        Participant(uuid.UUID(int=10), "爱丽丝的助理"),
+        (Participant(uuid.UUID(int=10), "爱丽丝的助理"), expert),
+        (("爱丽丝", "之前的消息"), ("爱丽丝", "帮我分析")),
+    )
+    assert agents.requests[1].prompt == roundtable_prompt(
+        expert,
+        (Participant(uuid.UUID(int=10), "爱丽丝的助理"), expert),
+        (("爱丽丝", "之前的消息"), ("爱丽丝", "帮我分析"), ("爱丽丝的助理", "reply1")),
+    )
     assert store.commits == 3
     assert [row.content for row in store.messages] == [
         "之前的消息",
@@ -257,6 +321,228 @@ async def test_roundtable_stream_owns_order_history_and_single_writes() -> None:
         "reply1",
         "reply2",
     ]
+
+
+async def test_single_assistant_uses_direct_chat_prompt() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    store = _Store(
+        [
+            ConversationMessage(
+                id=uuid.UUID(int=2),
+                owner_user_id=principal.id,
+                speaker_type=SPEAKER_USER,
+                speaker_name=principal.display_name,
+                content="上一条",
+                create_time=datetime(2026, 7, 22, tzinfo=UTC),
+            )
+        ]
+    )
+    assistants = _Assistants(principal.id)
+    agents = _Agents()
+    application = _application(store=store, assistants=assistants, agents=agents)
+
+    events = [
+        event
+        async for event in application.send_message_stream(
+            SendMessageCommand(principal, "请只回复：ok")
+        )
+    ]
+
+    assert [event.name for event in events] == [
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+    ]
+    assert agents.requests[0].prompt == direct_chat_prompt(
+        Participant(uuid.UUID(int=10), "爱丽丝的助理"),
+        (("爱丽丝", "上一条"), ("爱丽丝", "请只回复：ok")),
+    )
+    assert "圆桌对话记录" not in agents.requests[0].prompt
+
+
+def test_describe_user_turn_annotates_attachments() -> None:
+    image = {"type": "image", "name": "chart.png", "storage_path": "x", "size": 1}
+    doc = {"type": "file", "name": "报告.pdf", "storage_path": "y", "size": 2}
+    # 纯文字不加注
+    assert describe_user_turn("你好", ()) == "你好"
+    # 纯图片：占位符去掉，明确告知无法查看
+    only_image = describe_user_turn("[附件]", (image,))
+    assert "chart.png" in only_image
+    assert "无法查看图片内容" in only_image
+    assert "[附件]" not in only_image
+    # 图片+文字：正文保留 + 附件说明
+    with_text = describe_user_turn("看这个", (image, doc))
+    assert with_text.startswith("看这个")
+    assert "chart.png" in with_text
+    assert "报告.pdf" in with_text
+
+
+async def test_image_only_send_reaches_model_as_attachment_note() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    store = _Store(
+        [
+            ConversationMessage(
+                id=uuid.UUID(int=2),
+                owner_user_id=principal.id,
+                speaker_type=SPEAKER_USER,
+                speaker_name=principal.display_name,
+                content="上一条旧话题",
+                create_time=datetime(2026, 7, 22, tzinfo=UTC),
+            )
+        ]
+    )
+    agents = _Agents()
+    application = _application(store=store, assistants=_Assistants(principal.id), agents=agents)
+
+    _ = [
+        event
+        async for event in application.send_message_stream(
+            SendMessageCommand(
+                principal=principal,
+                message="[附件]",
+                attachments=(
+                    {"type": "image", "name": "photo.png", "storage_path": "z", "size": 3},
+                ),
+            )
+        )
+    ]
+
+    prompt = agents.requests[0].prompt
+    assert "photo.png" in prompt
+    assert "无法查看图片内容" in prompt
+
+
+async def test_send_message_persists_reply_preview_and_attachments() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    replied = ConversationMessage(
+        id=uuid.UUID(int=2),
+        owner_user_id=principal.id,
+        speaker_type=SPEAKER_USER,
+        speaker_name="同事A",
+        content="   这是一条需要被引用的原消息，用来验证 preview 会被裁剪成单行。   ",
+        create_time=datetime(2026, 7, 22, tzinfo=UTC),
+    )
+    store = _Store([replied])
+    application = _application(store=store, assistants=_Assistants(principal.id))
+
+    events = [
+        event
+        async for event in application.send_message_stream(
+            SendMessageCommand(
+                principal=principal,
+                message="收到，引用你这条",
+                reply_to_message_id=replied.id,
+                attachments=(
+                    {
+                        "type": "image",
+                        "name": "demo.png",
+                        "storage_path": "bucket/desktop-chat/token-1/demo.png",
+                        "size": 123,
+                    },
+                ),
+            )
+        )
+    ]
+
+    user_event = events[0].data
+    assert user_event["reply_to_message_id"] == str(replied.id)
+    assert user_event["reply_preview"] == {
+        "id": str(replied.id),
+        "speaker_name": "同事A",
+        "content": "这是一条需要被引用的原消息，用来验证 preview 会被裁剪成单行。",
+    }
+    assert user_event["attachments"] == [
+        {
+            "type": "image",
+            "name": "demo.png",
+            "storage_path": "bucket/desktop-chat/token-1/demo.png",
+            "size": 123,
+        }
+    ]
+
+
+async def test_pin_and_unpin_message_updates_flags() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    store = _Store(
+        [
+            ConversationMessage(
+                id=uuid.UUID(int=2),
+                owner_user_id=principal.id,
+                speaker_type=SPEAKER_USER,
+                speaker_name=principal.display_name,
+                content="可置顶",
+                create_time=datetime(2026, 7, 22, tzinfo=UTC),
+            )
+        ]
+    )
+    application = _application(store=store, assistants=_Assistants(principal.id))
+
+    pinned = await application.pin_message(
+        owner_user_id=principal.id,
+        message_id=uuid.UUID(int=2),
+        pinned_by_user_id=principal.id,
+    )
+    assert pinned.is_pinned is True
+    assert pinned.pinned_by_user_id == principal.id
+
+    unpinned = await application.unpin_message(
+        owner_user_id=principal.id,
+        message_id=uuid.UUID(int=2),
+    )
+    assert unpinned.is_pinned is False
+    assert unpinned.pinned_by_user_id is None
+
+
+async def test_upload_and_download_attachment_requires_visibility() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    store = _Store()
+    application = _application(store=store, assistants=_Assistants(principal.id))
+
+    attachment = await application.upload_attachment(
+        name="demo.png",
+        content=b"png-bytes",
+        content_type="image/png",
+    )
+    assert attachment.as_dict() == {
+        "type": "image",
+        "name": "demo.png",
+        "storage_path": "bucket/desktop-chat/token-1/demo.png",
+        "size": 9,
+    }
+
+    store.messages.append(
+        ConversationMessage(
+            id=uuid.UUID(int=2),
+            owner_user_id=principal.id,
+            speaker_type=SPEAKER_USER,
+            speaker_name=principal.display_name,
+            content="见图",
+            create_time=datetime(2026, 7, 22, tzinfo=UTC),
+            attachments=(attachment.as_dict(),),
+        )
+    )
+
+    downloaded = await application.download_attachment(
+        storage_path=attachment.storage_path,
+        name=attachment.name,
+        user_id=principal.id,
+    )
+    assert downloaded.content == b"png-bytes"
+
+    with pytest.raises(PermissionDenied, match="无权访问"):
+        await application.download_attachment(
+            storage_path=attachment.storage_path,
+            name=attachment.name,
+            user_id=uuid.UUID(int=99),
+        )
+
+    with pytest.raises(InvalidInput, match="非法附件路径"):
+        await application.download_attachment(
+            storage_path="bucket/other/token/demo.png",
+            name="demo.png",
+            user_id=principal.id,
+        )
 
 
 async def test_orchestration_preserves_payload_and_short_circuits_agent() -> None:
