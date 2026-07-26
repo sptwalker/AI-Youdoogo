@@ -29,7 +29,8 @@ export const ROLE_LABELS: Record<UserInfo['role_code'], string> = {
 }
 
 export function login(username: string, password: string): Promise<TokenData> {
-  return request({ method: 'POST', url: '/auth/login', data: { username, password } })
+  // silent：登录失败由登录表单内联展示，不弹右上角 toast（P2-29）。
+  return request({ method: 'POST', url: '/auth/login', data: { username, password }, silent: true })
 }
 
 export function fetchFeishuStatus(): Promise<{ enabled: boolean }> {

@@ -18,7 +18,7 @@ window.addEventListener('unhandledrejection', (e) => {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#3f7565' } }}>
       <RouterProvider router={router} />
     </ConfigProvider>
   </StrictMode>,
