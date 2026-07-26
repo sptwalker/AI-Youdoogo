@@ -1,5 +1,5 @@
-import { CloseOutlined, MessageOutlined, PaperClipOutlined, PushpinOutlined } from '@ant-design/icons'
-import { Button, Card, Input, List, Select, Space, Spin, Tag, Typography, Upload } from 'antd'
+import { CameraOutlined, CloseOutlined, MessageOutlined, PaperClipOutlined, PushpinOutlined, SearchOutlined } from '@ant-design/icons'
+import { Button, Card, Input, List, Popover, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
 import { useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import {
   fetchDesktopAttachment,
@@ -8,6 +8,8 @@ import {
   type DesktopMessage,
 } from '../../api/desktop'
 import type { OrchProgress } from '../../api/tasks'
+import { EmojiStickerButton } from '../../features/chat/EmojiStickerButton'
+import { captureScreenshot } from '../../features/chat/screenshot'
 import Markdown from '../Markdown'
 
 const TIME_SEPARATOR_GAP_MS = 3 * 60 * 1000
@@ -150,7 +152,15 @@ export default function AssistantChatCard(props: {
     setOrchestration,
   } = props
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
   const pinnedMessages = useMemo(() => sortPinnedMessages(chatMessages), [chatMessages])
+  const searchResults = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase()
+    if (!term) return []
+    return chatMessages.filter((item) => item.content.toLowerCase().includes(term))
+  }, [chatMessages, searchTerm])
 
   const scrollToMessage = (messageId: string) => {
     window.document.getElementById(`desktop-message-${messageId}`)?.scrollIntoView({
@@ -158,6 +168,47 @@ export default function AssistantChatCard(props: {
       block: 'center',
     })
   }
+
+  const handleScreenshot = async () => {
+    setCapturing(true)
+    try {
+      const file = await captureScreenshot()
+      if (file) await onUpload(file)
+    } catch (error) {
+      // 用户取消选屏会 reject，静默；仅在浏览器不支持时提示
+      if (error instanceof Error && error.message === 'unsupported') message.error('当前浏览器不支持截图')
+    } finally {
+      setCapturing(false)
+    }
+  }
+
+  const searchContent = (
+    <div style={{ width: 280 }}>
+      <Input
+        autoFocus
+        allowClear
+        placeholder="搜索当前对话"
+        prefix={<SearchOutlined />}
+        value={searchTerm}
+        onChange={(event) => setSearchTerm(event.target.value)}
+      />
+      <div style={{ maxHeight: 260, overflowY: 'auto', marginTop: 8 }}>
+        {searchTerm.trim() && searchResults.length === 0 && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>没有匹配的消息</Typography.Text>
+        )}
+        {searchResults.map((item) => (
+          <div
+            key={item.id}
+            onClick={() => { scrollToMessage(item.id); setSearchOpen(false) }}
+            style={{ cursor: 'pointer', padding: '6px 4px', borderBottom: '1px solid #f5f5f5', fontSize: 12 }}
+          >
+            <div style={{ color: '#888' }}>{item.speaker_name}</div>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.content}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 
   return (
     <Card
@@ -261,9 +312,8 @@ export default function AssistantChatCard(props: {
                     borderRadius: 8,
                     textAlign: 'left',
                     whiteSpace: mine ? 'pre-wrap' : 'normal',
-                    background: mine ? '#1677ff' : '#fff',
-                    color: mine ? '#fff' : undefined,
-                    border: mine ? undefined : '1px solid #eee',
+                    background: mine ? '#d6e8ff' : '#fff',
+                    border: mine ? '1px solid #b9d6ff' : '1px solid #eee',
                   }}
                 >
                   {chatMessage.reply_preview && (
@@ -271,8 +321,8 @@ export default function AssistantChatCard(props: {
                       marginBottom: 6,
                       padding: '6px 8px',
                       borderRadius: 6,
-                      background: mine ? 'rgba(255,255,255,0.18)' : '#f5f5f5',
-                      borderLeft: `3px solid ${mine ? 'rgba(255,255,255,0.75)' : '#91caff'}`,
+                      background: mine ? '#c2ddff' : '#f5f5f5',
+                      borderLeft: `3px solid ${mine ? '#1677ff' : '#91caff'}`,
                       fontSize: 12,
                     }}>
                       <div style={{ fontWeight: 600, marginBottom: 2 }}>{chatMessage.reply_preview.speaker_name}</div>
@@ -291,7 +341,7 @@ export default function AssistantChatCard(props: {
                               onDownload={onDownloadAttachment}
                             />
                           ) : (
-                            <a onClick={() => void onDownloadAttachment(attachment)} style={{ fontSize: 12, color: mine ? '#fff' : undefined }}>
+                            <a onClick={() => void onDownloadAttachment(attachment)} style={{ fontSize: 12 }}>
                               <PaperClipOutlined /> {attachment.name}
                             </a>
                           )}
@@ -389,18 +439,48 @@ export default function AssistantChatCard(props: {
         </div>
       )}
 
-      <Space.Compact style={{ width: '100%' }}>
-        <Upload beforeUpload={onUpload} showUploadList={false} multiple>
-          <Button loading={chatUploading} icon={<PaperClipOutlined />} />
-        </Upload>
-        <Input
-          placeholder="向你的助理提问，回车发送"
+      <div style={{ border: '1px solid #e8e8e8', borderRadius: 8, background: '#fff', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '2px 6px', borderBottom: '1px solid #f5f5f5' }}>
+          <EmojiStickerButton
+            variant="emoji"
+            type="text"
+            disabled={chatSending}
+            onInsertEmoji={(emoji) => setChatInput((prev) => prev + emoji)}
+            onPickSticker={onUpload}
+          />
+          <Button type="text" icon={<CameraOutlined />} loading={capturing} title="截图" onClick={() => void handleScreenshot()} />
+          <EmojiStickerButton
+            variant="sticker"
+            type="text"
+            disabled={chatSending}
+            onInsertEmoji={(emoji) => setChatInput((prev) => prev + emoji)}
+            onPickSticker={onUpload}
+          />
+          <Upload beforeUpload={onUpload} showUploadList={false} multiple>
+            <Button type="text" loading={chatUploading} icon={<PaperClipOutlined />} title="附件" />
+          </Upload>
+          <Popover content={searchContent} trigger="click" open={searchOpen} onOpenChange={setSearchOpen} placement="topLeft">
+            <Button type="text" icon={<SearchOutlined />} title="搜索聊天记录" />
+          </Popover>
+        </div>
+        <Input.TextArea
           value={chatInput}
           onChange={(event) => setChatInput(event.target.value)}
-          onPressEnter={() => void onSend()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              void onSend()
+            }
+          }}
+          placeholder="向你的助理提问（Enter 发送，Shift+Enter 换行）"
+          autoSize={{ minRows: 6, maxRows: 6 }}
+          variant="borderless"
+          style={{ resize: 'none', fontSize: 13 }}
         />
-        <Button type="primary" loading={chatSending} onClick={() => void onSend()}>发送</Button>
-      </Space.Compact>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 8px 8px' }}>
+          <Button loading={chatSending} onClick={() => void onSend()} style={{ minWidth: 88, background: '#d6e8ff', borderColor: '#b9d6ff', color: '#1677ff' }}>发送</Button>
+        </div>
+      </div>
     </Card>
   )
 }

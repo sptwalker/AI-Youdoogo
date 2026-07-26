@@ -57,7 +57,7 @@ function MessageItem({
 }) {
   const isAi = message.speaker_type === 'ai'
   return (
-    <div style={{ margin: '10px 6px' }}>
+    <div id={`group-message-${message.id}`} style={{ margin: '10px 6px' }}>
       <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>
         {isAi && <Tag color="blue" style={{ marginRight: 4 }}>AI</Tag>}
         {message.speaker_name}
