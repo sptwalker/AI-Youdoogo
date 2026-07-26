@@ -1,7 +1,10 @@
 /** 系统日志（F5b，仅 admin）：真人生效动作 / 配置 / 权限变更审计流。 */
 import { PageContainer, ProTable, type ProColumns } from '@ant-design/pro-components'
-import { Tag } from 'antd'
+import { Tag, Typography } from 'antd'
 import { listAuditLogs, type AuditLog as Log } from '../api/admin'
+
+// 后端上限 500 条、时间倒序;超过需服务端翻页(后端待补 offset/时间范围)。
+const MAX_LOGS = 500
 
 const columns: ProColumns<Log>[] = [
   { title: '时间', dataIndex: 'create_time', valueType: 'dateTime', search: false, width: 170 },
@@ -20,16 +23,32 @@ const columns: ProColumns<Log>[] = [
 
 export default function AuditLog() {
   return (
-    <PageContainer title="系统日志" subTitle="真人生效动作 / 配置 / 权限 变更审计（红线留痕）">
+    <PageContainer title="系统日志" subTitle={`真人生效动作 / 配置 / 权限 变更审计（红线留痕，最多显示最近 ${MAX_LOGS} 条）`}>
       <ProTable<Log>
         rowKey="id"
         columns={columns}
         search={{ labelWidth: 'auto' }}
         options={{ reload: true, density: false, setting: false }}
-        request={async (p) => ({
-          data: await listAuditLogs({ action: p.action as string | undefined }),
-          success: true,
-        })}
+        request={async (p) => {
+          try {
+            return {
+              data: await listAuditLogs({ action: p.action as string | undefined, limit: MAX_LOGS }),
+              success: true,
+            }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
+        expandable={{
+          rowExpandable: (r) => r.detail != null,
+          expandedRowRender: (r) => (
+            <Typography.Paragraph style={{ margin: 0 }}>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 12 }}>
+                {JSON.stringify(r.detail, null, 2)}
+              </pre>
+            </Typography.Paragraph>
+          ),
+        }}
         pagination={{ pageSize: 20 }}
       />
     </PageContainer>

@@ -42,6 +42,17 @@ export default function KnowledgeBases() {
     setGrants({ kb, rows: all.filter((g) => g.resource_id === kb.id) })
   }
 
+  // 授权对象 ID → 可读名称(复用已加载的 users/depts),AI 类型暂无名录退回短 ID。
+  const granteeName = (g: ResourceGrant): string => {
+    const short = `${g.grantee_id.slice(0, 8)}…`
+    if (g.grantee_type === 'department') return depts.find((d) => d.value === g.grantee_id)?.label ?? short
+    if (g.grantee_type === 'user') {
+      const u = users.find((x) => x.id === g.grantee_id)
+      return u ? u.real_name || u.username : short
+    }
+    return short
+  }
+
   const columns: ProColumns<KnowledgeBase>[] = [
     { title: '名称', dataIndex: 'name' },
     { title: '范围', dataIndex: 'scope', render: (_, r) => <Tag>{SCOPE_LABEL[r.scope] ?? r.scope}</Tag> },
@@ -74,7 +85,9 @@ export default function KnowledgeBases() {
         >
           <ProFormText name="name" label="名称" rules={[{ required: true }]} />
           <ProFormSelect name="is_confidential" label="机密" options={[{ value: true, label: '机密（仅本部门子树+授权+admin）' }, { value: false, label: '公开（默认全员可见）' }]} />
-          <ProFormSelect name="department_id" label="归属部门" options={depts} tooltip="改部门" />
+          {r.scope === 'department' && (
+            <ProFormSelect name="department_id" label="归属部门" options={depts} tooltip="改部门" />
+          )}
           <ProFormTextArea name="description" label="描述" />
         </ModalForm>,
         <a
@@ -107,7 +120,13 @@ export default function KnowledgeBases() {
         columns={columns}
         search={false}
         options={{ reload: true, density: false, setting: false }}
-        request={async () => ({ data: await listKnowledgeBases(), success: true })}
+        request={async () => {
+          try {
+            return { data: await listKnowledgeBases(), success: true }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
         pagination={false}
         toolBarRender={() => [
           <ModalForm
@@ -172,7 +191,7 @@ export default function KnowledgeBases() {
           <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #f0f0f0' }}>
             <Space>
               <Tag>{g.grantee_type === 'department' ? '部门' : g.grantee_type === 'agent' ? 'AI' : '用户'}</Tag>
-              <span style={{ fontSize: 12, color: '#666' }}>{g.grantee_id.slice(0, 8)}…</span>
+              <span style={{ fontSize: 12, color: '#666' }}>{granteeName(g)}</span>
               <Tag color="green">{g.perm}</Tag>
             </Space>
             <Popconfirm title="撤销此授权？" onConfirm={async () => { await revokeGrant(g.id); message.success('已撤销'); await openGrants(grants!.kb) }}>

@@ -154,8 +154,19 @@ export function DataSourceRegistry() {
       actionRef={actionRef}
       columns={columns}
       search={false}
-      options={{ reload: true, density: false, setting: false }}
-      request={async () => ({ data: await dataSourcesApi.listDataSources(), success: true })}
+      options={{ reload: true, density: false, setting: false, search: true }}
+      request={async (params) => {
+        try {
+          const all = await dataSourcesApi.listDataSources()
+          const kw = (params as { keyword?: string }).keyword?.trim().toLowerCase()
+          const data = kw
+            ? all.filter((d) => `${d.name}${d.code ?? ''}${d.type}`.toLowerCase().includes(kw))
+            : all
+          return { data, success: true }
+        } catch {
+          return { data: [], success: false }
+        }
+      }}
       pagination={false}
       toolBarRender={() => [
         <ModalForm<DataSourceCreateValues>

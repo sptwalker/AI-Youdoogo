@@ -1,20 +1,53 @@
-import { ProTable, type ProColumns } from '@ant-design/pro-components'
+import { ModalForm, ProFormText, ProTable, type ProColumns } from '@ant-design/pro-components'
 import { Button, Card, Popconfirm, Select, Space, Tag } from 'antd'
+import type { ReactElement } from 'react'
 import type { UserInfo } from '../../api/auth'
 import { TIER_LABEL, type Employee, type OrgNode } from '../../api/org'
 import EmployeeForm, { type EmployeeFormValues } from './EmployeeForm'
 
 const TIER_COLOR: Record<string, string> = { exec: 'red', director: 'blue', member: 'default' }
 
+/** 部门名输入弹窗:替代原生 prompt,统一 trim + 必填 + 长度校验。 */
+function DeptNameForm(props: {
+  title: string
+  trigger: ReactElement
+  initialName?: string
+  onSubmit: (name: string) => Promise<void>
+}) {
+  return (
+    <ModalForm<{ name: string }>
+      title={props.title}
+      trigger={props.trigger}
+      width={420}
+      modalProps={{ destroyOnHidden: true }}
+      initialValues={props.initialName ? { name: props.initialName } : undefined}
+      onFinish={async ({ name }) => {
+        await props.onSubmit(name.trim())
+        return true
+      }}
+    >
+      <ProFormText
+        name="name"
+        label="部门名称"
+        rules={[
+          { required: true, message: '请输入部门名称' },
+          { max: 50, message: '不超过 50 字' },
+          { whitespace: true, message: '不能为空白' },
+        ]}
+      />
+    </ModalForm>
+  )
+}
+
 export default function OrgNodeEditor(props: {
   employees: Employee[]
   node: OrgNode
   users: UserInfo[]
   onAddEmployee: (value: EmployeeFormValues) => Promise<void>
-  onAddSubDepartment: (label: string) => Promise<void>
+  onAddSubDepartment: (label: string, name: string) => Promise<void>
   onDeleteEmployee: (employeeId: string) => Promise<void>
   onDeleteNode: () => Promise<void>
-  onRename: () => Promise<void>
+  onRename: (name: string) => Promise<void>
   onSetSupervisor: (userId: string | null) => Promise<void>
   onUpdateEmployee: (employeeId: string, value: EmployeeFormValues) => Promise<void>
 }) {
@@ -51,7 +84,14 @@ export default function OrgNodeEditor(props: {
         <Space>
           <span>{node.name}</span>
           <Tag>{node.node_type}</Tag>
-          {node.node_type !== 'company' && <a onClick={() => void props.onRename()}>改名</a>}
+          {node.node_type !== 'company' && (
+            <DeptNameForm
+              title={`重命名 · ${node.name}`}
+              trigger={<a>改名</a>}
+              initialName={node.name}
+              onSubmit={props.onRename}
+            />
+          )}
         </Space>
       }
       style={{ flex: 1 }}
@@ -65,8 +105,20 @@ export default function OrgNodeEditor(props: {
             options={users.map((user) => ({ value: user.id, label: user.real_name || user.username }))}
             onChange={(value) => void props.onSetSupervisor(value ?? null)}
           />
-          {node.node_type === 'company' && <Button size="small" onClick={() => void props.onAddSubDepartment('一级部门')}>+ 一级部门</Button>}
-          {node.node_type === 'dept_l1' && <Button size="small" onClick={() => void props.onAddSubDepartment('二级部门')}>+ 二级部门</Button>}
+          {node.node_type === 'company' && (
+            <DeptNameForm
+              title="新建一级部门"
+              trigger={<Button size="small">+ 一级部门</Button>}
+              onSubmit={(name) => props.onAddSubDepartment('一级部门', name)}
+            />
+          )}
+          {node.node_type === 'dept_l1' && (
+            <DeptNameForm
+              title="新建二级部门"
+              trigger={<Button size="small">+ 二级部门</Button>}
+              onSubmit={(name) => props.onAddSubDepartment('二级部门', name)}
+            />
+          )}
           {node.node_type !== 'company' && (
             <Popconfirm title="删除该部门？（有子部门/员工会被拒绝）" onConfirm={props.onDeleteNode}>
               <Button size="small" danger>删除部门</Button>

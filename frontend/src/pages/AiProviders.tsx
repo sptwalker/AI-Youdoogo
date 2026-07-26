@@ -2,7 +2,7 @@
  *  新增卡片（名称/档位/地址/Key/模型）→ 自动测连通 → 设主用/启停/编辑/删；顶部一键检测全部。
  *  绿灯=正常 / 红灯=异常 / 灰灯=禁用或未测。密钥只显示末4位提示，不回显明文。 */
 import { ModalForm, PageContainer, ProFormSelect, ProFormText } from '@ant-design/pro-components'
-import { Badge, Button, Card, Col, Empty, Popconfirm, Row, Space, Tag, Tooltip, message } from 'antd'
+import { Badge, Button, Card, Col, Empty, Popconfirm, Row, Space, Spin, Tag, Tooltip, message } from 'antd'
 import { useEffect, useState } from 'react'
 import {
   createProvider,
@@ -17,6 +17,7 @@ import {
   type AiProvider,
   type Tier,
 } from '../api/aiProviders'
+import { usePendingActions } from '../hooks/usePendingActions'
 
 const TIER_OPTIONS = [
   { value: 'daily', label: '日常（daily）· 普通任务' },
@@ -48,9 +49,20 @@ const cardForm = (
 
 export default function AiProviders() {
   const [cards, setCards] = useState<AiProvider[]>([])
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const pending = usePendingActions()
 
-  const load = () => listProviders().then(setCards)
+  const load = async () => {
+    setLoading(true)
+    try {
+      setCards(await listProviders())
+    } catch {
+      message.error('加载 AI 卡片失败，请重试')
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => {
     void load()
   }, [])
@@ -101,16 +113,23 @@ export default function AiProviders() {
           )}
         </div>
         <Space wrap style={{ marginTop: 12 }}>
-          <a onClick={() => runTest(p.id)}>测试</a>
+          <Button type="link" size="small" style={{ padding: 0 }}
+            loading={pending.isPending(`test:${p.id}`)}
+            onClick={() => void pending.run(`test:${p.id}`, () => runTest(p.id)).catch(() => {})}
+          >测试</Button>
           {!p.is_primary && p.is_active && (
-            <a onClick={async () => { await setPrimary(p.id); message.success('已设为主用'); await load() }}>设主用</a>
+            <Button type="link" size="small" style={{ padding: 0 }}
+              loading={pending.isPending(`primary:${p.id}`)}
+              onClick={() => void pending.run(`primary:${p.id}`, async () => { await setPrimary(p.id); message.success('已设为主用'); await load() }).catch(() => {})}
+            >设主用</Button>
           )}
-          <a onClick={async () => { await toggleActive(p.id, !p.is_active); await load() }}>
-            {p.is_active ? '禁用' : '启用'}
-          </a>
+          <Button type="link" size="small" style={{ padding: 0 }}
+            loading={pending.isPending(`toggle:${p.id}`)}
+            onClick={() => void pending.run(`toggle:${p.id}`, async () => { await toggleActive(p.id, !p.is_active); await load() }).catch(() => {})}
+          >{p.is_active ? '禁用' : '启用'}</Button>
           <ModalForm
             title={`编辑 · ${p.name}`}
-            trigger={<a>编辑</a>}
+            trigger={<Button type="link" size="small" style={{ padding: 0 }}>编辑</Button>}
             modalProps={{ destroyOnHidden: true }}
             initialValues={{ name: p.name, tier: p.tier, base_url: p.base_url, model: p.model }}
             onFinish={async (v) => {
@@ -128,8 +147,11 @@ export default function AiProviders() {
             <ProFormText.Password name="api_key" label="API Key（留空不改）"
               tooltip="留空则保留原有密钥；填写则覆盖" />
           </ModalForm>
-          <Popconfirm title="删除此卡片？" onConfirm={async () => { await deleteProvider(p.id); message.success('已删除'); await load() }}>
-            <a style={{ color: '#cf1322' }}>删除</a>
+          <Popconfirm title="删除此卡片？"
+            okButtonProps={{ danger: true, loading: pending.isPending(`delete:${p.id}`) }}
+            onConfirm={() => pending.run(`delete:${p.id}`, async () => { await deleteProvider(p.id); message.success('已删除'); await load() }).catch(() => {})}
+          >
+            <Button type="link" size="small" danger style={{ padding: 0 }}>删除</Button>
           </Popconfirm>
         </Space>
       </Card>
@@ -138,7 +160,9 @@ export default function AiProviders() {
 
   const section = (title: string, list: AiProvider[]) => (
     <Card title={title} size="small" style={{ marginBottom: 16 }} styles={{ body: { paddingBottom: 0 } }}>
-      {list.length ? <Row gutter={16}>{list.map(renderCard)}</Row> : <Empty description="暂无卡片" />}
+      <Spin spinning={loading}>
+        {list.length ? <Row gutter={16}>{list.map(renderCard)}</Row> : <Empty description="暂无卡片" />}
+      </Spin>
     </Card>
   )
 

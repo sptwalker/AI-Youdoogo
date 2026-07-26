@@ -77,9 +77,8 @@ export default function OrgAdmin() {
     await refreshEmployees(node.id)
   }
 
-  const addSubDepartment = async (label: string) => {
-    const name = prompt(`${label}名称`)
-    if (!name || !selected) return
+  const addSubDepartment = async (label: string, name: string) => {
+    if (!selected) return
     await createNode({ name, parent_id: selected.id })
     message.success(`已新建${label}`)
     await refreshTree()
@@ -109,9 +108,8 @@ export default function OrgAdmin() {
           <OrgNodeEditor
             node={selected} users={users} employees={employees}
             onAddSubDepartment={addSubDepartment}
-            onRename={async () => {
-              const name = prompt('新部门名', selected.name)
-              if (!name || name === selected.name) return
+            onRename={async (name) => {
+              if (name === selected.name) return
               await updateNode(selected.id, { name })
               message.success('已改名')
               await refreshTree()
