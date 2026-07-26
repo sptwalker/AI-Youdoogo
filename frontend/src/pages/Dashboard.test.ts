@@ -4,7 +4,7 @@ import {
   mergeDesktopChatMessages,
   reconcileDesktopMessageEnd,
   startDesktopStreamingMessage,
-} from './Dashboard'
+} from '../components/dashboard/desktopChatModel'
 
 function message(overrides: Partial<DesktopMessage> = {}): DesktopMessage {
   return {

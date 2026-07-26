@@ -47,13 +47,21 @@ function formatExactTimestamp(messageTime: Date): string {
   return messageTime.toLocaleString()
 }
 
-function InlineImage(props: { attachment: Attachment; onDownload: (attachment: Attachment) => Promise<void> }) {
-  const { attachment, onDownload } = props
+function InlineImage(props: {
+  attachment: Attachment
+  canPreview: boolean
+  onDownload: (attachment: Attachment) => Promise<void>
+}) {
+  const { attachment, canPreview, onDownload } = props
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let disposed = false
     let objectUrl: string | null = null
+    if (!canPreview) {
+      setPreviewUrl(null)
+      return () => {}
+    }
     void fetchDesktopAttachment(attachment)
       .then((blob) => {
         if (disposed) return
@@ -67,7 +75,7 @@ function InlineImage(props: { attachment: Attachment; onDownload: (attachment: A
       disposed = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [attachment])
+  }, [attachment, canPreview])
 
   if (!previewUrl) {
     return (
@@ -277,7 +285,11 @@ export default function AssistantChatCard(props: {
                       {chatMessage.attachments.map((attachment, attachmentIndex) => (
                         <div key={`${chatMessage.id}-${attachment.storage_path}-${attachmentIndex}`}>
                           {attachment.type === 'image' ? (
-                            <InlineImage attachment={attachment} onDownload={onDownloadAttachment} />
+                            <InlineImage
+                              attachment={attachment}
+                              canPreview={Boolean(chatMessage.create_time)}
+                              onDownload={onDownloadAttachment}
+                            />
                           ) : (
                             <a onClick={() => void onDownloadAttachment(attachment)} style={{ fontSize: 12, color: mine ? '#fff' : undefined }}>
                               <PaperClipOutlined /> {attachment.name}

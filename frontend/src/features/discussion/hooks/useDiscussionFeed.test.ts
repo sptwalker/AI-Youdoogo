@@ -74,6 +74,7 @@ function createApi(overrides: Partial<DiscussionWorkspaceApi> = {}) {
   return {
     api,
     cancel,
+    emitEvent: (event: string, data: Record<string, unknown>) => onEvent?.(event, data),
     emitMessage: (incoming: Message) => onEvent?.('message', incoming as unknown as Record<string, unknown>),
     emitState: (state: 'connecting' | 'connected' | 'disconnected') => onState?.(state),
   }
@@ -126,7 +127,7 @@ afterEach(() => {
 describe('useDiscussionFeed', () => {
   it('owns realtime delivery, read acknowledgement, polling transitions, refresh, and cleanup', async () => {
     vi.useFakeTimers()
-    const { api, cancel, emitMessage, emitState } = createApi({
+    const { api, cancel, emitEvent, emitMessage, emitState } = createApi({
       listMessages: vi.fn().mockResolvedValue([message('initial', 'channel-a')]),
     })
     const rendered = await renderFeed({ activeChannelId: 'channel-a', api })
@@ -141,6 +142,8 @@ describe('useDiscussionFeed', () => {
     expect(rendered.current.channels.find((channel) => channel.id === 'channel-a')?.unread).toBe(0)
 
     await act(async () => {
+      emitEvent('ready', { channels: 2 })
+      emitEvent('ping', {})
       emitMessage(message('background', 'channel-b'))
       emitMessage(message('live-1', 'channel-a'))
       emitMessage(message('live-2', 'channel-a'))

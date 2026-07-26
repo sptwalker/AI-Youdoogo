@@ -3,7 +3,8 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
-import type { DesktopMessage } from '../../api/desktop'
+import * as desktopApi from '../../api/desktop'
+import type { Attachment, DesktopMessage } from '../../api/desktop'
 import AssistantChatCard, { parseMessageTime, shouldShowTimeSeparator, sortPinnedMessages } from './AssistantChatCard'
 
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
@@ -25,6 +26,32 @@ function pinnedMessage(): DesktopMessage {
     is_pinned: true,
     pinned_at: '2026-07-24T08:05:00Z',
     pinned_by_user_id: 'u',
+  }
+}
+
+function imageAttachment(): Attachment {
+  return {
+    name: 'diagram.png',
+    storage_path: 'desktop-chat/demo/diagram.png',
+    size: 123,
+    type: 'image',
+  }
+}
+
+function imageMessage(createTime = ''): DesktopMessage {
+  return {
+    id: 'img-1',
+    speaker_type: 'user',
+    speaker_agent_id: null,
+    speaker_name: '我',
+    content: '[附件]',
+    create_time: createTime,
+    reply_to_message_id: null,
+    reply_preview: null,
+    attachments: [imageAttachment()],
+    is_pinned: false,
+    pinned_at: null,
+    pinned_by_user_id: null,
   }
 }
 
@@ -143,6 +170,76 @@ describe('pinned banner', () => {
     expect(onPinToggle).toHaveBeenCalledTimes(1)
     expect(onPinToggle.mock.calls[0][0]).toMatchObject({ id: '7', is_pinned: true })
     await act(async () => mounted.unmount())
+    host.remove()
+  })
+})
+
+describe('inline image preview gating', () => {
+  it('waits for a persisted message before fetching the protected image blob', async () => {
+    const fetchDesktopAttachment = vi
+      .spyOn(desktopApi, 'fetchDesktopAttachment')
+      .mockResolvedValue(new Blob(['x'], { type: 'image/png' }))
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const mounted = createRoot(host)
+
+    await act(async () => mounted.render(createElement(AssistantChatCard, {
+      addable: [],
+      addAgentIds: [],
+      assistant: { id: 'x', name: '助理' },
+      chatBoxRef: { current: null },
+      chatInput: '',
+      chatMessages: [imageMessage('')],
+      chatSending: false,
+      chatUploading: false,
+      pendingAttachments: [],
+      replyingTo: null,
+      orchestration: null,
+      onAcceptStep: vi.fn(),
+      onCancelReply: vi.fn(),
+      onDownloadAttachment: vi.fn(),
+      onPinToggle: vi.fn(),
+      onRemoveAttachment: vi.fn(),
+      onReply: vi.fn(),
+      onSend: vi.fn(),
+      onUpload: vi.fn(),
+      setAddAgentIds: vi.fn(),
+      setChatInput: vi.fn(),
+      setOrchestration: vi.fn(),
+    })))
+
+    expect(fetchDesktopAttachment).not.toHaveBeenCalled()
+
+    await act(async () => mounted.render(createElement(AssistantChatCard, {
+      addable: [],
+      addAgentIds: [],
+      assistant: { id: 'x', name: '助理' },
+      chatBoxRef: { current: null },
+      chatInput: '',
+      chatMessages: [imageMessage('2026-07-24T08:00:00Z')],
+      chatSending: false,
+      chatUploading: false,
+      pendingAttachments: [],
+      replyingTo: null,
+      orchestration: null,
+      onAcceptStep: vi.fn(),
+      onCancelReply: vi.fn(),
+      onDownloadAttachment: vi.fn(),
+      onPinToggle: vi.fn(),
+      onRemoveAttachment: vi.fn(),
+      onReply: vi.fn(),
+      onSend: vi.fn(),
+      onUpload: vi.fn(),
+      setAddAgentIds: vi.fn(),
+      setChatInput: vi.fn(),
+      setOrchestration: vi.fn(),
+    })))
+
+    expect(fetchDesktopAttachment).toHaveBeenCalledTimes(1)
+
+    await act(async () => mounted.unmount())
+    fetchDesktopAttachment.mockRestore()
     host.remove()
   })
 })

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   loginRedirectPath,
+  parseStreamEvent,
   request,
   sseRequest,
   sseSubscribe,
@@ -33,6 +34,35 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   localStorage.clear()
+})
+
+describe('stream event parsing', () => {
+  it('normalizes typed stream payloads without changing wire event names', () => {
+    expect(parseStreamEvent<{ id: string }>('message_start', {
+      speaker_agent_id: 'agent-1',
+      speaker_name: 'Planner',
+    })).toEqual({
+      type: 'message_start',
+      payload: { speaker_agent_id: 'agent-1', speaker_name: 'Planner' },
+    })
+
+    expect(parseStreamEvent<{ id: string }>('delta', { text: 123 })).toEqual({
+      type: 'delta',
+      payload: { text: '123' },
+    })
+
+    expect(parseStreamEvent<{ id: string }>('message_end', { id: 'm-1' })).toEqual({
+      type: 'message_end',
+      payload: { id: 'm-1' },
+    })
+
+    expect(parseStreamEvent<{ id: string }, { step: number }>('orchestration', { step: 2 })).toEqual({
+      type: 'orchestration',
+      payload: { step: 2 },
+    })
+
+    expect(parseStreamEvent('unknown', { x: 1 })).toBeNull()
+  })
 })
 
 describe('authentication failures', () => {

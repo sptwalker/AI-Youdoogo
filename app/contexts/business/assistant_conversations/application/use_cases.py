@@ -328,7 +328,7 @@ class AssistantConversationsApplication:
         )
         model_turn = describe_user_turn(command.message, command.attachments)
         conversation.append((principal.display_name, model_turn))
-        yield ConversationStreamEvent("message_end", _message_result(user_message).as_dict())
+        yield ConversationStreamEvent.message_persisted(_message_result(user_message))
 
         orchestration = await self._try_start_orchestration(command, participants)
         if orchestration is not None:
@@ -420,12 +420,9 @@ class AssistantConversationsApplication:
             prompt = direct_chat_prompt(participant, tuple(conversation))
         else:
             prompt = roundtable_prompt(participant, participants, tuple(conversation))
-        yield ConversationStreamEvent(
-            "message_start",
-            {
-                "speaker_agent_id": str(participant.id),
-                "speaker_name": participant.name,
-            },
+        yield ConversationStreamEvent.turn_started(
+            speaker_agent_id=participant.id,
+            speaker_name=participant.name,
         )
         completed = None
         async for agent_event in self._agents.stream(
@@ -437,7 +434,7 @@ class AssistantConversationsApplication:
             )
         ):
             if agent_event.name == "delta":
-                yield ConversationStreamEvent("delta", {"text": agent_event.text})
+                yield ConversationStreamEvent.delta(agent_event.text)
             elif agent_event.name == "complete":
                 completed = agent_event
         if completed is None:
@@ -451,7 +448,7 @@ class AssistantConversationsApplication:
             content=completed.content,
         )
         conversation.append((participant.name, completed.content))
-        yield ConversationStreamEvent("message_end", _message_result(ai_message).as_dict())
+        yield ConversationStreamEvent.message_persisted(_message_result(ai_message))
 
         async for stream_event in self._emit_consulted_replies(
             principal_id=command.principal.id,
@@ -468,14 +465,11 @@ class AssistantConversationsApplication:
         conversation: list[tuple[str, str]],
     ) -> AsyncIterator[ConversationStreamEvent]:
         for consulted in consultations:
-            yield ConversationStreamEvent(
-                "message_start",
-                {
-                    "speaker_agent_id": str(consulted.participant_id),
-                    "speaker_name": consulted.participant_name,
-                },
+            yield ConversationStreamEvent.turn_started(
+                speaker_agent_id=consulted.participant_id,
+                speaker_name=consulted.participant_name,
             )
-            yield ConversationStreamEvent("delta", {"text": consulted.content})
+            yield ConversationStreamEvent.delta(consulted.content)
             message = await self._save_message(
                 owner_user_id=principal_id,
                 speaker_type=SPEAKER_AI,
@@ -484,7 +478,7 @@ class AssistantConversationsApplication:
                 content=consulted.content,
             )
             conversation.append((consulted.participant_name, consulted.content))
-            yield ConversationStreamEvent("message_end", _message_result(message).as_dict())
+            yield ConversationStreamEvent.message_persisted(_message_result(message))
 
     async def emit_orchestration(
         self,
@@ -493,7 +487,7 @@ class AssistantConversationsApplication:
         assistant: Participant,
         orchestration: OrchestrationResult,
     ) -> AsyncIterator[ConversationStreamEvent]:
-        yield ConversationStreamEvent("orchestration", dict(orchestration.payload))
+        yield ConversationStreamEvent.orchestration_snapshot(orchestration.payload)
         message = await self._save_message(
             owner_user_id=principal_id,
             speaker_type=SPEAKER_AI,
@@ -501,7 +495,7 @@ class AssistantConversationsApplication:
             speaker_name=assistant.name,
             content=progress_text(orchestration.payload),
         )
-        yield ConversationStreamEvent("message_end", _message_result(message).as_dict())
+        yield ConversationStreamEvent.message_persisted(_message_result(message))
 
     async def _history_days(self) -> int:
         return await self._configuration.integer("desktop_history_days", _DEFAULT_HISTORY_DAYS)

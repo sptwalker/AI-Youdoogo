@@ -12,7 +12,7 @@ export default function DashboardSidebar(props: {
 }) {
   const { data, deliverables, isSupervising, onDownload, onNavigate, onRefreshDeliverables } = props
   return (
-    <div style={{ height: 'calc(100vh - 130px)', minHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
+    <div style={{ height: '100%', minHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
       {!isSupervising && (
         <Card title="发起需求">
           <Space wrap>

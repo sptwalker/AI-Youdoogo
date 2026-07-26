@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { groupChatApi, type GroupChatApi } from '../api'
+import { useStreamingSend } from './useStreamingSend'
 
 interface UseAdvisorComposerOptions {
   channelId: string
@@ -25,38 +26,17 @@ export function useAdvisorComposer({
 }: UseAdvisorComposerOptions): AdvisorComposerState {
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<string[]>([])
-  const [sending, setSending] = useState(false)
-  const sendingRef = useRef(false)
-  const activeRequestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => () => activeRequestRef.current?.abort(), [])
+  const { sending, sendingRef, submit } = useStreamingSend(clearStreamingMessage)
 
   const send = useCallback(async () => {
     const content = text.trim()
     if (!content || sendingRef.current) return
-    const controller = new AbortController()
-    activeRequestRef.current = controller
-    sendingRef.current = true
-    setSending(true)
-    try {
-      await api.postMessage(
-        channelId,
-        content,
-        mentions.slice(0, 3),
-        ingestStreamEvent,
-        [],
-        { signal: controller.signal },
-      )
+    await submit(async (signal) => {
+      await api.postMessage(channelId, content, mentions.slice(0, 3), ingestStreamEvent, [], { signal })
       setText('')
       setMentions([])
-    } catch {
-      clearStreamingMessage()
-    } finally {
-      if (activeRequestRef.current === controller) activeRequestRef.current = null
-      sendingRef.current = false
-      setSending(false)
-    }
-  }, [api, channelId, clearStreamingMessage, ingestStreamEvent, mentions, text])
+    })
+  }, [api, channelId, ingestStreamEvent, mentions, sendingRef, submit, text])
 
   return { text, mentions, sending, setText, setMentions, send }
 }

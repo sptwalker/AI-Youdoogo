@@ -175,3 +175,32 @@ class OrchestrationResult:
 class ConversationStreamEvent:
     name: str
     data: dict[str, Any]
+
+    @classmethod
+    def message_persisted(cls, message: MessageResult) -> ConversationStreamEvent:
+        return cls("message_end", message.as_dict())
+
+    @classmethod
+    def turn_started(
+        cls,
+        *,
+        speaker_agent_id: uuid.UUID,
+        speaker_name: str,
+    ) -> ConversationStreamEvent:
+        return cls(
+            "message_start",
+            {
+                "speaker_agent_id": str(speaker_agent_id),
+                "speaker_name": speaker_name,
+            },
+        )
+
+    @classmethod
+    def delta(cls, text: str) -> ConversationStreamEvent:
+        return cls("delta", {"text": text})
+
+    @classmethod
+    def orchestration_snapshot(
+        cls, payload: Mapping[str, object]
+    ) -> ConversationStreamEvent:
+        return cls("orchestration", dict(payload))

@@ -50,8 +50,21 @@ export interface Message {
   create_time: string
 }
 
+export interface RealtimeMessageEvent {
+  type: 'message'
+  payload: Message
+}
+
 export interface ChannelWithUnread extends Channel {
   unread: number
+}
+
+export function parseRealtimeMessageEvent(
+  event: string,
+  data: Record<string, unknown>,
+): RealtimeMessageEvent | null {
+  if (event !== 'message') return null
+  return { type: 'message', payload: data as unknown as Message }
 }
 
 /** 我的群 + 未读数（I5，话题页签用）。 */

@@ -109,6 +109,56 @@ export async function request<T>(config: RequestConfig): Promise<T> {
 // ── SSE（AI 对话逐字流式）────────────────────────────────
 export type SseHandler = (event: string, data: Record<string, unknown>) => void
 
+export interface StreamTurnStartPayload {
+  speaker_agent_id: string | null
+  speaker_name: string
+}
+
+export interface StreamDeltaPayload {
+  text: string
+}
+
+export type ParsedStreamEvent<
+  TPersistedMessage,
+  TOrchestration = never,
+> =
+  | { type: 'message_start'; payload: StreamTurnStartPayload }
+  | { type: 'delta'; payload: StreamDeltaPayload }
+  | { type: 'message_end'; payload: TPersistedMessage }
+  | { type: 'orchestration'; payload: TOrchestration }
+  | { type: 'done'; payload: Record<string, unknown> }
+
+export function parseStreamEvent<
+  TPersistedMessage,
+  TOrchestration = never,
+>(
+  event: string,
+  data: Record<string, unknown>,
+): ParsedStreamEvent<TPersistedMessage, TOrchestration> | null {
+  if (event === 'message_start') {
+    return {
+      type: 'message_start',
+      payload: {
+        speaker_agent_id: typeof data.speaker_agent_id === 'string' ? data.speaker_agent_id : null,
+        speaker_name: String(data.speaker_name ?? ''),
+      },
+    }
+  }
+  if (event === 'delta') {
+    return { type: 'delta', payload: { text: String(data.text ?? '') } }
+  }
+  if (event === 'message_end') {
+    return { type: 'message_end', payload: data as TPersistedMessage }
+  }
+  if (event === 'orchestration') {
+    return { type: 'orchestration', payload: data as TOrchestration }
+  }
+  if (event === 'done') {
+    return { type: 'done', payload: data }
+  }
+  return null
+}
+
 export type SseConnectionState = 'connecting' | 'connected' | 'disconnected'
 
 export interface SseSubscribeOptions {

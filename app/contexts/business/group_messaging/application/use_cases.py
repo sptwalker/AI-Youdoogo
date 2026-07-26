@@ -286,8 +286,9 @@ class GroupMessagingApplication:
         self, command: PostMessageCommand
     ) -> AsyncIterator[MessageStreamEvent]:
         channel, human = await self._save_human_message(command)
-        human_data = _message_result(human).as_dict()
-        yield MessageStreamEvent("message_end", human_data)
+        human_result = _message_result(human)
+        human_data = human_result.as_dict()
+        yield MessageStreamEvent.message_persisted(human_result)
         await self._realtime_delivery.publish(command.channel_id, "message", human_data)
 
         targets = deduplicate_mentions(command.mentioned_agent_ids)
@@ -359,8 +360,9 @@ class GroupMessagingApplication:
             if reply_event.name != "complete" or reply_event.speaker_agent_id is None:
                 continue
             ai_message = await self._save_ai_message(command.channel_id, reply_event)
-            ai_data = _message_result(ai_message).as_dict()
-            yield MessageStreamEvent("message_end", ai_data)
+            ai_result = _message_result(ai_message)
+            ai_data = ai_result.as_dict()
+            yield MessageStreamEvent.message_persisted(ai_result)
             if reply_event.publish_realtime:
                 await self._realtime_delivery.publish(command.channel_id, "message", ai_data)
 
@@ -369,15 +371,12 @@ class GroupMessagingApplication:
         reply_event: AgentReplyStreamEvent,
     ) -> MessageStreamEvent | None:
         if reply_event.name == "start":
-            return MessageStreamEvent(
-                "message_start",
-                {
-                    "speaker_agent_id": str(reply_event.speaker_agent_id),
-                    "speaker_name": reply_event.speaker_name,
-                },
+            return MessageStreamEvent.turn_started(
+                speaker_agent_id=reply_event.speaker_agent_id,
+                speaker_name=reply_event.speaker_name,
             )
         if reply_event.name == "delta":
-            return MessageStreamEvent("delta", {"text": reply_event.text})
+            return MessageStreamEvent.delta(reply_event.text)
         return None
 
     async def _save_ai_message(

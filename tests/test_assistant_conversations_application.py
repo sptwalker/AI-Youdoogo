@@ -590,6 +590,47 @@ async def test_orchestration_preserves_payload_and_short_circuits_agent() -> Non
     assert store.commits == 2
 
 
+async def test_attachments_skip_orchestration_and_fall_back_to_direct_reply() -> None:
+    principal = Principal(uuid.UUID(int=1), "爱丽丝")
+    store = _Store()
+    agents = _Agents()
+    orchestration = _Orchestration(OrchestrationResult({"done": False}))
+    application = _application(
+        store=store,
+        assistants=_Assistants(principal.id),
+        agents=agents,
+        orchestration=orchestration,
+    )
+
+    events = [
+        event
+        async for event in application.send_message_stream(
+            SendMessageCommand(
+                principal,
+                "请结合附件总结",
+                attachments=(
+                    {
+                        "type": "image",
+                        "name": "demo.png",
+                        "storage_path": "bucket/desktop-chat/x/demo.png",
+                        "size": 3,
+                    },
+                ),
+            )
+        )
+    ]
+
+    assert [event.name for event in events] == [
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+    ]
+    assert orchestration.calls == 0
+    assert len(agents.requests) == 1
+    assert store.commits == 2
+
+
 async def test_consulted_reply_streams_and_persists_after_primary_reply() -> None:
     principal = Principal(uuid.UUID(int=1), "爱丽丝")
     expert = Participant(uuid.UUID(int=12), "专家A")

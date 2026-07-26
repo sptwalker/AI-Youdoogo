@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { groupChatApi, type Attachment, type DiscussionMember, type GroupChatApi } from '../api'
 import { buildOutgoingMessage, isAttachmentTooLarge } from '../model'
+import { useStreamingSend } from './useStreamingSend'
 
 interface UseMessageComposerOptions {
   channelId: string
@@ -37,13 +38,9 @@ export function useMessageComposer({
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<string[]>([])
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
-  const [sending, setSending] = useState(false)
   const [uploadCount, setUploadCount] = useState(0)
-  const sendingRef = useRef(false)
   const uploadCountRef = useRef(0)
-  const activeRequestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => () => activeRequestRef.current?.abort(), [])
+  const { sending, sendingRef, submit } = useStreamingSend(clearStreamingMessage)
 
   const removeAttachment = useCallback((index: number) => {
     setPendingAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))
@@ -77,30 +74,20 @@ export function useMessageComposer({
     })
     if (!outgoing || sendingRef.current || uploadCountRef.current > 0) return
 
-    const controller = new AbortController()
-    activeRequestRef.current = controller
-    sendingRef.current = true
-    setSending(true)
-    try {
+    await submit(async (signal) => {
       await api.postMessage(
         channelId,
         outgoing.content,
         outgoing.mentionedAgentIds,
         ingestStreamEvent,
         outgoing.attachments,
-        { signal: controller.signal },
+        { signal },
       )
       setText('')
       setPendingAttachments([])
       setMentions([])
-    } catch {
-      clearStreamingMessage()
-    } finally {
-      if (activeRequestRef.current === controller) activeRequestRef.current = null
-      sendingRef.current = false
-      setSending(false)
-    }
-  }, [api, channelId, clearStreamingMessage, ingestStreamEvent, members, mentions, pendingAttachments, text])
+    })
+  }, [api, channelId, ingestStreamEvent, members, mentions, pendingAttachments, sendingRef, submit, text])
 
   return {
     text,

@@ -182,6 +182,37 @@ class FakeAgentReplies:
         )
 
 
+class FakeConsultedReplies(FakeAgentReplies):
+    async def _stream(self, request: AgentReplyRequest) -> AsyncIterator[AgentReplyStreamEvent]:
+        yield AgentReplyStreamEvent(
+            "start",
+            speaker_agent_id=request.agent_id,
+            speaker_name="主顾问",
+        )
+        yield AgentReplyStreamEvent("delta", text="主回复")
+        yield AgentReplyStreamEvent(
+            "complete",
+            speaker_agent_id=request.agent_id,
+            speaker_name="主顾问",
+            content="主回复",
+            source_record_id=uuid.UUID(int=99),
+        )
+        yield AgentReplyStreamEvent(
+            "start",
+            speaker_agent_id=uuid.UUID(int=77),
+            speaker_name="被咨询顾问",
+        )
+        yield AgentReplyStreamEvent("delta", text="补充意见")
+        yield AgentReplyStreamEvent(
+            "complete",
+            speaker_agent_id=uuid.UUID(int=77),
+            speaker_name="被咨询顾问",
+            content="补充意见",
+            source_record_id=uuid.UUID(int=100),
+            publish_realtime=False,
+        )
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.values: dict[str, bytes] = {}
@@ -231,6 +262,8 @@ class SequenceIdentifiers:
 def _application(
     repository: FakeRepository,
     identifiers: SequenceIdentifiers,
+    *,
+    agent_replies: FakeAgentReplies | None = None,
 ) -> tuple[GroupMessagingApplication, FakeRealtime, dict[str, int]]:
     realtime = FakeRealtime()
     transactions = {"commits": 0, "rollbacks": 0}
@@ -238,7 +271,7 @@ def _application(
         uow_factory=lambda: FakeUnitOfWork(repository, transactions),
         realtime_delivery=realtime,
         realtime_subscription=FakeSubscription(),
-        agent_replies=FakeAgentReplies(),
+        agent_replies=agent_replies or FakeAgentReplies(),
         attachment_storage=FakeStorage(),
         archive_port=FakeArchive(),
         promotion_port=FakePromotion(),
@@ -327,6 +360,59 @@ async def test_message_stream_keeps_start_delta_end_order_and_delivery() -> None
     assert len(repository.messages) == 2
     assert [item[1] for item in realtime.published] == ["message", "message"]
     assert transactions["commits"] == 2
+
+
+async def test_consulted_reply_persists_without_realtime_publish() -> None:
+    channel_id = uuid.UUID(int=20)
+    user_id = uuid.UUID(int=21)
+    agent_id = uuid.UUID(int=22)
+    repository = FakeRepository()
+    repository.channels[channel_id] = Channel(
+        id=channel_id,
+        name="项目群",
+        creator_id=user_id,
+        create_time=FixedClock().now(),
+    )
+    repository.members[(channel_id, MEMBER_HUMAN, user_id)] = MemberDraft(
+        MEMBER_HUMAN, user_id, "发言人"
+    )
+    application, realtime, transactions = _application(
+        repository,
+        SequenceIdentifiers([uuid.UUID(int=23), uuid.UUID(int=24), uuid.UUID(int=25)]),
+        agent_replies=FakeConsultedReplies(),
+    )
+
+    events = [
+        event
+        async for event in application.post_message_stream(
+            PostMessageCommand(
+                channel_id=channel_id,
+                speaker_id=user_id,
+                speaker_name="发言人",
+                content="请给建议",
+                mentioned_agent_ids=(agent_id,),
+                require_member_id=user_id,
+            )
+        )
+    ]
+
+    assert [event.name for event in events] == [
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+        "message_start",
+        "delta",
+        "message_end",
+    ]
+    assert events[4].data == {
+        "speaker_agent_id": str(uuid.UUID(int=77)),
+        "speaker_name": "被咨询顾问",
+    }
+    assert events[5].data == {"text": "补充意见"}
+    assert [item[2]["content"] for item in realtime.published] == ["请给建议", "主回复"]
+    assert len(repository.messages) == 3
+    assert transactions["commits"] == 3
 
 
 async def test_attachment_limit_and_path_rules_are_owned_by_application() -> None:

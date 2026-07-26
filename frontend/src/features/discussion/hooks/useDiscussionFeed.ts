@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { parseRealtimeMessageEvent } from '../../../api/discussion'
+import { parseStreamEvent } from '../../../api/client'
 import {
   discussionWorkspaceApi,
   type ChannelWithUnread,
@@ -78,8 +80,9 @@ export function useDiscussionFeed({
   useEffect(() => {
     const readControllers = new Set<AbortController>()
     const subscription = api.subscribeRealtime((event, data) => {
-      if (event !== 'message') return
-      const incoming = data as unknown as Message
+      const parsed = parseRealtimeMessageEvent(event, data)
+      if (!parsed) return
+      const incoming = parsed.payload
       const incomingChannelId = incoming.channel_id
       if (!incomingChannelId) return
 
@@ -164,18 +167,19 @@ export function useDiscussionFeed({
 
   const ingestStreamEvent = useCallback((event: string, data: Record<string, unknown>) => {
     if (!activeChannelId) return
+    const parsed = parseStreamEvent<Message>(event, data)
     let action: MessageSessionAction | null = null
-    if (event === 'message_start') {
+    if (parsed?.type === 'message_start') {
       action = {
         type: 'stream_started',
         channelId: activeChannelId,
-        speakerAgentId: typeof data.speaker_agent_id === 'string' ? data.speaker_agent_id : null,
-        speakerName: String(data.speaker_name ?? ''),
+        speakerAgentId: parsed.payload.speaker_agent_id,
+        speakerName: parsed.payload.speaker_name,
       }
-    } else if (event === 'delta') {
-      action = { type: 'stream_delta', channelId: activeChannelId, text: String(data.text ?? '') }
-    } else if (event === 'message_end') {
-      action = { type: 'stream_ended', message: data as unknown as Message }
+    } else if (parsed?.type === 'delta') {
+      action = { type: 'stream_delta', channelId: activeChannelId, text: parsed.payload.text }
+    } else if (parsed?.type === 'message_end') {
+      action = { type: 'stream_ended', message: parsed.payload }
     }
     if (action) dispatch(action)
   }, [activeChannelId])

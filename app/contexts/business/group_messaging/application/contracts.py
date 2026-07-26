@@ -149,6 +149,29 @@ class MessageStreamEvent:
     name: str
     data: dict[str, Any]
 
+    @classmethod
+    def message_persisted(cls, message: MessageResult) -> MessageStreamEvent:
+        return cls("message_end", message.as_dict())
+
+    @classmethod
+    def turn_started(
+        cls,
+        *,
+        speaker_agent_id: uuid.UUID | None,
+        speaker_name: str,
+    ) -> MessageStreamEvent:
+        return cls(
+            "message_start",
+            {
+                "speaker_agent_id": str(speaker_agent_id) if speaker_agent_id else None,
+                "speaker_name": speaker_name,
+            },
+        )
+
+    @classmethod
+    def delta(cls, text: str) -> MessageStreamEvent:
+        return cls("delta", {"text": text})
+
 
 @dataclass(frozen=True, slots=True)
 class UploadAttachmentCommand:
