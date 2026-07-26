@@ -9,7 +9,7 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Card, Input, List, Popconfirm, Select, Space, Spin, Tag, Typography, Upload, message } from 'antd'
+import { Button, Card, Input, List, Popconfirm, Select, Space, Spin, Tag, Tooltip, Typography, Upload, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import {
   askKnowledge,
@@ -36,8 +36,8 @@ export default function Knowledge() {
   const actionRef = useRef<ActionType>(null)
   const [query, setQuery] = useState('')
   const [asking, setAsking] = useState(false)
-  const [answer, setAnswer] = useState<AskResponse | null>(null)
-  const [answerQuery, setAnswerQuery] = useState('')
+  // 问答历史：最新在前，保留本次会话所有问答（P3-4）。
+  const [history, setHistory] = useState<Array<{ q: string; a: AskResponse }>>([])
   const [uploading, setUploading] = useState(false)
   const [kbs, setKbs] = useState<KnowledgeBase[]>([])
   const [targetKb, setTargetKb] = useState<string | undefined>()
@@ -68,8 +68,8 @@ export default function Knowledge() {
     try {
       const next = await askKnowledge(submittedQuery)
       if (requestId === askRequestRef.current) {
-        setAnswer(next)
-        setAnswerQuery(submittedQuery)
+        setHistory((h) => [{ q: submittedQuery, a: next }, ...h])
+        setQuery('')
       }
     } catch {
       /* 错误已由拦截器提示 */
@@ -149,17 +149,17 @@ export default function Knowledge() {
           </Button>
         </Space.Compact>
         {asking && <Spin style={{ marginTop: 16 }} />}
-        {answer && !asking && (
-          <div style={{ marginTop: 16 }}>
-            <Typography.Text type="secondary">问题：{answerQuery}</Typography.Text>
+        {history.map((h, i) => (
+          <div key={history.length - i} style={{ marginTop: 16, borderTop: i > 0 ? '1px solid #f0f0f0' : undefined, paddingTop: i > 0 ? 16 : 0 }}>
+            <Typography.Text type="secondary">问题：{h.q}</Typography.Text>
             <Typography.Paragraph>
-              <Markdown>{answer.answer}</Markdown>
+              <Markdown>{h.a.answer}</Markdown>
             </Typography.Paragraph>
-            {answer.sources.length > 0 && (
+            {h.a.sources.length > 0 && (
               <List
                 size="small"
                 header={<b>来源</b>}
-                dataSource={answer.sources}
+                dataSource={h.a.sources}
                 renderItem={(s) => (
                   <List.Item>
                     [{s.index}] {s.file_name} · 片段 #{s.chunk_index}
@@ -168,7 +168,7 @@ export default function Knowledge() {
               />
             )}
           </div>
-        )}
+        ))}
       </Card>
 
       <ProTable<KnowledgeFile>
@@ -195,7 +195,9 @@ export default function Knowledge() {
               return false
             }}
           >
-            <Button loading={uploading}>上传文档 (txt/md/docx/pdf)</Button>
+            <Tooltip title="支持 txt/md/docx/pdf；上传后自动解析、切片并向量入库到所选知识库">
+              <Button loading={uploading}>上传文档 (txt/md/docx/pdf)</Button>
+            </Tooltip>
           </Upload>,
           <ModalForm<{ title: string; text: string; category?: string }>
             key="text"

@@ -1,6 +1,6 @@
 /** 运营看板：上传日数据 → 查看指标 → 生成日报 / 异常检测（结果留痕）。 */
 import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
-import { Alert, Button, Card, DatePicker, Space, Tag, Typography, Upload, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Space, Tag, Tooltip, Typography, Upload, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useRef, useState } from 'react'
 import Markdown from '../components/Markdown'
@@ -133,7 +133,12 @@ export default function OpsBoard() {
     <PageContainer title="运营看板">
       <Card style={{ marginBottom: 16 }}>
         <Space wrap>
-          <DatePicker value={date} onChange={selectDate} allowClear={false} />
+          <DatePicker
+            value={date}
+            onChange={selectDate}
+            allowClear={false}
+            disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+          />
           <Upload
             accept=".xlsx"
             showUploadList={false}
@@ -142,7 +147,9 @@ export default function OpsBoard() {
               return false
             }}
           >
-            <Button loading={uploading}>上传日数据 Excel</Button>
+            <Tooltip title="xlsx 列：日期、产品、日活（必填）；新增、次留%（可选）。首行为表头。">
+              <Button loading={uploading}>上传日数据 Excel</Button>
+            </Tooltip>
           </Upload>
           <Button onClick={runSync} loading={syncing}>
             从 ThinkingData 拉取

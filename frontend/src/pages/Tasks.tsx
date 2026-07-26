@@ -5,12 +5,13 @@ import {
   ProFormDigit,
   ProFormSelect,
   ProFormText,
+  ProFormTextArea,
   ProTable,
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
 import { Button, Space, Tag, Typography, message } from 'antd'
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Markdown from '../components/Markdown'
 import { listRoles } from '../api/agents'
 import {
@@ -21,7 +22,7 @@ import {
   transitionTask,
   type TaskCard,
 } from '../api/tasks'
-import { taskHumanActions } from '../features/tasks/model'
+import { TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, taskHumanActions } from '../features/tasks/model'
 import { usePendingActions } from '../hooks/usePendingActions'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -43,10 +44,17 @@ export default function Tasks() {
   const actionRef = useRef<ActionType>(null)
   const pending = usePendingActions()
   const reload = () => actionRef.current?.reload()
+  const [roleNames, setRoleNames] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    void listRoles()
+      .then((roles) => setRoleNames(Object.fromEntries(roles.map((r) => [r.id, r.name]))))
+      .catch(() => {})
+  }, [])
 
   const columns: ProColumns<TaskCard>[] = [
     { title: '标题', dataIndex: 'title' },
-    { title: '类型', dataIndex: 'task_type' },
+    { title: '类型', dataIndex: 'task_type', render: (_, r) => TASK_TYPE_LABEL[r.task_type] ?? r.task_type },
     { title: '优先级', dataIndex: 'priority' },
     {
       title: '状态',
@@ -84,12 +92,37 @@ export default function Tasks() {
         }
         for (const action of taskHumanActions(r.status)) {
           const transitionKey = `transition:${r.id}:${action.to}`
+          if (action.danger) {
+            // 驳回/终止不可逆,弹窗二次确认并记录原因(驳回必填、终止选填)。
+            const reasonRequired = action.to === 'rejected'
+            actions.push(
+              <ModalForm<{ note?: string }>
+                key={action.to}
+                title={`${action.label}任务`}
+                trigger={<Button type="link" size="small" danger>{action.label}</Button>}
+                modalProps={{ destroyOnHidden: true, okText: `确认${action.label}`, okButtonProps: { danger: true } }}
+                onFinish={async (v) => {
+                  await transitionTask(r.id, action.to, v.note?.trim() || undefined)
+                  message.success(`已${action.label}`)
+                  reload()
+                  return true
+                }}
+              >
+                <ProFormTextArea
+                  name="note"
+                  label="原因"
+                  rules={reasonRequired ? [{ required: true, message: '请填写驳回原因' }] : []}
+                  fieldProps={{ maxLength: 500, showCount: true, autoSize: { minRows: 2 } }}
+                />
+              </ModalForm>,
+            )
+            continue
+          }
           actions.push(
             <Button
               key={action.to}
               type="link"
               size="small"
-              danger={action.danger}
               loading={pending.isPending(transitionKey)}
               onClick={() => {
                 void pending.run(transitionKey, async () => {
@@ -114,14 +147,19 @@ export default function Tasks() {
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
-        request={async (params) => ({
-          data: await listTasks(params.status as string | undefined),
-          success: true,
-        })}
+        request={async (params) => {
+          try {
+            return { data: await listTasks(params.status as string | undefined), success: true }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
         expandable={{
           expandedRowRender: (r) => (
             <Space direction="vertical">
-              {r.assignee_agent_id && <span>指派智能体：{r.assignee_agent_id}</span>}
+              {r.assignee_agent_id && (
+                <span>指派智能体：{roleNames[r.assignee_agent_id] ?? r.assignee_agent_id}</span>
+              )}
               <Typography.Paragraph style={{ margin: 0 }}>
                 <Markdown>{r.result_content || '（暂无执行结果）'}</Markdown>
               </Typography.Paragraph>
@@ -148,7 +186,13 @@ export default function Tasks() {
             }}
           >
             <ProFormText name="title" label="标题" rules={[{ required: true }]} />
-            <ProFormText name="task_type" label="类型" rules={[{ required: true }]} />
+            <ProFormSelect
+              name="task_type"
+              label="类型"
+              options={TASK_TYPE_OPTIONS}
+              showSearch
+              rules={[{ required: true }]}
+            />
             <ProFormSelect
               name="priority"
               label="优先级"

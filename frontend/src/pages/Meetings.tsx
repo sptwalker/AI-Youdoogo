@@ -1,6 +1,6 @@
 /** 会议：列表 + 详情抽屉（开始/结束、发言、AI专家、投票、纪要、决议→确认→转任务卡）。 */
-import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
-import { Button, Card, Drawer, Input, List, Space, Tag, message } from 'antd'
+import { ModalForm, PageContainer, ProFormText, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
+import { Button, Card, Drawer, Input, List, Popconfirm, Space, Tag, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
@@ -34,6 +34,11 @@ const STATUS_COLOR: Record<string, string> = {
   closed: 'success',
 }
 
+/** 把 {approve:2, reject:1} 这样的原始票数渲染成「赞成 2 · 反对 1」。 */
+function formatVotes(counts: Record<string, number>): string {
+  return `赞成 ${counts.approve ?? 0} · 反对 ${counts.reject ?? 0}`
+}
+
 interface Detail {
   meeting: Meeting
   discussions: Discuss[]
@@ -46,6 +51,7 @@ export default function Meetings() {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [subject, setSubject] = useState('')
   const [speech, setSpeech] = useState('')
+  const [aiTopic, setAiTopic] = useState('')
   const [resText, setResText] = useState('')
   const [tally, setTally] = useState<Tally | null>(null)
   const [aiSpeaking, setAiSpeaking] = useState(false)
@@ -60,6 +66,7 @@ export default function Meetings() {
   const resetDrafts = () => {
     setSubject('')
     setSpeech('')
+    setAiTopic('')
     setResText('')
     setTally(null)
   }
@@ -114,16 +121,31 @@ export default function Meetings() {
         search={false}
         columns={columns}
         request={async () => ({ data: await listMeetings(), success: true })}
-        toolBarRender={() => [
-          <Button key="new" type="primary" onClick={async () => {
-            const t = prompt('会议主题')
-            const title = t?.trim()
-            if (title) { await createMeeting(title); message.success('已创建'); actionRef.current?.reload() }
-          }}>新建会议</Button>,
-        ]}
+        toolBarRender={() => canManage ? [
+          <ModalForm
+            key="new"
+            title="新建会议"
+            width={420}
+            trigger={<Button type="primary">新建会议</Button>}
+            modalProps={{ destroyOnClose: true }}
+            onFinish={async (values: { title: string }) => {
+              await createMeeting(values.title.trim())
+              message.success('已创建')
+              actionRef.current?.reload()
+              return true
+            }}
+          >
+            <ProFormText
+              name="title"
+              label="会议主题"
+              placeholder="请输入会议主题"
+              rules={[{ required: true, message: '请输入会议主题' }, { max: 100, message: '主题不超过 100 字' }]}
+            />
+          </ModalForm>,
+        ] : []}
       />
 
-      <Drawer open={!!detail} onClose={close} width={640}
+      <Drawer open={!!detail} onClose={close} width="min(640px, 100vw)"
         title={detail && `${detail.meeting.title}（${MEETING_STATUS[detail.meeting.status] ?? detail.meeting.status}）`}>
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -139,13 +161,20 @@ export default function Meetings() {
                 }}>开始会议</Button>
               )}
               {inProgress && (
-                <Button loading={pending.isPending(`meeting:${detail.meeting.id}:close`)} onClick={() => {
-                  void pending.run(`meeting:${detail.meeting.id}:close`, async () => {
+                <Popconfirm
+                  title="确认结束会议?"
+                  description="结束后不可再发言、投票或生成纪要,且无法重新开启。"
+                  okText="结束会议"
+                  okButtonProps={{ danger: true }}
+                  cancelText="取消"
+                  onConfirm={() => pending.run(`meeting:${detail.meeting.id}:close`, async () => {
                     await setMeetingStatus(detail.meeting.id, 'closed')
                     message.success('会议结束')
                     await refresh()
-                  }).catch(() => {})
-                }}>结束会议</Button>
+                  }).catch(() => {})}
+                >
+                  <Button danger loading={pending.isPending(`meeting:${detail.meeting.id}:close`)}>结束会议</Button>
+                </Popconfirm>
               )}
               </Space>
             )}
@@ -159,49 +188,66 @@ export default function Meetings() {
                   </List.Item>
                 )} />
               {inProgress && (
-                <Space.Compact style={{ width: '100%', marginTop: 8 }}>
-                  <Input placeholder="真人发言 / 或输入议题给AI专家" value={speech}
-                    onChange={(e) => setSpeech(e.target.value)} />
-                  <Button loading={pending.isPending(`meeting:${detail.meeting.id}:discuss`)} onClick={() => {
-                    const content = speech.trim()
-                    if (!content) return
-                    void pending.run(`meeting:${detail.meeting.id}:discuss`, async () => {
-                      await discuss(detail.meeting.id, content)
-                      setSpeech('')
-                      await refresh()
-                    }).catch(() => {})
-                  }}>发言</Button>
-                  {canManage && <Button type="primary" loading={aiSpeaking} onClick={async () => {
-                    const topic = speech.trim()
-                    if (!topic || aiSpeakControllerRef.current) return
-                    const controller = new AbortController()
-                    aiSpeakControllerRef.current = controller
-                    setAiSpeaking(true)
-                    const streamId = `__streaming__-${detail.meeting.id}`
-                    try {
-                      await aiSpeak(detail.meeting.id, topic, (event, data) => {
-                        if (event === 'message_start') {
-                          const d = data as unknown as { speaker_name: string }
-                          setDetail((prev) => prev && ({ ...prev, discussions: [...prev.discussions, { id: streamId, speaker_type: 'ai', speaker_name: d.speaker_name, content: '', create_time: '' }] }))
-                        } else if (event === 'delta') {
-                          const t = String((data as { text?: unknown }).text ?? '')
-                          setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? { ...x, content: x.content + t } : x)) }))
-                        } else if (event === 'message_end') {
-                          const msg = data as unknown as Discuss
-                          setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? msg : x)) }))
+                <Space direction="vertical" style={{ width: '100%', marginTop: 8 }} size={8}>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input placeholder="真人发言…" value={speech}
+                      onChange={(e) => setSpeech(e.target.value)}
+                      onPressEnter={() => {
+                        const content = speech.trim()
+                        if (!content) return
+                        void pending.run(`meeting:${detail.meeting.id}:discuss`, async () => {
+                          await discuss(detail.meeting.id, content)
+                          setSpeech('')
+                          await refresh()
+                        }).catch(() => {})
+                      }} />
+                    <Button loading={pending.isPending(`meeting:${detail.meeting.id}:discuss`)} onClick={() => {
+                      const content = speech.trim()
+                      if (!content) return
+                      void pending.run(`meeting:${detail.meeting.id}:discuss`, async () => {
+                        await discuss(detail.meeting.id, content)
+                        setSpeech('')
+                        await refresh()
+                      }).catch(() => {})
+                    }}>发言</Button>
+                  </Space.Compact>
+                  {canManage && (
+                    <Space.Compact style={{ width: '100%' }}>
+                      <Input placeholder="输入议题,让 AI 专家发言" value={aiTopic}
+                        onChange={(e) => setAiTopic(e.target.value)} disabled={aiSpeaking} />
+                      <Button type="primary" loading={aiSpeaking} onClick={async () => {
+                        const topic = aiTopic.trim()
+                        if (!topic || aiSpeakControllerRef.current) return
+                        const controller = new AbortController()
+                        aiSpeakControllerRef.current = controller
+                        setAiSpeaking(true)
+                        const streamId = `__streaming__-${detail.meeting.id}`
+                        try {
+                          await aiSpeak(detail.meeting.id, topic, (event, data) => {
+                            if (event === 'message_start') {
+                              const d = data as unknown as { speaker_name: string }
+                              setDetail((prev) => prev && ({ ...prev, discussions: [...prev.discussions, { id: streamId, speaker_type: 'ai', speaker_name: d.speaker_name, content: '', create_time: '' }] }))
+                            } else if (event === 'delta') {
+                              const t = String((data as { text?: unknown }).text ?? '')
+                              setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? { ...x, content: x.content + t } : x)) }))
+                            } else if (event === 'message_end') {
+                              const msg = data as unknown as Discuss
+                              setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.map((x) => (x.id === streamId ? msg : x)) }))
+                            }
+                          }, { signal: controller.signal })
+                          setAiTopic('')
+                        } catch {
+                          setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.filter((x) => x.id !== streamId) }))
+                        } finally {
+                          if (aiSpeakControllerRef.current === controller) {
+                            aiSpeakControllerRef.current = null
+                            setAiSpeaking(false)
+                          }
                         }
-                      }, { signal: controller.signal })
-                      setSpeech('')
-                    } catch {
-                      setDetail((prev) => prev && ({ ...prev, discussions: prev.discussions.filter((x) => x.id !== streamId) }))
-                    } finally {
-                      if (aiSpeakControllerRef.current === controller) {
-                        aiSpeakControllerRef.current = null
-                        setAiSpeaking(false)
-                      }
-                    }
-                  }}>AI专家</Button>}
-                </Space.Compact>
+                      }}>AI专家</Button>
+                    </Space.Compact>
+                  )}
+                </Space>
               )}
             </Card>
 
@@ -243,7 +289,7 @@ export default function Meetings() {
                     <Tag color={tally.human_passed ? 'success' : 'default'}>
                       真人票{tally.human_passed ? '通过' : '未过'}
                     </Tag>
-                    <span>真人 {JSON.stringify(tally.human)} · AI参考 {JSON.stringify(tally.ai)}</span>
+                    <span>真人 {formatVotes(tally.human)} · AI参考 {formatVotes(tally.ai)}</span>
                   </div>
                 )}
               </Card>

@@ -29,28 +29,18 @@ import {
   type TaskRecord,
 } from '../api/agents'
 import { hasAdminRole, hasManagerRole } from './managementPermissions'
-
-const TASK_LABEL: Record<string, string> = {
-  daily_report: '运营日报',
-  anomaly_alert: '异常告警',
-  proposal: '运营提案',
-  proposal_research: '提案预研',
-  proposal_execution: '提案执行',
-  meeting_discuss: '会议发言',
-  meeting_minutes: '会议纪要',
-  meeting_vote: 'AI参考票',
-  analysis: '分析',
-  resolution_execution: '决议执行',
-}
+import { TASK_TYPE_LABEL } from '../features/tasks/model'
 
 export default function Agents() {
   const { me } = useOutletContext<{ me: UserInfo | null }>()
   const actionRef = useRef<ActionType>(null)
   const canGenerateProposal = hasManagerRole(me?.role_code)
   const canConfigureAgents = hasAdminRole(me?.role_code)
+  // 本轮已评分记录 id→分值:绑定 Rate 值并置只读,避免拖一次发一次的重复提交。
+  const [ratings, setRatings] = useState<Record<string, number>>({})
 
   const columns: ProColumns<TaskRecord>[] = [
-    { title: '任务', dataIndex: 'task_type', render: (_, r) => TASK_LABEL[r.task_type] || r.task_type },
+    { title: '任务', dataIndex: 'task_type', render: (_, r) => TASK_TYPE_LABEL[r.task_type] || r.task_type },
     { title: '摘要', dataIndex: 'input_summary', render: (_, r) => r.input_summary || '-' },
     {
       title: '状态',
@@ -64,14 +54,29 @@ export default function Agents() {
     { title: '模型', dataIndex: 'model_used', render: (_, r) => r.model_used || '-' },
     {
       title: '评分',
-      render: (_, r) => (
-        <Rate
-          onChange={async (v) => {
-            await addFeedback(r.id, v)
-            message.success(canConfigureAgents ? '已评分，可在角色卡触发提示词优化' : '已评分')
-          }}
-        />
-      ),
+      render: (_, r) => {
+        const rated = ratings[r.id] !== undefined
+        return (
+          <Rate
+            value={ratings[r.id] ?? 0}
+            disabled={rated}
+            onChange={async (v) => {
+              setRatings((prev) => ({ ...prev, [r.id]: v }))
+              try {
+                await addFeedback(r.id, v)
+                message.success(canConfigureAgents ? '已评分，可在角色卡触发提示词优化' : '已评分')
+              } catch {
+                setRatings((prev) => {
+                  const next = { ...prev }
+                  delete next[r.id]
+                  return next
+                })
+                message.error('评分失败，请重试')
+              }
+            }}
+          />
+        )
+      },
     },
     { title: '时间', dataIndex: 'create_time', valueType: 'dateTime' },
   ]
@@ -85,7 +90,13 @@ export default function Agents() {
         headerTitle="执行留痕（AI 产出仅供参考，需真人确认）"
         search={false}
         columns={columns}
-        request={async () => ({ data: await listRecords(50), success: true })}
+        request={async () => {
+          try {
+            return { data: await listRecords(50), success: true }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
         expandable={{
           expandedRowRender: (r) => (
             <Typography.Paragraph style={{ margin: 0 }}>
@@ -132,7 +143,13 @@ function RolesCard({ canConfigure }: { canConfigure: boolean }) {
         search={false}
         options={false}
         pagination={false}
-        request={async () => ({ data: await listRoles(), success: true })}
+        request={async () => {
+          try {
+            return { data: await listRoles(), success: true }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
         columns={[
           { title: '角色', dataIndex: 'name' },
           { title: '职责', dataIndex: 'duty', render: (_, r) => r.duty || '-' },
@@ -193,7 +210,7 @@ function RolesCard({ canConfigure }: { canConfigure: boolean }) {
                       setOpt(await optimizePrompt(r.id))
                       message.destroy('o')
                     } catch {
-                      message.destroy('o')
+                      message.error({ content: '优化失败，请稍后重试', key: 'o' })
                     }
                   }}
                 >
