@@ -14,7 +14,13 @@ export interface KnowledgeFile {
 
 export interface AskResponse {
   answer: string
-  sources: Array<{ index: number; file_id: string; file_name: string; chunk_index: number }>
+  sources: Array<{
+    index: number
+    file_id: string
+    file_name: string
+    chunk_index: number
+    snippet: string
+  }>
 }
 
 export function listKnowledgeFiles(): Promise<KnowledgeFile[]> {

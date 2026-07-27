@@ -1,6 +1,6 @@
 /** 会议：列表 + 详情抽屉（开始/结束、发言、AI专家、投票、纪要、决议→确认→转任务卡）。 */
 import { ModalForm, PageContainer, ProFormText, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components'
-import { Button, Card, Drawer, Input, List, Popconfirm, Space, Tag, message } from 'antd'
+import { AutoComplete, Button, Card, Drawer, Input, List, Popconfirm, Space, Tag, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
@@ -17,6 +17,7 @@ import {
   getMeeting,
   getTally,
   listMeetings,
+  listVoteSubjects,
   MEETING_STATUS,
   setMeetingStatus,
   vote,
@@ -54,6 +55,7 @@ export default function Meetings() {
   const [aiTopic, setAiTopic] = useState('')
   const [resText, setResText] = useState('')
   const [tally, setTally] = useState<Tally | null>(null)
+  const [subjects, setSubjects] = useState<string[]>([])
   const [aiSpeaking, setAiSpeaking] = useState(false)
   const openRequestRef = useRef(0)
   const aiSpeakControllerRef = useRef<AbortController | null>(null)
@@ -69,6 +71,7 @@ export default function Meetings() {
     setAiTopic('')
     setResText('')
     setTally(null)
+    setSubjects([])
   }
   const open = async (id: string) => {
     const requestId = ++openRequestRef.current
@@ -77,6 +80,9 @@ export default function Meetings() {
     resetDrafts()
     const next = await getMeeting(id)
     if (requestId === openRequestRef.current) setDetail(next)
+    void listVoteSubjects(id).then((s) => {
+      if (requestId === openRequestRef.current) setSubjects(s)
+    }).catch(() => {})
   }
   const close = () => {
     openRequestRef.current += 1
@@ -99,7 +105,11 @@ export default function Meetings() {
     if (!subj) return
     const requestId = ++tallyRequestRef.current
     const next = await getTally(mid, subj)
-    if (requestId === tallyRequestRef.current) setTally(next)
+    if (requestId === tallyRequestRef.current) {
+      setTally(next)
+      // 刚投过票的对象即时进下拉，无需重开会议（P1-8）。
+      setSubjects((prev) => (prev.includes(subj) ? prev : [...prev, subj]))
+    }
   }
 
   const columns: ProColumns<Meeting>[] = [
@@ -254,7 +264,16 @@ export default function Meetings() {
             {inProgress && (
               <Card size="small" title="投票（真人票决定，AI票仅参考）">
                 <Space.Compact style={{ width: '100%' }}>
-                  <Input placeholder="表决对象" value={subject} onChange={(e) => setSubject(e.target.value)} />
+                  <AutoComplete
+                    style={{ width: '100%' }}
+                    placeholder="表决对象（可选已有或新建）"
+                    value={subject}
+                    onChange={setSubject}
+                    options={subjects.map((s) => ({ value: s }))}
+                    filterOption={(input, option) =>
+                      (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
                   <Button loading={pending.isPending(`meeting:${detail.meeting.id}:vote:approve`)} onClick={() => {
                     const value = subject.trim()
                     if (!value) return

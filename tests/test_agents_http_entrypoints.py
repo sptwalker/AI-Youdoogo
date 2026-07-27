@@ -121,6 +121,9 @@ async def test_operational_and_record_routes_delegate_to_contexts(monkeypatch) -
         assert args[1] == 5
         return (report,)
 
+    async def my_feedback(*args, **kwargs):
+        return ()
+
     monkeypatch.setattr(agents.operational_operations, "create_daily_report", daily)
     monkeypatch.setattr(agents.operational_operations, "check_anomalies", anomaly)
     monkeypatch.setattr(
@@ -133,6 +136,7 @@ async def test_operational_and_record_routes_delegate_to_contexts(monkeypatch) -
         "list_execution_records",
         records,
     )
+    monkeypatch.setattr(agents.quality_operations, "list_my_feedback", my_feedback)
 
     daily_response = await agents.ops_daily_report(
         DailyReportRequest(
@@ -154,6 +158,7 @@ async def test_operational_and_record_routes_delegate_to_contexts(monkeypatch) -
     assert anomaly_response["data"]["alerts"][0]["metric"] == "dau"
     assert proposal_response["data"]["task_type"] == "proposal"
     assert records_response["data"][0]["id"] == str(report.id)
+    assert records_response["data"][0]["my_score"] is None
 
 
 async def test_role_routes_delegate_to_expert_management_and_audit(monkeypatch) -> None:

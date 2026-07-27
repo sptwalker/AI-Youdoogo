@@ -88,6 +88,23 @@ export function DataSourceRegistry() {
         >
           {item.is_active ? '停用' : '启用'}
         </a>,
+        <a
+          key="test"
+          onClick={async () => {
+            const key = `ds-test:${item.id}`
+            message.loading({ content: '连通测试中…', key, duration: 0 })
+            try {
+              const r = await dataSourcesApi.testDataSource(item.id)
+              if (r.status === 'ok') message.success({ content: r.message, key })
+              else if (r.status === 'unsupported') message.info({ content: r.message, key })
+              else message.warning({ content: r.message, key })
+            } catch {
+              message.error({ content: '连通测试失败', key })
+            }
+          }}
+        >
+          测试连通
+        </a>,
         <ModalForm
           key="agent"
           title={`指派对接AI · ${item.name}`}

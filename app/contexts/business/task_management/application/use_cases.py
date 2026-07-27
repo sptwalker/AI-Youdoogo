@@ -8,6 +8,7 @@ from typing import Any
 from app.contexts.business.task_management.application.contracts import (
     CreateTaskRequest,
     DecomposeTaskRequest,
+    EditTaskRequest,
     RunTaskRequest,
     TaskDetailView,
     TaskExecutionRequest,
@@ -47,6 +48,12 @@ class TaskManagementApplication:
         task = await self._tasks.create_view(request)
         await self._transaction.commit()
         return await self._tasks.get_view(task.id)
+
+    async def edit(self, request: EditTaskRequest) -> TaskView:
+        # 补指派/改标题优先级；仅未开跑状态可编辑，状态守卫在 repo（domain assert_editable）。
+        await self._tasks.edit_view(request)
+        await self._transaction.commit()
+        return await self._tasks.get_view(request.task_id)
 
     async def list(
         self,

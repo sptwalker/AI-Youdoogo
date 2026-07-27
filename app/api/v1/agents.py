@@ -118,14 +118,24 @@ async def ops_proposal(body: ProposalRequest, db: DB, manager: Manager) -> dict:
 @router.get("/records")
 async def list_records(
     db: DB,
-    _: CurrentUser,
+    user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """Return recent immutable Agent execution evidence."""
+    """Return recent immutable Agent execution evidence with the caller's own rating."""
     records = await agent_execution_operations.list_execution_records(db, limit)
-    return ok(
-        [TaskRecordOut.model_validate(record).model_dump(mode="json") for record in records]
+    mine = await quality_operations.list_my_feedback(
+        db, user.id, tuple(record.id for record in records)
     )
+    scored = {feedback.task_record_id: feedback for feedback in mine}
+    result = []
+    for record in records:
+        view = TaskRecordOut.model_validate(record)
+        feedback = scored.get(record.id)
+        if feedback is not None:
+            view.my_score = feedback.score
+            view.my_comment = feedback.comment
+        result.append(view.model_dump(mode="json"))
+    return ok(result)
 
 
 @router.get("/roles")

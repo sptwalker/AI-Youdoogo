@@ -55,10 +55,12 @@ export default function Agents() {
     {
       title: '评分',
       render: (_, r) => {
-        const rated = ratings[r.id] !== undefined
+        // 已评分来源：本次提交的本地态优先，否则后端回显的 my_score（P1-9 刷新不清零）。
+        const current = ratings[r.id] ?? r.my_score ?? 0
+        const rated = ratings[r.id] !== undefined || r.my_score != null
         return (
           <Rate
-            value={ratings[r.id] ?? 0}
+            value={current}
             disabled={rated}
             onChange={async (v) => {
               setRatings((prev) => ({ ...prev, [r.id]: v }))

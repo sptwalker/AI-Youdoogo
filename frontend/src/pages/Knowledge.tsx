@@ -162,7 +162,18 @@ export default function Knowledge() {
                 dataSource={h.a.sources}
                 renderItem={(s) => (
                   <List.Item>
-                    [{s.index}] {s.file_name} · 片段 #{s.chunk_index}
+                    <div style={{ width: '100%' }}>
+                      <div>[{s.index}] {s.file_name} · 片段 #{s.chunk_index}</div>
+                      {s.snippet && (
+                        <Typography.Paragraph
+                          type="secondary"
+                          style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap' }}
+                          ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}
+                        >
+                          {s.snippet}
+                        </Typography.Paragraph>
+                      )}
+                    </div>
                   </List.Item>
                 )}
               />

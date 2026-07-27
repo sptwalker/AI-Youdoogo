@@ -69,6 +69,7 @@ class SqlAlchemyKnowledgeRetrievalGateway:
                 document_id=uuid.UUID(str(source["file_id"])),
                 document_name=str(source["file_name"]),
                 chunk_index=int(source["chunk_index"]),
+                snippet=str(source.get("snippet", "")),
             )
             for source in result["sources"]
         )

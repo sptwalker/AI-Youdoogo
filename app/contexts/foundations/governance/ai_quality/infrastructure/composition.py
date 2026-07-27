@@ -11,6 +11,7 @@ from app.contexts.foundations.governance.ai_quality.application.use_cases import
     DeleteEvaluationCase,
     ListEvaluationCases,
     ListLowScoreSamples,
+    ListMyFeedback,
     RecordFeedback,
     RunEvaluation,
     SuggestPromptImprovement,
@@ -48,6 +49,7 @@ class AIQualityOperations:
         self.create_case = CreateEvaluationCase(unit)
         self.delete_case = DeleteEvaluationCase(unit)
         self.record_feedback = RecordFeedback(unit)
+        self.list_my_feedback = ListMyFeedback(unit)
         self.list_low_score_samples = ListLowScoreSamples(unit)
         self.suggest_prompt_improvement = SuggestPromptImprovement(
             unit,

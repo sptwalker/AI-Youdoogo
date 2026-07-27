@@ -167,6 +167,12 @@ async def tally(
     return ok(await operations.tally_votes(db, meeting_id, subject))
 
 
+@router.get("/{meeting_id}/vote-subjects")
+async def vote_subjects(meeting_id: uuid.UUID, db: DB, _: CurrentUser) -> dict:
+    """已有表决对象列表（供前端统计下拉，避免手打精确匹配，P1-8）。"""
+    return ok(list(await operations.list_vote_subjects(db, meeting_id)))
+
+
 @router.post("/{meeting_id}/minutes")
 async def generate_minutes(meeting_id: uuid.UUID, db: DB, manager: Manager) -> dict:
     """自动生成会议纪要。"""

@@ -50,6 +50,7 @@ class Citation:
     document_id: uuid.UUID
     document_name: str
     chunk_index: int
+    snippet: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,7 @@ class KnowledgeAnswer:
                     "file_id": str(citation.document_id),
                     "file_name": citation.document_name,
                     "chunk_index": citation.chunk_index,
+                    "snippet": citation.snippet,
                 }
                 for citation in self.citations
             ],

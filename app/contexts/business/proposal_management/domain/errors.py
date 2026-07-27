@@ -38,3 +38,10 @@ class ProposalAlreadyConverted(ProposalError):
 
     def __init__(self) -> None:
         super().__init__("该提案已转过任务卡")
+
+
+class ProposalNotDraft(ProposalError):
+    """Only draft proposals may be edited or deleted by their creator."""
+
+    def __init__(self, current_status: str) -> None:
+        super().__init__(f"提案当前状态 {current_status} 不可编辑/删除（仅草稿可改删）")

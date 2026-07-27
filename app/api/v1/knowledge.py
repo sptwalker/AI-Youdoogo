@@ -204,6 +204,7 @@ async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
             "file_id": str(citation.document_id),
             "file_name": citation.document_name,
             "chunk_index": citation.chunk_index,
+            "snippet": citation.snippet,
         }
         for citation in result.citations
     ]

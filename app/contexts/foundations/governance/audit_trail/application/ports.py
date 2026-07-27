@@ -17,6 +17,8 @@ class AuditRecordRepositoryPort(Protocol):
 
     async def list(self, query: AuditTrailQuery) -> tuple[AuditRecordView, ...]: ...
 
+    async def count(self, query: AuditTrailQuery) -> int: ...
+
 
 class AuditUnitOfWork(Protocol):
     records: AuditRecordRepositoryPort

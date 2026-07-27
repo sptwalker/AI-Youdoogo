@@ -11,6 +11,7 @@ from app.contexts.business.proposal_management.domain.errors import (
     InvalidProposalDecision,
     ProposalAlreadyConverted,
     ProposalNotApproved,
+    ProposalNotDraft,
     ProposalResearchNotAllowed,
     ProposalReviewNotAllowed,
 )
@@ -74,6 +75,29 @@ class Proposal:
         """Reject research once a human decision has made the Proposal terminal."""
         if self.status in (ProposalStatus.APPROVED, ProposalStatus.REJECTED):
             raise ProposalResearchNotAllowed()
+
+    def edit_draft(
+        self,
+        *,
+        title: str,
+        background: str,
+        plan: str,
+        benefit_risk: str | None,
+        priority: str,
+    ) -> None:
+        """Amend a still-draft proposal; forbidden once预研/评审已启动。"""
+        if self.status != ProposalStatus.DRAFT:
+            raise ProposalNotDraft(self.status.value)
+        self.title = title
+        self.background = background
+        self.plan = plan
+        self.benefit_risk = benefit_risk
+        self.priority = priority
+
+    def assert_deletable(self) -> None:
+        """Only a draft may be removed; reviewed/approved proposals keep their trail."""
+        if self.status != ProposalStatus.DRAFT:
+            raise ProposalNotDraft(self.status.value)
 
     def start_research(self) -> None:
         """Expose the durable pending state before invoking an AI expert."""

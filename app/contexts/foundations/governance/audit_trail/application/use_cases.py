@@ -11,6 +11,7 @@ from app.contexts.foundations.governance.audit_trail.application.ports import (
 from app.contexts.foundations.governance.audit_trail.contracts.audit import (
     AppendAuditRecordCommand,
     AuditRecordView,
+    AuditTrailPage,
     AuditTrailQuery,
 )
 from app.contexts.foundations.governance.audit_trail.domain.redaction import mask_secrets
@@ -45,3 +46,11 @@ class QueryAuditTrail:
 
     async def execute(self, query: AuditTrailQuery) -> tuple[AuditRecordView, ...]:
         return await self._units().records.list(query)
+
+    async def execute_page(self, query: AuditTrailQuery) -> AuditTrailPage:
+        """一次取当前页 + 满足筛选的总数（服务端翻页）。"""
+        records = self._units().records
+        return AuditTrailPage(
+            items=await records.list(query),
+            total=await records.count(query),
+        )

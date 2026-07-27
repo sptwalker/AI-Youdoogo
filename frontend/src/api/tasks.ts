@@ -73,6 +73,14 @@ export function runTask(id: string): Promise<TaskCard> {
   return request({ method: 'POST', url: `/tasks/${id}/run` })
 }
 
+/** 编辑/补指派未开跑任务（created/rejected），留空字段不改（P2-12）。 */
+export function editTask(
+  id: string,
+  payload: { title?: string; priority?: string; assignee_agent_id?: string },
+): Promise<TaskCard> {
+  return request({ method: 'PATCH', url: `/tasks/${id}`, data: payload })
+}
+
 // ── 任务编排进度（docs/14 阶段B）──────────────────────────
 export interface OrchStep {
   id: string

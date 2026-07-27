@@ -17,6 +17,7 @@ from app.platform.http_runtime import ok
 from app.schemas.task import (
     DecomposeRequest,
     TaskCreate,
+    TaskEdit,
     TransitionRequest,
 )
 
@@ -59,6 +60,24 @@ async def create_task(body: TaskCreate, db: DB, user: CurrentUser) -> dict:
                 parent_id=body.parent_id,
                 sla_hours=body.sla_hours,
                 payload=tuple(body.payload.items()),
+            ),
+        )
+    )
+
+
+@router.patch("/{task_id}")
+async def edit_task(
+    task_id: uuid.UUID, body: TaskEdit, db: DB, _: CurrentUser
+) -> dict:
+    """编辑/补指派任务（仅 created/rejected 未开跑可改，非法状态返回错误，P2-12）。"""
+    return ok(
+        await task_management.edit_task(
+            db,
+            task_management.EditTaskRequest(
+                task_id=task_id,
+                title=body.title,
+                priority=body.priority,
+                assignee_agent_id=body.assignee_agent_id,
             ),
         )
     )

@@ -4,8 +4,10 @@ import {
   createDataSource,
   deleteDataSource,
   listDataSources,
+  testDataSource,
   updateDataSource,
   type DataSource,
+  type DataSourceTestResult,
 } from '../../api/dataSources'
 import { flattenDepts, getTree, type OrgNode } from '../../api/org'
 import {
@@ -15,7 +17,7 @@ import {
 } from '../../api/opsData'
 
 export { DS_TYPES, flattenDepts }
-export type { AgentRole, DataSource, OpsEventGroup, OrgNode }
+export type { AgentRole, DataSource, DataSourceTestResult, OpsEventGroup, OrgNode }
 
 export interface DataSourcesApi {
   listAgents(): Promise<AgentRole[]>
@@ -31,6 +33,7 @@ export interface DataSourcesApi {
   }): Promise<{ id: string }>
   updateDataSource: typeof updateDataSource
   deleteDataSource(id: string): Promise<null>
+  testDataSource: typeof testDataSource
   listOpsEvents(statDate: string): Promise<OpsEventGroup[]>
   saveEventAliases: typeof saveEventAliases
 }
@@ -42,6 +45,7 @@ export const dataSourcesApi: DataSourcesApi = {
   createDataSource,
   updateDataSource,
   deleteDataSource,
+  testDataSource,
   listOpsEvents,
   saveEventAliases,
 }

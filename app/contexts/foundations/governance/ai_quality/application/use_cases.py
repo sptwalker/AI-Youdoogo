@@ -158,6 +158,18 @@ class RecordFeedback:
         return result
 
 
+class ListMyFeedback:
+    """Return the current rater's feedback for a set of execution records (回显已评)。"""
+
+    def __init__(self, unit: AIQualityUnitOfWork) -> None:
+        self._unit = unit
+
+    async def execute(
+        self, rater_id: uuid.UUID, task_record_ids: tuple[uuid.UUID, ...]
+    ) -> tuple[FeedbackResult, ...]:
+        return await self._unit.feedback.mine(rater_id, task_record_ids)
+
+
 class ListLowScoreSamples:
     """Return feedback evidence without exposing the repository adapter."""
 

@@ -9,7 +9,7 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Modal, Tag, Typography, message } from 'antd'
+import { Button, Modal, Popconfirm, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
@@ -18,6 +18,8 @@ import {
   aiResearch,
   convertProposal,
   createProposal,
+  deleteProposal,
+  editProposal,
   getProposal,
   listProposals,
   PROPOSAL_STATUS,
@@ -74,6 +76,51 @@ export default function Proposals() {
       valueType: 'option',
       render: (_, r) => {
         const a = [<a key="d" onClick={() => openDetail(r.id)}>详情</a>]
+        if (r.status === 'draft' && r.creator_id === me?.id) {
+          a.push(
+            <ModalForm<{ title: string; background: string; plan: string; benefit_risk?: string; priority: string }>
+              key="edit"
+              title="编辑草稿"
+              trigger={<a>编辑</a>}
+              modalProps={{ destroyOnHidden: true }}
+              initialValues={{
+                title: r.title,
+                background: r.background,
+                plan: r.plan,
+                benefit_risk: r.benefit_risk ?? undefined,
+                priority: r.priority,
+              }}
+              onFinish={async (v) => {
+                await editProposal(r.id, v)
+                message.success('已保存')
+                reload()
+                return true
+              }}
+            >
+              <ProFormText name="title" label="标题" rules={[{ required: true }]} />
+              <ProFormTextArea name="background" label="背景与问题" rules={[{ required: true }]} />
+              <ProFormTextArea name="plan" label="方案" rules={[{ required: true }]} />
+              <ProFormTextArea name="benefit_risk" label="收益与风险" />
+              <ProFormSelect name="priority" label="优先级" options={[
+                { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }]} />
+            </ModalForm>,
+          )
+          a.push(
+            <Popconfirm
+              key="del"
+              title="删除该草稿提案？"
+              onConfirm={() => {
+                void pending.run(`delete:${r.id}`, async () => {
+                  await deleteProposal(r.id)
+                  message.success('已删除')
+                  reload()
+                }).catch(() => {})
+              }}
+            >
+              <a>删除</a>
+            </Popconfirm>,
+          )
+        }
         if (canManage && canResearchProposal(r.status)) {
           const researchKey = `research:${r.id}`
           a.push(

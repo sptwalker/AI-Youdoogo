@@ -368,6 +368,10 @@ class MeetingApplication:
             await uow.commit()
         return task
 
+    async def list_vote_subjects(self, meeting_id: uuid.UUID) -> tuple[str, ...]:
+        async with self._uow_factory() as uow:
+            return await uow.meetings.list_vote_subjects(meeting_id)
+
     async def list_discussions(self, meeting_id: uuid.UUID) -> tuple[DiscussionResult, ...]:
         async with self._uow_factory() as uow:
             discussions = await uow.meetings.list_discussions(meeting_id)

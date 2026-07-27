@@ -35,6 +35,14 @@ class DecomposeRequest(BaseModel):
     subtasks: list[SubTask] = Field(min_length=1)
 
 
+class TaskEdit(BaseModel):
+    """编辑/补指派未开跑任务（字段留空表示不改）。"""
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    priority: str | None = Field(default=None, max_length=16)
+    assignee_agent_id: uuid.UUID | None = None
+
+
 class TransitionRequest(BaseModel):
     """状态流转。"""
 

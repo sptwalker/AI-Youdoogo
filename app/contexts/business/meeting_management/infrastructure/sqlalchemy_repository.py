@@ -190,6 +190,17 @@ class SQLAlchemyMeetingRepository:
         ).scalars()
         return tuple(_vote_from_row(row) for row in rows)
 
+    async def list_vote_subjects(self, meeting_id: uuid.UUID) -> tuple[str, ...]:
+        rows = (
+            await self._session.execute(
+                select(MeetingVote.subject)
+                .where(MeetingVote.meeting_id == meeting_id)
+                .distinct()
+                .order_by(MeetingVote.subject)
+            )
+        ).scalars()
+        return tuple(rows)
+
     async def add_resolution(self, resolution: Resolution) -> None:
         self._session.add(
             MeetingResolution(

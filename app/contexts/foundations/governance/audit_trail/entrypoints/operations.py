@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.foundations.governance.audit_trail.contracts.audit import (
     AppendAuditRecordCommand,
     AuditRecordView,
+    AuditTrailPage,
     AuditTrailQuery,
 )
 from app.contexts.foundations.governance.audit_trail.infrastructure.composition import (
@@ -28,3 +29,11 @@ async def query_audit_trail(
 ) -> tuple[AuditRecordView, ...]:
     """Query immutable audit evidence in reverse chronological order."""
     return await build_audit_trail(session).query(query)
+
+
+async def query_audit_trail_page(
+    session: AsyncSession,
+    query: AuditTrailQuery,
+) -> AuditTrailPage:
+    """Query one page of audit evidence plus the filtered total count."""
+    return await build_audit_trail(session).query_page(query)

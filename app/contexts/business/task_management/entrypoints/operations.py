@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.business.task_management.application.contracts import (
     CreateTaskRequest,
     DecomposeTaskRequest,
+    EditTaskRequest,
     RunTaskRequest,
     TaskPrincipal,
     TransitionTaskRequest,
@@ -21,6 +22,10 @@ from app.contexts.business.task_management.infrastructure.composition import (
 
 async def create_task(session: AsyncSession, request: CreateTaskRequest) -> dict[str, Any]:
     return (await build_task_management_application(session).create(request)).as_dict()
+
+
+async def edit_task(session: AsyncSession, request: EditTaskRequest) -> dict[str, Any]:
+    return (await build_task_management_application(session).edit(request)).as_dict()
 
 
 async def list_tasks(

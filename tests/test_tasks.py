@@ -6,6 +6,11 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.task_management.application.contracts import EditTaskRequest
+from app.contexts.business.task_management.domain import state_machine
+from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
+    SQLAlchemyTaskManagementAdapter,
+)
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysUser
@@ -101,3 +106,34 @@ async def test_list_limit_caps_rows(db: tuple[AsyncSession, uuid.UUID]) -> None:
         await task_service.create_task(session, title=f"T{i}", task_type="x", creator_id=uid)
     assert len(await task_service.list_tasks(session, limit=3)) == 3
     assert len(await task_service.list_tasks(session)) == 5  # 默认 100 ≥ 全部
+
+
+def test_assert_editable_guard() -> None:
+    """P2-12：仅 created/rejected 未开跑可编辑，其余状态守卫报错。"""
+    state_machine.assert_editable(state_machine.CREATED)
+    state_machine.assert_editable(state_machine.REJECTED)
+    with pytest.raises(ApplicationError, match="不可编辑"):
+        state_machine.assert_editable(state_machine.EXECUTING)
+
+
+async def test_edit_reassigns_pre_run_task(db: tuple[AsyncSession, uuid.UUID]) -> None:
+    """P2-12：created 任务可改标题 + 补指派智能体。"""
+    session, uid = db
+    agent_id = uuid.uuid4()
+    task = await task_service.create_task(session, title="T", task_type="x", creator_id=uid)
+    view = await SQLAlchemyTaskManagementAdapter(session).edit_view(
+        EditTaskRequest(task_id=task.id, title="改名", assignee_agent_id=agent_id)
+    )
+    assert view.title == "改名"
+    assert view.assignee_agent_id == agent_id
+
+
+async def test_edit_rejected_after_dispatch(db: tuple[AsyncSession, uuid.UUID]) -> None:
+    """P2-12：已分发（开跑）任务不可再编辑。"""
+    session, uid = db
+    task = await task_service.create_task(session, title="T", task_type="x", creator_id=uid)
+    await task_service.transition(session, task.id, task_flow.DISPATCHED, operator_id=uid)
+    with pytest.raises(ApplicationError, match="不可编辑"):
+        await SQLAlchemyTaskManagementAdapter(session).edit_view(
+            EditTaskRequest(task_id=task.id, title="x")
+        )

@@ -25,10 +25,18 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     CANCELLED: frozenset(),
 }
 TERMINAL: frozenset[str] = frozenset({ACCEPTED, CANCELLED})
+# 仅「未开跑」的任务可编辑/补指派：created 尚未分发、rejected 待重新分发。
+EDITABLE: frozenset[str] = frozenset({CREATED, REJECTED})
 
 
 def can_transition(from_status: str, to_status: str) -> bool:
     return to_status in TRANSITIONS.get(from_status, frozenset())
+
+
+def assert_editable(status: str) -> None:
+    if status not in EDITABLE:
+        allowed = "、".join(sorted(EDITABLE))
+        raise RuleViolation(f"任务当前状态 {status} 不可编辑；仅 {allowed} 可编辑/补指派")
 
 
 def assert_transition(from_status: str, to_status: str) -> None:

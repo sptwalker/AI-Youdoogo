@@ -12,6 +12,9 @@ export interface TaskRecord {
   error_msg: string | null
   duration_ms: number | null
   create_time: string
+  /** 当前用户对该记录的已有评分（回显 + 提交后只读，P1-9）。 */
+  my_score: number | null
+  my_comment: string | null
 }
 
 export interface AgentRole {

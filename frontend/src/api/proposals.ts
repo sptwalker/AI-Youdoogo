@@ -54,6 +54,19 @@ export function aiResearch(id: string): Promise<Review> {
   return request({ method: 'POST', url: `/proposals/${id}/ai-research` })
 }
 
+/** 编辑草稿提案（仅创建者本人、仅草稿状态可改，P3-7）。 */
+export function editProposal(
+  id: string,
+  payload: { title: string; background: string; plan: string; benefit_risk?: string; priority?: string },
+): Promise<Proposal> {
+  return request({ method: 'PATCH', url: `/proposals/${id}`, data: payload })
+}
+
+/** 删除草稿提案（软删除，仅创建者本人、仅草稿状态可删，P3-7）。 */
+export function deleteProposal(id: string): Promise<{ id: string }> {
+  return request({ method: 'DELETE', url: `/proposals/${id}` })
+}
+
 export function reviewProposal(id: string, decision: 'approve' | 'reject', conclusion: string) {
   return request({ method: 'POST', url: `/proposals/${id}/review`, data: { decision, conclusion } })
 }

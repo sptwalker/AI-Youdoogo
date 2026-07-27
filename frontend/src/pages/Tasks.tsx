@@ -16,6 +16,7 @@ import Markdown from '../components/Markdown'
 import { listRoles } from '../api/agents'
 import {
   createTask,
+  editTask,
   listTasks,
   runTask,
   STATUS_LABEL,
@@ -70,6 +71,44 @@ export default function Tasks() {
       valueType: 'option',
       render: (_, r) => {
         const actions = []
+        if (r.status === 'created' || r.status === 'rejected') {
+          // 未开跑可编辑/补指派（对应后端 EDITABLE 状态）。
+          actions.push(
+            <ModalForm<{ title: string; priority: string; assignee_agent_id?: string }>
+              key="edit"
+              title="编辑任务"
+              trigger={<Button type="link" size="small">编辑</Button>}
+              modalProps={{ destroyOnHidden: true }}
+              initialValues={{
+                title: r.title,
+                priority: r.priority,
+                assignee_agent_id: r.assignee_agent_id ?? undefined,
+              }}
+              onFinish={async (v) => {
+                await editTask(r.id, v)
+                message.success('已保存')
+                reload()
+                return true
+              }}
+            >
+              <ProFormText name="title" label="标题" rules={[{ required: true }]} />
+              <ProFormSelect
+                name="priority"
+                label="优先级"
+                options={[
+                  { value: 'high', label: '高' },
+                  { value: 'normal', label: '普通' },
+                  { value: 'low', label: '低' },
+                ]}
+              />
+              <ProFormSelect
+                name="assignee_agent_id"
+                label="指派智能体"
+                request={agentRoleOptions}
+              />
+            </ModalForm>,
+          )
+        }
         if (r.assignee_agent_id && (r.status === 'created' || r.status === 'dispatched')) {
           const runKey = `run:${r.id}`
           actions.push(

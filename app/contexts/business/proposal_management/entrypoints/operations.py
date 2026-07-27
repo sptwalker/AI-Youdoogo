@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.business.proposal_management.application.contracts import (
     ConvertProposalCommand,
     CreateProposalCommand,
+    DeleteProposalCommand,
+    EditProposalCommand,
     GetProposalQuery,
     ListProposalsQuery,
     ProposalDetailResult,
@@ -45,6 +47,41 @@ async def create_proposal(
             priority=priority,
             department_id=department_id,
         )
+    )
+
+
+async def edit_proposal(
+    session: AsyncSession,
+    proposal_id: uuid.UUID,
+    *,
+    actor_id: uuid.UUID,
+    title: str,
+    background: str,
+    plan: str,
+    benefit_risk: str | None = None,
+    priority: str = "normal",
+) -> ProposalResult:
+    return await build_proposal_application(session).edit(
+        EditProposalCommand(
+            proposal_id=proposal_id,
+            actor_id=actor_id,
+            title=title,
+            background=background,
+            plan=plan,
+            benefit_risk=benefit_risk,
+            priority=priority,
+        )
+    )
+
+
+async def delete_proposal(
+    session: AsyncSession,
+    proposal_id: uuid.UUID,
+    *,
+    actor_id: uuid.UUID,
+) -> None:
+    await build_proposal_application(session).delete(
+        DeleteProposalCommand(proposal_id=proposal_id, actor_id=actor_id)
     )
 
 
