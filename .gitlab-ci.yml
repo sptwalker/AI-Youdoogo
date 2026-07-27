@@ -29,6 +29,9 @@ variables:
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
   UV_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
   NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+  # npm cache must live inside the workspace so GitLab can archive it (paths outside
+  # $CI_PROJECT_DIR are not cacheable). node_modules stays uncached; only the tarball cache is.
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
 
 .verify_rules:
   rules:
@@ -53,12 +56,16 @@ verify_backend:
   variables:
     REDIS_URL: redis://redis:6379/0
   extends: .verify_rules
+  # uv's content-addressed download cache, keyed on the resolved lockfile. The venv
+  # (.venv) is intentionally NOT cached — it is rebuilt by `uv sync` from this cache.
   cache:
     key:
+      prefix: uv
       files:
         - uv.lock
     paths:
       - .cache/uv/
+    policy: pull-push
   before_script:
     - python -m pip install --no-cache-dir uv==0.11.7
     - uv sync --frozen
@@ -73,6 +80,16 @@ verify_frontend:
     name: node:20-alpine
     pull_policy: always
   extends: .verify_rules
+  # npm's package (tarball) cache, keyed on the frontend lockfile. node_modules is left
+  # to `npm ci` (which wipes and reinstalls it) and is never cached.
+  cache:
+    key:
+      prefix: npm
+      files:
+        - frontend/package-lock.json
+    paths:
+      - .cache/npm/
+    policy: pull-push
   script:
     - npm --prefix frontend ci
     - npm --prefix frontend run test:coverage
@@ -114,6 +131,9 @@ preflight_delivery:
     DOCKER_HOST: unix:///runner-docker.sock
     DOCKER_BUILDKIT: "1"
     BUILDX_GIT_INFO: "0"
+    # Registry cache export requires the docker-container driver. Give every Job its
+    # own builder so 10 concurrent builds never race on one mutable BuildKit instance.
+    BUILDX_BUILDER: "youdoogo-ci-${CI_JOB_ID}"
   before_script:
     # The AI runner mounts the host Docker socket; no privileged DinD service is used.
     - test -n "${SWR_REGION:-}" && test -n "${SWR_REGISTRY_OVERRIDE:-}"
@@ -122,9 +142,13 @@ preflight_delivery:
     - export SWR_REGISTRY_HOST="${SWR_REGISTRY%%/*}"
     - export IMAGE_TAG="ci-${CI_COMMIT_SHA}"
     - docker info >/dev/null
+    - docker buildx create --name "$BUILDX_BUILDER" --driver docker-container --use
+    - docker buildx inspect --bootstrap
     - printf '%s' "$SWR_PASSWORD" | docker login -u "${SWR_REGION}@${SWR_AK}" --password-stdin "$SWR_REGISTRY_HOST"
   after_script:
     - if [ -n "${SWR_REGISTRY_OVERRIDE:-}" ]; then docker logout "${SWR_REGISTRY_OVERRIDE%%/*}" >/dev/null 2>&1 || true; fi
+    # Only remove this Job's builder; never prune shared image or BuildKit caches.
+    - docker buildx rm "$BUILDX_BUILDER" >/dev/null 2>&1 || true
 
 build_backend:
   extends: .swr_build
@@ -134,6 +158,8 @@ build_backend:
         --push
         --provenance=false
         --platform linux/amd64
+        --cache-from "type=registry,ref=${SWR_REGISTRY}/youdoogo-backend:buildcache"
+        --cache-to "type=registry,ref=${SWR_REGISTRY}/youdoogo-backend:buildcache,mode=max,image-manifest=true,oci-mediatypes=true"
         --tag "${SWR_REGISTRY}/youdoogo-backend:${IMAGE_TAG}"
         .
 
@@ -146,6 +172,8 @@ build_frontend:
         --provenance=false
         --platform linux/amd64
         --file frontend/Dockerfile
+        --cache-from "type=registry,ref=${SWR_REGISTRY}/youdoogo-frontend:buildcache"
+        --cache-to "type=registry,ref=${SWR_REGISTRY}/youdoogo-frontend:buildcache,mode=max,image-manifest=true,oci-mediatypes=true"
         --tag "${SWR_REGISTRY}/youdoogo-frontend:${IMAGE_TAG}"
         .
 
