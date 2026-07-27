@@ -8,26 +8,8 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.API_PROXY_TARGET || 'http://127.0.0.1:8000'
   return {
     plugins: [react()],
-    build: {
-      rolldownOptions: {
-        output: {
-          codeSplitting: {
-            groups: [
-              {
-                name: 'antd-date-picker',
-                test: /node_modules[\\/]rc-picker[\\/]/,
-                includeDependenciesRecursively: false,
-              },
-              {
-                name: 'ant-design-pro',
-                test: /node_modules[\\/]@ant-design[\\/]pro-/,
-                includeDependenciesRecursively: false,
-              },
-            ],
-          },
-        },
-      },
-    },
+    // Keep Vite's default chunking: splitting interdependent Ant Design packages
+    // into separate groups caused the production bundle to fail during startup.
     server: {
       proxy: {
         // 本地开发代理到 FastAPI 后端

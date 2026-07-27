@@ -267,6 +267,17 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
     assert "baseURL: '/api/v1'" in client
 
 
+def test_frontend_build_avoids_fragile_custom_vendor_chunks() -> None:
+    vite_config = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
+    for custom_split_marker in (
+        "rolldownOptions",
+        "codeSplitting",
+        "antd-date-picker",
+        "ant-design-pro",
+    ):
+        assert custom_split_marker not in vite_config
+
+
 def test_frontend_nginx_template_renders_and_validates(tmp_path: Path) -> None:
     envsubst = required_command("envsubst")
     nginx = required_command("nginx")
