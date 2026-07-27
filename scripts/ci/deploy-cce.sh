@@ -261,7 +261,8 @@ verify_deployment_image() {
   fi
   mapfile -t pod_images < <(
     kubectl get pods -n "$KUBE_NAMESPACE" -l "app.kubernetes.io/name=${deployment}" \
-      -o jsonpath="{range .items[*]}{.spec.containers[?(@.name=='${container}')].image}{\"\\n\"}{end}"
+      --field-selector=status.phase=Running \
+      -o jsonpath="{range .items[?(@.metadata.deletionTimestamp==null)]}{.spec.containers[?(@.name=='${container}')].image}{\"\\n\"}{end}"
   )
   if [[ "${#pod_images[@]}" -eq 0 ]]; then
     echo "ERROR: deployment/${deployment} has no pods" >&2

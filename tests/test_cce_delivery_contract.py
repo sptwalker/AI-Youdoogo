@@ -246,6 +246,14 @@ def test_migration_job_is_once_only_and_bounded(tmp_path: Path) -> None:
     container = job["spec"]["template"]["spec"]["containers"][0]
     assert container["args"] == ["migrate"]
 
+
+def test_deploy_image_verification_ignores_terminating_rollout_pods() -> None:
+    deploy = (ROOT / "scripts/ci/deploy-cce.sh").read_text(encoding="utf-8")
+    assert "--field-selector=status.phase=Running" in deploy
+    assert ".items[?(@.metadata.deletionTimestamp==null)]" in deploy
+    assert "deployment/${deployment} uses ${actual}, expected ${expected}" in deploy
+
+
 def test_frontend_same_origin_proxy_and_spa() -> None:
     nginx = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
     dockerfile = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
