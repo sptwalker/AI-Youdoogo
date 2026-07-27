@@ -6,6 +6,7 @@ import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.foundations.governance.usage_budget.public import record_usage
 from app.contexts.foundations.knowledge.organizational_memory.contracts import (
     DistillConversationCommand,
     MemoryDraft,
@@ -17,7 +18,6 @@ from app.contexts.foundations.model_gateway.contracts.completion import (
     LlmCompletionPort,
     LlmCompletionRequest,
 )
-from app.llm.usage import record_usage
 
 _DISTILL_SYSTEM = (
     "你是记忆整理助手。把一段对话记录提炼成结构化的长期记忆，供日后检索。"

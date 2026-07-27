@@ -25,8 +25,8 @@ from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_ad
     SQLAlchemyAIQualityUnitOfWork,
     SQLAlchemyEvaluationSubject,
 )
+from app.contexts.foundations.governance.usage_budget.public import record_usage
 from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
-from app.llm.usage import record_usage
 
 
 class AIQualityOperations:

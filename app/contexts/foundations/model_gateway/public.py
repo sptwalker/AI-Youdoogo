@@ -6,12 +6,12 @@ Phase 1 的唯一切换点：把 ``LocalLlmAdapter`` 换成 ``RemoteLlmAdapter``
 
 from __future__ import annotations
 
+from app.contexts.foundations.governance.usage_budget.public import extract_usage
 from app.contexts.foundations.model_gateway.contracts.completion import LlmCompletionPort
 from app.contexts.foundations.model_gateway.infrastructure.local_adapter import (
     LocalLlmAdapter,
 )
 from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage
 
 
 def build_local_llm_completion_port() -> LlmCompletionPort:

@@ -33,10 +33,13 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.system_cl
 from app.contexts.foundations.execution.agent_execution.infrastructure.transaction_boundary import (
     SQLAlchemyExternalExecutionBoundary,
 )
+from app.contexts.foundations.governance.usage_budget.public import (
+    budget_exceeded,
+    record_usage,
+)
 from app.contexts.foundations.model_gateway.public import (
     build_local_llm_completion_port,
 )
-from app.llm.usage import budget_exceeded, record_usage
 
 
 def build_agent_execution_application(session: AsyncSession) -> AgentExecutionApplication:

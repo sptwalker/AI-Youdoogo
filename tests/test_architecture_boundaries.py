@@ -685,3 +685,57 @@ def test_llm_completion_flows_through_model_gateway_seam() -> None:
     # 债务白名单精确——不留已消除项，避免虚假债务。
     stale = sorted(_LLM_COMPLETION_MIGRATION_DEBT - touching)
     assert stale == [], f"债务白名单存在冗余项（已消除应删除）：{stale}"
+
+
+# ── knowledge_retrieval 检索接缝守卫（ADR 0002 · A1）──────────────────
+_KNOWLEDGE_SESSION_ENTRYPOINTS = {
+    "search_knowledge",
+    "answer_knowledge",
+    "diagnose_retrieval_arms",
+}
+_KNOWLEDGE_RETRIEVAL_CTX = (
+    APP / "contexts" / "foundations" / "knowledge" / "knowledge_retrieval"
+)
+
+
+def _imports_knowledge_session_entrypoint(path: Path) -> bool:
+    """文件是否直引会话级知识检索 entrypoint（应改经端口工厂）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.endswith("knowledge_retrieval.public") or module.endswith(
+                "knowledge_retrieval.entrypoints.operations"
+            ):
+                if any(alias.name in _KNOWLEDGE_SESSION_ENTRYPOINTS for alias in node.names):
+                    return True
+    return False
+
+
+def test_knowledge_search_flows_through_port_seam() -> None:
+    """跨 Context 知识检索须经 KnowledgeSearchPort 端口；禁止直引会话级 entrypoint 函数。
+
+    ``knowledge_retrieval`` 自身（public/operations 内部装配）与 ``app/api``、``app/agents``
+    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。
+    """
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (APP / "contexts").rglob("*.py")
+        if not path.is_relative_to(_KNOWLEDGE_RETRIEVAL_CTX)
+        and _imports_knowledge_session_entrypoint(path)
+    )
+    assert offenders == [], (
+        f"跨 Context 直引会话级知识检索 entrypoint（应经端口工厂）：{offenders}"
+    )
+
+
+# ── usage_budget 记账接缝守卫（ADR 0002 · A2）────────────────────────
+def test_usage_recording_flows_through_usage_budget_public() -> None:
+    """``app/contexts`` 下 LLM 用量记账一律经 usage_budget.public；禁止引 legacy ``app.llm.usage``。
+
+    ``app/agents``、``app/services`` 等迁移期 facade 仍可用旧路径（不在扫描面内）。
+    """
+    offenders = _violations(APP / "contexts", ("app.llm.usage",))
+    assert offenders == [], (
+        f"新增 legacy app.llm.usage 直引（应经 usage_budget.public）：{offenders}"
+    )

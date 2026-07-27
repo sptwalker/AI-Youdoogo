@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.foundations.governance.usage_budget.public import record_usage
 from app.contexts.foundations.knowledge import embedding_gateway
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import rerank_gateway
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.configuration import (
@@ -33,7 +34,6 @@ from app.contexts.foundations.model_gateway.contracts.completion import (
     LlmCompletionRequest,
 )
 from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
-from app.llm.usage import record_usage
 from app.models.knowledge import KnowledgeFile, KnowledgeVector
 
 logger = logging.getLogger(__name__)

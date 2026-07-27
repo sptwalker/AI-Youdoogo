@@ -22,7 +22,9 @@ from app.contexts.foundations.governance.system_configuration.public import (
 from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
     SearchKnowledgeQuery,
 )
-from app.contexts.foundations.knowledge.knowledge_retrieval.public import search_knowledge
+from app.contexts.foundations.knowledge.knowledge_retrieval.public import (
+    build_local_knowledge_search_port,
+)
 from app.contexts.foundations.knowledge.semantic_catalog.public import term_prompt
 from app.contexts.foundations.knowledge.wiki_management.public import (
     agent_visible_knowledge_base_ids,
@@ -60,8 +62,7 @@ class CurrentKnowledgeAugmentationAdapter:
                 department_id=expert.department_id,
                 owner_agent_id=expert.expert_id,
             )
-            result = await search_knowledge(
-                self._session,
+            result = await build_local_knowledge_search_port(self._session).search(
                 SearchKnowledgeQuery(
                     query=user_message,
                     top_k=5,

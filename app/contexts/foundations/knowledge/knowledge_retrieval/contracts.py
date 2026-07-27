@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,3 +73,13 @@ class KnowledgeAnswer:
                 for citation in self.citations
             ],
         }
+
+
+class KnowledgeSearchPort(Protocol):
+    """跨 Context 可远端替换的知识检索端口（会话无关签名）。
+
+    Phase 2（docs/21 §11「先切只读 Search」）由 RemoteKnowledgeAdapter 实现同一签名，
+    届时仅换 ``public.build_local_knowledge_search_port`` 的返回实现即可全量改道。
+    """
+
+    async def search(self, query: SearchKnowledgeQuery) -> SearchKnowledgeResult: ...
