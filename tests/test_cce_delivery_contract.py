@@ -247,10 +247,14 @@ def test_migration_job_is_once_only_and_bounded(tmp_path: Path) -> None:
     assert container["args"] == ["migrate"]
 
 
-def test_deploy_image_verification_ignores_terminating_rollout_pods() -> None:
+def test_deploy_image_verification_targets_current_rollout_pods() -> None:
     deploy = (ROOT / "scripts/ci/deploy-cce.sh").read_text(encoding="utf-8")
     assert "--field-selector=status.phase=Running" in deploy
-    assert ".items[?(@.metadata.deletionTimestamp==null)]" in deploy
+    assert ".spec.template.metadata.labels.app\\.kubernetes\\.io/version" in deploy
+    assert (
+        'app.kubernetes.io/name=${deployment},app.kubernetes.io/version=${version}'
+        in deploy
+    )
     assert "deployment/${deployment} uses ${actual}, expected ${expected}" in deploy
 
 

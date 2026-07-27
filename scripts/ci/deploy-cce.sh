@@ -253,16 +253,22 @@ kubectl apply --dry-run=server -f "$ingress_manifest" >/dev/null
 kubectl apply -f "$ingress_manifest"
 
 verify_deployment_image() {
-  local deployment="$1" container="$2" expected="$3" actual
+  local deployment="$1" container="$2" expected="$3" actual version
   actual="$(kubectl get deployment "$deployment" -n "$KUBE_NAMESPACE" -o jsonpath="{.spec.template.spec.containers[?(@.name=='${container}')].image}")"
   if [[ "$actual" != "$expected" ]]; then
     echo "ERROR: deployment/${deployment} uses ${actual}, expected ${expected}" >&2
     exit 1
   fi
+  version="$(kubectl get deployment "$deployment" -n "$KUBE_NAMESPACE" -o jsonpath="{.spec.template.metadata.labels.app\.kubernetes\.io/version}")"
+  if [[ -z "$version" ]]; then
+    echo "ERROR: deployment/${deployment} has no version label" >&2
+    exit 1
+  fi
   mapfile -t pod_images < <(
-    kubectl get pods -n "$KUBE_NAMESPACE" -l "app.kubernetes.io/name=${deployment}" \
+    kubectl get pods -n "$KUBE_NAMESPACE" \
+      -l "app.kubernetes.io/name=${deployment},app.kubernetes.io/version=${version}" \
       --field-selector=status.phase=Running \
-      -o jsonpath="{range .items[?(@.metadata.deletionTimestamp==null)]}{.spec.containers[?(@.name=='${container}')].image}{\"\\n\"}{end}"
+      -o jsonpath="{range .items[*]}{.spec.containers[?(@.name=='${container}')].image}{\"\\n\"}{end}"
   )
   if [[ "${#pod_images[@]}" -eq 0 ]]; then
     echo "ERROR: deployment/${deployment} has no pods" >&2
