@@ -42,9 +42,34 @@ They are still protected because they select production infrastructure.
 | `RUNTIME_SECRET_NAME` | Existing application runtime Secret in `KUBE_NAMESPACE`; first-release bootstrap creates it once. |
 | `RUNTIME_CONFIGMAP_NAME` | Existing application runtime ConfigMap in `KUBE_NAMESPACE`; first-release bootstrap creates it. |
 
-All 12 variables are checked by `preflight_delivery` before either image is built. The deployment
-script validates Kubernetes object existence, type, required keys, host ownership, server-side
-dry runs, and RBAC before mutating a workload.
+The 12 existing delivery variables are checked by `preflight_delivery` before either application
+image is built. The deploy-tools image reuses the existing `SWR_REGION`, `SWR_AK`,
+`SWR_PASSWORD`, and `SWR_REGISTRY_OVERRIDE` configuration; no additional registry variable or
+second copy of the SWR credential is required. The deployment script validates Kubernetes object
+existence, type, required keys, host ownership, server-side dry runs, and RBAC before mutating a
+workload.
+
+## Deploy-tools image bootstrap and release
+
+The deploy job uses the immutable SWR tag
+`youdoogo-deploy-tools:alpine3.22.1-kubectl1.31.5-r1`. Its Dockerfile pins Alpine 3.22.1 and
+kubectl v1.31.5, verifies the kubectl binary with the repository's approved SHA256, and installs
+bash, CA certificates, curl, Python 3, and PyYAML once at image-build time.
+
+Before merging the first change, the platform owner must confirm that the approved SWR namespace
+permits push and pull of `youdoogo-deploy-tools`. The first dev push containing
+`docker/ci/deploy-tools.Dockerfile` runs `build_deploy_tools` in the `bootstrap` stage. That job
+uses the existing SWR login/buildx flow to publish the fixed tag before `deploy_cce` is eligible to
+start, so the rollout does not assume a pre-existing tool image.
+
+The build job serializes publication with a dedicated resource group and never overwrites the
+remote tag. On a retry, it pulls the existing image and verifies the OCI version label, required
+commands, PyYAML import, kubectl client, and approved kubectl SHA256 before succeeding. For a real
+toolchain change, update the Dockerfile, its OCI version label, and `.gitlab-ci.yml`'s
+`DEPLOY_TOOLS_TAG` together; never reuse a published tag. If an unchanged tag is accidentally
+removed from SWR, run the optional `bootstrap_deploy_tools` job from a dev delivery pipeline to
+rebuild it. Platform policy should also deny tag overwrite for this repository where SWR supports
+it.
 
 ## Required pre-existing CCE and SWR state
 
@@ -95,13 +120,15 @@ certificate material.
 - The kubeconfig can get/list the referenced objects and cluster Ingress inventory, perform
   server-side dry runs, and create/patch/get Jobs, Services, Deployments, and Ingresses in the
   namespace. It does not need permission to create Secrets or ConfigMaps.
-- The approved SWR namespace contains or permits creation/push of `youdoogo-backend` and
-  `youdoogo-frontend`, and the CCE pull Secret can read them.
+- The approved SWR namespace contains or permits creation/push of `youdoogo-backend`,
+  `youdoogo-frontend`, and `youdoogo-deploy-tools`. GitLab Runner can pull the deploy-tools image
+  with the protected SWR variables, and the CCE pull Secret can read both application images.
 
 ## Release behavior and ownership
 
-The pipeline pushes only immutable `ci-$CI_COMMIT_SHA` tags. It scans both images for HIGH and
-CRITICAL vulnerabilities before deployment. A commit-scoped migration Job has
+The pipeline pushes application images only as immutable `ci-$CI_COMMIT_SHA` tags and publishes
+the deployment toolchain under its separately versioned immutable tag. It scans both application
+images for HIGH and CRITICAL vulnerabilities before deployment. A commit-scoped migration Job has
 `backoffLimit: 0` and a ten-minute deadline. An existing failed/incomplete Job is never deleted or
 retried by CI; a platform/application owner must diagnose it and explicitly decide how to recover.
 

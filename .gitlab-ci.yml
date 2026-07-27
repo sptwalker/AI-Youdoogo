@@ -2,6 +2,7 @@
 # pull_policy=always. Use direct upstream images; the runner has demonstrated
 # successful direct Docker Hub pulls in the same pipeline.
 stages:
+  - bootstrap
   - verify
   - build
   - scan
@@ -11,7 +12,12 @@ stages:
 default:
   tags:
     - AI
-  retry: 2
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - api_failure
   interruptible: true
 
 workflow:
@@ -24,8 +30,9 @@ variables:
   GIT_STRATEGY: fetch
   GIT_DEPTH: "2"
   GET_SOURCES_ATTEMPTS: "3"
-  KUBECTL_VERSION: v1.31.5
-  KUBECTL_SHA256: fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af
+  # Immutable SWR tag. Bump it together with the Dockerfile version label;
+  # the contract test keeps both values synchronized.
+  DEPLOY_TOOLS_TAG: alpine3.22.1-kubectl1.31.5-r1
   UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
   UV_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
   NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
@@ -63,16 +70,17 @@ verify_backend:
       prefix: uv
       files:
         - uv.lock
+    policy: pull
     paths:
       - .cache/uv/
     policy: pull-push
   before_script:
+    - apt-get update
+    - apt-get install --yes --no-install-recommends git
+    - rm -rf /var/lib/apt/lists/*
     - python -m pip install --no-cache-dir uv==0.11.7
-    - uv sync --frozen
   script:
-    - uv run --frozen ruff check .
-    - uv run --frozen mypy app
-    - uv run --frozen pytest -q -m "not delivery_contract" --cov=app --cov-report=term-missing:skip-covered
+    - bash scripts/ci/verify-backend-localfs.sh
 
 verify_frontend:
   stage: verify
@@ -109,7 +117,8 @@ verify_delivery_contract:
     - python -m pip install --no-cache-dir pytest PyYAML
   script:
     - python -m pytest -q -m delivery_contract tests/test_cce_delivery_contract.py
-    - bash -n scripts/ci/deploy-cce.sh scripts/ci/bootstrap-runtime.sh scripts/ci/smoke-youdoogo.sh
+    - bash -n scripts/ci/deploy-cce.sh scripts/ci/bootstrap-runtime.sh scripts/ci/smoke-youdoogo.sh scripts/ci/verify-backend-localfs.sh
+    - sh -n scripts/ci/trivy-image-scan.sh
     - python -m py_compile scripts/ci/render_cce.py scripts/ci/preflight_vars.py scripts/ci/notify.py
 
 preflight_delivery:
@@ -150,6 +159,62 @@ preflight_delivery:
     # Only remove this Job's builder; never prune shared image or BuildKit caches.
     - docker buildx rm "$BUILDX_BUILDER" >/dev/null 2>&1 || true
 
+.deploy_tools_build:
+  extends: .swr_build
+  stage: bootstrap
+  interruptible: false
+  resource_group: youdoogo-deploy-tools-publish
+  script:
+    - |
+      export DEPLOY_TOOLS_IMAGE="${SWR_REGISTRY}/youdoogo-deploy-tools:${DEPLOY_TOOLS_TAG}"
+      verify_deploy_tools_image() {
+        docker pull "$DEPLOY_TOOLS_IMAGE"
+        actual_version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$DEPLOY_TOOLS_IMAGE")"
+        test "$actual_version" = "$DEPLOY_TOOLS_TAG"
+        docker run --rm "$DEPLOY_TOOLS_IMAGE" sh -ec '
+          command -v bash && command -v curl && command -v python3 && command -v kubectl
+          python3 -c "import yaml"
+          printf "%s  %s\n" "fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af" /usr/local/bin/kubectl | sha256sum -c -
+          kubectl version --client=true
+        '
+      }
+      if docker manifest inspect "$DEPLOY_TOOLS_IMAGE" >/dev/null 2>&1; then
+        echo "Immutable deploy-tools tag already exists; verifying without overwrite"
+        verify_deploy_tools_image
+        exit 0
+      fi
+      docker buildx build \
+        --pull \
+        --push \
+        --provenance=false \
+        --platform linux/amd64 \
+        --file docker/ci/deploy-tools.Dockerfile \
+        --tag "$DEPLOY_TOOLS_IMAGE" \
+        docker/ci
+      verify_deploy_tools_image
+
+# The first dev pipeline containing a deploy-tools Dockerfile change builds the
+# fixed tag before any job can try to use it. Future version bumps must change
+# both this Dockerfile and DEPLOY_TOOLS_TAG.
+build_deploy_tools:
+  extends: .deploy_tools_build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - docker/ci/deploy-tools.Dockerfile
+    - when: never
+
+# Recovery path when an immutable tag was removed from SWR: run this optional
+# job from a dev delivery pipeline. It still refuses to overwrite an existing
+# tag, so a content change always requires a new DEPLOY_TOOLS_TAG.
+bootstrap_deploy_tools:
+  extends: .deploy_tools_build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'
+      when: manual
+      allow_failure: true
+    - when: never
+
 build_backend:
   extends: .swr_build
   script:
@@ -185,10 +250,18 @@ build_frontend:
     pull_policy: always
   extends: .delivery_rules
   variables:
+    TRIVY_CACHE_DIR: "$CI_PROJECT_DIR/.cache/trivy"
+    TRIVY_CACHE_POLICY: pull
     TRIVY_NO_PROGRESS: "true"
     TRIVY_SEVERITY: HIGH,CRITICAL
     TRIVY_DB_REPOSITORY: m.daocloud.io/ghcr.io/aquasecurity/trivy-db:2
     TRIVY_JAVA_DB_REPOSITORY: m.daocloud.io/ghcr.io/aquasecurity/trivy-java-db:1
+  cache:
+    key: "trivy-db-${CI_PROJECT_ID}"
+    paths:
+      - .cache/trivy/
+    policy: "$TRIVY_CACHE_POLICY"
+    when: always
   before_script:
     - test -n "${SWR_REGION:-}" && test -n "${SWR_REGISTRY_OVERRIDE:-}"
     - test -n "${SWR_AK:-}" && test -n "${SWR_PASSWORD:-}"
@@ -199,10 +272,14 @@ build_frontend:
 
 scan_backend:
   extends: .trivy_scan
+  variables:
+    # Keep one cache writer so parallel scans cannot overwrite the same archive.
+    TRIVY_CACHE_POLICY: pull-push
+  resource_group: trivy-db-cache-writer
   needs:
     - job: build_backend
   script:
-    - trivy image --scanners vuln --exit-code 1 --severity "$TRIVY_SEVERITY"
+    - sh scripts/ci/trivy-image-scan.sh
         "${SWR_REGISTRY}/youdoogo-backend:${IMAGE_TAG}"
 
 scan_frontend:
@@ -210,18 +287,26 @@ scan_frontend:
   needs:
     - job: build_frontend
   script:
-    - trivy image --scanners vuln --exit-code 1 --severity "$TRIVY_SEVERITY"
+    - sh scripts/ci/trivy-image-scan.sh
         "${SWR_REGISTRY}/youdoogo-frontend:${IMAGE_TAG}"
 
 deploy_cce:
   stage: deploy
   image:
-    name: alpine:3.22
+    name: "${SWR_REGISTRY_OVERRIDE}/youdoogo-deploy-tools:${DEPLOY_TOOLS_TAG}"
     pull_policy: always
   extends: .delivery_rules
   needs:
+    - job: build_deploy_tools
+      optional: true
     - job: scan_backend
     - job: scan_frontend
+  variables:
+    # The Docker executor pulls the private job image before before_script, so
+    # reuse the existing SWR credentials for preparation-time auth. The known
+    # hostname portion of SWR_REGISTRY_OVERRIDE is pinned here because Docker
+    # auth keys cannot include its namespace path; no new CI variable is needed.
+    DOCKER_AUTH_CONFIG: '{"auths":{"swr.cn-south-1.myhuaweicloud.com":{"username":"${SWR_REGION}@${SWR_AK}","password":"${SWR_PASSWORD}"}}}'
   retry: 0
   interruptible: false
   resource_group: youdoogo-cce-production
@@ -229,14 +314,8 @@ deploy_cce:
     name: cce-production
     url: https://ai.youdoogo.com/
   before_script:
-    - apk add --no-cache bash ca-certificates curl python3 py3-yaml
-    - curl --fail --silent --show-error --location
-        --retry 5 --retry-delay 2 --retry-all-errors
-        --connect-timeout 15 --max-time 180
-        --output /tmp/kubectl
-        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-    - echo "${KUBECTL_SHA256}  /tmp/kubectl" | sha256sum -c -
-    - chmod 0755 /tmp/kubectl && mv /tmp/kubectl /usr/local/bin/kubectl
+    - command -v bash && command -v curl && command -v python3 && command -v kubectl
+    - python3 -c 'import yaml; print(f"PyYAML {yaml.__version__}")'
     - kubectl version --client=true
     - test -n "${KUBECONFIG_CCE_B64:-}"
     - export KUBECONFIG="/tmp/youdoogo-kubeconfig-${CI_JOB_ID}"
@@ -251,7 +330,7 @@ deploy_cce:
   script:
     - bash scripts/ci/deploy-cce.sh
   after_script:
-    - rm -f "/tmp/youdoogo-kubeconfig-${CI_JOB_ID}" /tmp/kubectl
+    - rm -f "/tmp/youdoogo-kubeconfig-${CI_JOB_ID}"
 
 # Feishu credentials come from the `ai` group; notify.py owns the shared fixed destination.
 notify_success:

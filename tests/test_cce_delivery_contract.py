@@ -16,6 +16,11 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 FULL_SHA = "a" * 40
 IMAGE_TAG = f"ci-{FULL_SHA}"
+DEPLOY_TOOLS_TAG = "alpine3.22.1-kubectl1.31.5-r1"
+KUBECTL_VERSION = "v1.31.5"
+KUBECTL_SHA256 = (
+    "fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af"
+)
 pytestmark = pytest.mark.delivery_contract
 
 
@@ -65,8 +70,23 @@ def object_by(objects: list[dict], kind: str, name: str) -> dict:
 
 def test_gitlab_pipeline_policy_and_mechanics() -> None:
     pipeline = load_yaml(ROOT / ".gitlab-ci.yml")
-    assert pipeline["stages"] == ["verify", "build", "scan", "deploy", "notify"]
+    assert pipeline["stages"] == [
+        "bootstrap",
+        "verify",
+        "build",
+        "scan",
+        "deploy",
+        "notify",
+    ]
     assert pipeline["default"]["tags"] == ["AI"]
+    assert pipeline["default"]["retry"] == {
+        "max": 2,
+        "when": [
+            "runner_system_failure",
+            "stuck_or_timeout_failure",
+            "api_failure",
+        ],
+    }
     assert "dev" in str(pipeline["workflow"]["rules"])
     assert "merge_request_event" in str(pipeline["workflow"]["rules"])
     rule_conditions = [
@@ -104,14 +124,64 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
         for name, config in pipeline.items()
         if name != "verify_backend" and isinstance(config, dict)
     )
-    assert "uv sync --frozen" in backend_verify["before_script"]
-    for command in ("ruff check .", "mypy app"):
-        assert f"uv run --frozen {command}" in backend_verify["script"]
-    assert (
-        'uv run --frozen pytest -q -m "not delivery_contract" '
-        "--cov=app --cov-report=term-missing:skip-covered"
-        in backend_verify["script"]
+    assert backend_verify["cache"] == {
+        "key": {"files": ["uv.lock"], "prefix": "uv"},
+        "policy": "pull-push",
+        "paths": [".cache/uv/"],
+    }
+    assert backend_verify["before_script"] == [
+        "apt-get update",
+        "apt-get install --yes --no-install-recommends git",
+        "rm -rf /var/lib/apt/lists/*",
+        "python -m pip install --no-cache-dir uv==0.11.7",
+    ]
+    assert backend_verify["script"] == ["bash scripts/ci/verify-backend-localfs.sh"]
+    backend_gate_commands = (
+        "uv sync --frozen",
+        "uv run --frozen ruff check .",
+        "uv run --frozen mypy app",
+        (
+            'uv run --frozen pytest -q -m "not delivery_contract" '
+            "--durations=25 --cov=app --cov-report=term-missing:skip-covered"
+        ),
     )
+    for command in backend_gate_commands:
+        assert command not in backend_verify["before_script"]
+        assert command not in backend_verify["script"]
+
+    backend_helper = (ROOT / "scripts/ci/verify-backend-localfs.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "set -Eeuo pipefail" in backend_helper
+    assert ': "${CI_PROJECT_DIR:?CI_PROJECT_DIR is required}"' in backend_helper
+    assert ': "${CI_COMMIT_SHA:?CI_COMMIT_SHA is required}"' in backend_helper
+    assert 'workdir="/tmp/youdoogo-verify-${CI_JOB_ID:-local}"' in backend_helper
+    assert 'source_uv_cache="${UV_CACHE_DIR:-$CI_PROJECT_DIR/.cache/uv}"' in backend_helper
+    assert 'local_uv_cache="$workdir/.cache/uv"' in backend_helper
+    assert 'export UV_CACHE_DIR="$local_uv_cache"' in backend_helper
+    assert "trap cleanup EXIT" in backend_helper
+    assert "command -v git >/dev/null" in backend_helper
+    assert "command -v tar >/dev/null" in backend_helper
+    assert 'rm -rf -- "$workdir"' in backend_helper
+    assert 'git -C "$CI_PROJECT_DIR" cat-file -e "$CI_COMMIT_SHA:.env"' in backend_helper
+    assert 'cd "$CI_PROJECT_DIR"' in backend_helper
+    assert (
+        'git archive --format=tar "$CI_COMMIT_SHA" | tar -xf - -C "$workdir"'
+        in backend_helper
+    )
+    assert 'tar -cf - . | tar -xf - -C "$UV_CACHE_DIR"' in backend_helper
+    for command in backend_gate_commands:
+        assert command in backend_helper
+    assert (
+        backend_helper.index("uv sync --frozen")
+        < backend_helper.index("uv run --frozen ruff check .")
+        < backend_helper.index("uv run --frozen mypy app")
+        < backend_helper.index(
+            'uv run --frozen pytest -q -m "not delivery_contract"'
+        )
+    )
+    assert "cp -a" not in backend_helper
+    assert "rsync" not in backend_helper
     delivery_verify = pipeline["verify_delivery_contract"]
     assert "apk add --no-cache bash gettext nginx" in delivery_verify["before_script"]
     assert "command -v envsubst" in delivery_verify["before_script"]
@@ -120,6 +190,10 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
         "python -m pytest -q -m delivery_contract tests/test_cce_delivery_contract.py"
         in delivery_verify["script"]
     )
+    bash_n = next(
+        command for command in delivery_verify["script"] if command.startswith("bash -n ")
+    )
+    assert "scripts/ci/verify-backend-localfs.sh" in bash_n
 
     for config in pipeline.values():
         if isinstance(config, dict) and isinstance(config.get("image"), dict):
@@ -128,7 +202,29 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert deploy["retry"] == 0
     assert deploy["resource_group"] == "youdoogo-cce-production"
     assert deploy["interruptible"] is False
-    assert "sha256sum -c" in str(deploy["before_script"])
+    assert "youdoogo-deploy-tools:${DEPLOY_TOOLS_TAG}" in deploy["image"]["name"]
+    assert "apk add" not in str(deploy["before_script"])
+    assert "dl.k8s.io" not in str(deploy["before_script"])
+    assert any("kubectl version --client=true" in item for item in deploy["before_script"])
+
+    trivy = pipeline[".trivy_scan"]
+    assert trivy["variables"]["TRIVY_CACHE_DIR"] == "$CI_PROJECT_DIR/.cache/trivy"
+    assert trivy["cache"] == {
+        "key": "trivy-db-${CI_PROJECT_ID}",
+        "paths": [".cache/trivy/"],
+        "policy": "$TRIVY_CACHE_POLICY",
+        "when": "always",
+    }
+    assert pipeline["scan_backend"]["variables"]["TRIVY_CACHE_POLICY"] == "pull-push"
+    assert pipeline["scan_frontend"].get("variables") is None
+    assert pipeline["scan_backend"]["script"][0].startswith("sh scripts/ci/trivy-image-scan.sh")
+    assert pipeline["scan_frontend"]["script"][0].startswith("sh scripts/ci/trivy-image-scan.sh")
+    trivy_helper = (ROOT / "scripts/ci/trivy-image-scan.sh").read_text(encoding="utf-8")
+    for option in ("--scanners vuln", "--exit-code 1", '--severity "$TRIVY_SEVERITY"'):
+        assert option in trivy_helper
+    assert "report summary" in trivy_helper
+    assert "unauthorized" in trivy_helper
+    assert "DB download hit a temporary network error" in trivy_helper
 
     deploy_script = (ROOT / "scripts/ci/deploy-cce.sh").read_text(encoding="utf-8")
     assert "workloads_manifest" in deploy_script
@@ -170,6 +266,69 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert deploy_script.index('kubectl apply -f "$workloads_manifest"') < deploy_script.index(
         'kubectl apply -f "$ingress_manifest"'
     )
+
+
+def test_deploy_tools_image_and_bootstrap_contract() -> None:
+    pipeline = load_yaml(ROOT / ".gitlab-ci.yml")
+    dockerfile = (ROOT / "docker/ci/deploy-tools.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert pipeline["variables"]["DEPLOY_TOOLS_TAG"] == DEPLOY_TOOLS_TAG
+    assert f'org.opencontainers.image.version="{DEPLOY_TOOLS_TAG}"' in dockerfile
+    assert "FROM alpine:3.22.1" in dockerfile
+    assert "latest" not in dockerfile.lower()
+    assert f"ARG KUBECTL_VERSION={KUBECTL_VERSION}" in dockerfile
+    assert f"ARG KUBECTL_SHA256={KUBECTL_SHA256}" in dockerfile
+
+    for package in ("bash", "ca-certificates", "curl", "python3", "py3-yaml"):
+        assert package in dockerfile
+    assert "apk add --no-cache" in dockerfile
+    kubectl_url = (
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    )
+    assert kubectl_url in dockerfile
+    assert "sha256sum -c -" in dockerfile
+    assert dockerfile.index("sha256sum -c -") < dockerfile.index(
+        "mv /tmp/kubectl /usr/local/bin/kubectl"
+    )
+    assert "python3 -c 'import yaml;" in dockerfile
+    assert "kubectl version --client=true" in dockerfile
+
+    build_template = pipeline[".deploy_tools_build"]
+    assert build_template["stage"] == "bootstrap"
+    assert build_template["interruptible"] is False
+    assert build_template["resource_group"] == "youdoogo-deploy-tools-publish"
+    build_script = "\n".join(build_template["script"])
+    assert "docker manifest inspect" in build_script
+    assert "verifying without overwrite" in build_script
+    assert "docker image inspect" in build_script
+    assert KUBECTL_SHA256 in build_script
+    assert "--file docker/ci/deploy-tools.Dockerfile" in build_script
+    assert 'DEPLOY_TOOLS_IMAGE="${SWR_REGISTRY}/youdoogo-deploy-tools:' in build_script
+    assert "--push" in build_script
+    assert "--platform linux/amd64" in build_script
+
+    automatic = pipeline["build_deploy_tools"]
+    assert automatic["extends"] == ".deploy_tools_build"
+    assert automatic["rules"][0]["changes"] == [
+        "docker/ci/deploy-tools.Dockerfile"
+    ]
+    assert 'CI_PIPELINE_SOURCE == "push"' in automatic["rules"][0]["if"]
+    recovery = pipeline["bootstrap_deploy_tools"]
+    assert recovery["extends"] == ".deploy_tools_build"
+    assert recovery["rules"][0]["when"] == "manual"
+    assert recovery["rules"][0]["allow_failure"] is True
+
+    docs = (ROOT / "ops/first-release-preflight.md").read_text(encoding="utf-8")
+    for required_text in (
+        "`SWR_REGISTRY_OVERRIDE`",
+        "no additional registry variable",
+        "`build_deploy_tools`",
+        "`bootstrap_deploy_tools`",
+        f"`youdoogo-deploy-tools:{DEPLOY_TOOLS_TAG}`",
+    ):
+        assert required_text in docs
 
 
 def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
