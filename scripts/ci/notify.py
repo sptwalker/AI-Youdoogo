@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send the standard six-field YOUDOOGO card to the shared organization chat."""
+"""Send the standard six-field YOUDOOGO card to the project chat."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 TZ = timezone(timedelta(hours=8))
 PUBLIC_URL = "https://ai.youdoogo.com/"
-CHAT_ID = "oc_aae2fdb8d29cc64e86efa7ce6c0e60da"
+CHAT_ID = "oc_52174c913e452fa712e77439a07300ac"
 
 
 def env(name: str) -> str:

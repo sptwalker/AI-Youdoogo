@@ -385,7 +385,7 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
     ]
     assert lines[-1] == "**地址**：[YOUDOOGO](https://ai.youdoogo.com/)"
 
-    canonical_chat_id = "oc_aae2fdb8d29cc64e86efa7ce6c0e60da"
+    canonical_chat_id = "oc_52174c913e452fa712e77439a07300ac"
     assert module.CHAT_ID == canonical_chat_id
     requests = []
 
