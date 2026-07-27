@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.business.task_management.application.contracts import (
     CreateTaskRequest,
+    EditTaskRequest,
     TaskLogView,
     TaskView,
     TaskVisibility,
@@ -95,6 +96,19 @@ class SQLAlchemyTaskManagementAdapter:
 
     async def get_view(self, task_id: uuid.UUID) -> TaskView:
         return self._task_view(await self.get_record(task_id))
+
+    async def edit_view(self, request: EditTaskRequest) -> TaskView:
+        task = await self.get_record(request.task_id)
+        state_machine.assert_editable(task.status)
+        if request.title is not None:
+            task.title = request.title
+        if request.priority is not None:
+            task.priority = request.priority
+        if request.assignee_agent_id is not None:
+            task.assignee_agent_id = request.assignee_agent_id
+        await self._session.flush()
+        await self._session.refresh(task)
+        return self._task_view(task)
 
     async def list_views(
         self,

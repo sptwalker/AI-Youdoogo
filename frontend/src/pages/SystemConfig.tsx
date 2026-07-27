@@ -51,6 +51,9 @@ const asText = (v: unknown): string => v == null
   : typeof v === 'string' ? v : JSON.stringify(v)
 const label = (k: string) => KEY_LABEL[k] ?? k
 
+/** 以 text 存 JSON 的配置键:提交前做 JSON 合法性校验,避免非法 JSON 存进去后被后端静默回退默认。 */
+const JSON_KEYS = new Set(['td_field_mapping'])
+
 /** 连通性测试目标的中文名。 */
 const TARGET_LABEL: Record<string, string> = {
   llm: 'AI 大模型', embedding: '向量模型', feishu: '飞书', thinkingdata: '数据平台',
@@ -65,13 +68,23 @@ const EFFECTIVE_DEFAULT: Record<string, string> = {
 
 export default function SystemConfig() {
   const [configs, setConfigs] = useState<SysConfig[]>([])
+  const [loading, setLoading] = useState(true)
   const [conn, setConn] = useState<ConnResult[] | null>(null)
   const [testing, setTesting] = useState(false)
   const [readDate, setReadDate] = useState(localDateInputValue)
   const [readResult, setReadResult] = useState<TestReadResult | null>(null)
   const [reading, setReading] = useState(false)
 
-  const load = () => listConfigs().then(setConfigs)
+  const load = async () => {
+    setLoading(true)
+    try {
+      setConfigs(await listConfigs())
+    } catch {
+      message.error('加载配置失败，请重试')
+    } finally {
+      setLoading(false)
+    }
+  }
   useEffect(() => {
     void load()
   }, [])
@@ -99,7 +112,8 @@ export default function SystemConfig() {
     not_configured: { color: 'default', text: '未配置' },
   } as const
 
-  const cats = [...new Set(configs.map((c) => c.category))].sort(
+  // llm 已改为「AI 配置」页卡片化管理,这里排除,避免与上方专用卡片出现两张同名「AI 大模型」。
+  const cats = [...new Set(configs.map((c) => c.category))].filter((c) => c !== 'llm').sort(
     (a, b) => {
       const rank = (category: string) => {
         const index = CAT_ORDER.indexOf(category)
@@ -144,7 +158,26 @@ export default function SystemConfig() {
           rules={[{ required: true, message: '请输入整数' }]}
         />
       ) : (
-        <ProFormTextArea name="value" label="值" rules={[{ required: true }]} />
+        <ProFormTextArea
+          name="value"
+          label="值"
+          rules={[
+            { required: true },
+            ...(JSON_KEYS.has(c.key)
+              ? [{
+                  validator: (_: unknown, value: unknown) => {
+                    if (typeof value !== 'string' || !value.trim()) return Promise.resolve()
+                    try {
+                      JSON.parse(value)
+                      return Promise.resolve()
+                    } catch {
+                      return Promise.reject(new Error('必须是合法 JSON'))
+                    }
+                  },
+                }]
+              : []),
+          ]}
+        />
       )}
     </ModalForm>
   )
@@ -242,9 +275,13 @@ export default function SystemConfig() {
         )}
       </Card>
 
+      {loading && configs.length === 0 && (
+        <Card size="small" style={{ marginBottom: 16, textAlign: 'center', padding: 24 }} loading />
+      )}
       {cats.map((cat) => (
         <Card key={cat} title={CAT_LABEL[cat] ?? cat} size="small" style={{ marginBottom: 16 }}>
           <List
+            loading={loading}
             dataSource={configs.filter((c) => c.category === cat)}
             renderItem={(c) => (
               <List.Item actions={c.is_editable ? [editForm(c)] : []}>

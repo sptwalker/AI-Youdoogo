@@ -8,7 +8,7 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Switch, Tag, Typography, message } from 'antd'
+import { Button, Popconfirm, Switch, Tag, Typography, message } from 'antd'
 import { useRef } from 'react'
 import {
   createUser,
@@ -47,16 +47,33 @@ export default function Users() {
     {
       title: '启用',
       dataIndex: 'is_active',
-      render: (_, row) => (
-        <Switch
-          checked={row.is_active}
-          onChange={async (checked) => {
-            await updateUser(row.id, { is_active: checked })
-            message.success(checked ? '已启用' : '已停用')
-            actionRef.current?.reload()
-          }}
-        />
-      ),
+      render: (_, row) =>
+        row.is_active ? (
+          // 停用不可逆(用户将无法登录),二次确认;启用无风险,直接切换。
+          <Popconfirm
+            title="确认停用该用户?"
+            description="停用后该用户将无法登录。"
+            okText="停用"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={async () => {
+              await updateUser(row.id, { is_active: false })
+              message.success('已停用')
+              actionRef.current?.reload()
+            }}
+          >
+            <Switch checked />
+          </Popconfirm>
+        ) : (
+          <Switch
+            checked={false}
+            onChange={async () => {
+              await updateUser(row.id, { is_active: true })
+              message.success('已启用')
+              actionRef.current?.reload()
+            }}
+          />
+        ),
     },
     {
       title: '操作',
@@ -102,6 +119,27 @@ export default function Users() {
             fieldProps={{ maxLength: 128 }}
             rules={[
               { validator: (_, value) => validateOptionalFeishuOpenId(value as string | undefined) },
+            ]}
+          />
+        </ModalForm>,
+        <ModalForm<{ password: string }>
+          key="reset-pwd"
+          title={`重置密码 · ${row.real_name || row.username}`}
+          trigger={<a>重置密码</a>}
+          modalProps={{ destroyOnHidden: true }}
+          onFinish={async ({ password }) => {
+            await updateUser(row.id, { password })
+            message.success('密码已重置')
+            return true
+          }}
+        >
+          <ProFormText.Password
+            name="password"
+            label="新密码"
+            fieldProps={{ maxLength: 128 }}
+            rules={[
+              { required: true, min: 8, message: '至少8位' },
+              { max: 128, message: '最多128位' },
             ]}
           />
         </ModalForm>,

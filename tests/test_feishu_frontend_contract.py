@@ -12,7 +12,7 @@ def test_login_keeps_default_password_submit_and_separate_feishu_entry() -> None
     assert "startFeishuLogin(returnTo)" in source
     assert "submitButtonProps" in source
     assert source.index("</LoginForm>") < source.index('className="feishu-login-button"')
-    assert "localStorage.setItem(TOKEN_KEY, token.access_token)" in source
+    assert "setToken(token.access_token" in source
     assert "normalizeAppPath(token.redirect_to)" in source
     assert "管理员预绑定本地账号" in source
     assert "暂无系统访问权限，请联系管理员完成账号预绑定" in source

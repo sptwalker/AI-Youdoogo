@@ -34,6 +34,10 @@ class FeedbackRepositoryPort(Protocol):
 
     async def add(self, command: RecordFeedbackCommand) -> FeedbackResult: ...
 
+    async def mine(
+        self, rater_id: uuid.UUID, task_record_ids: tuple[uuid.UUID, ...]
+    ) -> tuple[FeedbackResult, ...]: ...
+
     async def low_scored(
         self, role_id: uuid.UUID, threshold: int, limit: int
     ) -> tuple[LowScoreSample, ...]: ...

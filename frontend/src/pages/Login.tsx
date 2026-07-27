@@ -6,12 +6,12 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { LoginForm, ProFormText } from '@ant-design/pro-components'
+import { LoginForm, ProFormCheckbox, ProFormText } from '@ant-design/pro-components'
 import { Alert, Button, Divider, Space, Tag, Typography } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { exchangeFeishuLogin, fetchFeishuStatus, login, startFeishuLogin } from '../api/auth'
-import { TOKEN_KEY } from '../api/client'
+import { ApiError, setToken } from '../api/client'
 import { normalizeAppPath } from '../auth/paths'
 
 const FEISHU_RETURN_TO_KEY = 'youdoo_feishu_return_to'
@@ -39,7 +39,11 @@ export default function Login() {
   const returnTo = normalizeAppPath(searchParams.get('return_to') ?? storedReturnTo)
   const [feishuAvailability, setFeishuAvailability] = useState<FeishuAvailability>('loading')
   const [completingFeishu, setCompletingFeishu] = useState(callbackResult === 'success')
-  const [feedback, setFeedback] = useState<LoginFeedback>(null)
+  const [feedback, setFeedback] = useState<LoginFeedback>(
+    searchParams.get('expired') === '1'
+      ? { type: 'error', message: '登录状态已过期，请重新登录。' }
+      : null,
+  )
 
   useEffect(() => {
     fetchFeishuStatus()
@@ -61,7 +65,7 @@ export default function Login() {
     setFeedback({ type: 'info', message: '飞书身份已验证，正在完成系统登录…' })
     void exchangeFeishuLogin()
       .then((token) => {
-        localStorage.setItem(TOKEN_KEY, token.access_token)
+        setToken(token.access_token, true)
         sessionStorage.removeItem(FEISHU_RETURN_TO_KEY)
         navigate(normalizeAppPath(token.redirect_to), { replace: true })
       })
@@ -71,12 +75,21 @@ export default function Login() {
       })
   }, [callbackResult, navigate])
 
-  const onFinish = async (values: { username: string; password: string }) => {
-    const token = await login(values.username, values.password)
-    localStorage.setItem(TOKEN_KEY, token.access_token)
-    sessionStorage.removeItem(FEISHU_RETURN_TO_KEY)
-    navigate(returnTo, { replace: true })
-    return true
+  const onFinish = async (values: { username: string; password: string; remember?: boolean }) => {
+    setFeedback(null)
+    try {
+      const token = await login(values.username, values.password)
+      setToken(token.access_token, values.remember ?? true)
+      sessionStorage.removeItem(FEISHU_RETURN_TO_KEY)
+      navigate(returnTo, { replace: true })
+      return true
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: error instanceof ApiError ? error.message : '登录失败，请稍后重试',
+      })
+      return false
+    }
   }
 
   const beginFeishuLogin = () => {
@@ -130,6 +143,9 @@ export default function Login() {
                 placeholder="密码"
                 rules={[{ required: true, message: '请输入密码' }]}
               />
+              <ProFormCheckbox name="remember" initialValue={true}>
+                记住登录（公用电脑请勿勾选）
+              </ProFormCheckbox>
             </LoginForm>
             <Divider plain>或使用企业身份</Divider>
             <Button

@@ -294,6 +294,7 @@ async def answer(
             "file_id": str(h.file_id),
             "file_name": h.file_name,
             "chunk_index": h.chunk_index,
+            "snippet": h.chunk_text,
         }
         for i, h in enumerate(hits)
     ]

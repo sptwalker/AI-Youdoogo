@@ -34,6 +34,27 @@ class GetProposalQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class EditProposalCommand:
+    """Amend a draft proposal; actor must be its creator (P3-7)."""
+
+    proposal_id: uuid.UUID
+    actor_id: uuid.UUID
+    title: str
+    background: str
+    plan: str
+    benefit_risk: str | None = None
+    priority: str = "normal"
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteProposalCommand:
+    """Soft-delete a draft proposal; actor must be its creator (P3-7)."""
+
+    proposal_id: uuid.UUID
+    actor_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
 class ListProposalsQuery:
     status: str | None = None
     limit: int = 100

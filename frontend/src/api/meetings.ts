@@ -87,6 +87,11 @@ export function getTally(id: string, subject: string): Promise<Tally> {
   return request({ method: 'GET', url: `/meetings/${id}/tally`, params: { subject } })
 }
 
+/** 已有表决对象列表，供统计下拉（P1-8）。 */
+export function listVoteSubjects(id: string): Promise<string[]> {
+  return request({ method: 'GET', url: `/meetings/${id}/vote-subjects` })
+}
+
 export function generateMinutes(id: string): Promise<Meeting> {
   return request({ method: 'POST', url: `/meetings/${id}/minutes` })
 }

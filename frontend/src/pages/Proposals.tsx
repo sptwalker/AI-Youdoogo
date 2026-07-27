@@ -9,7 +9,7 @@ import {
   type ActionType,
   type ProColumns,
 } from '@ant-design/pro-components'
-import { Button, Modal, Tag, Typography, message } from 'antd'
+import { Button, Modal, Popconfirm, Tag, Typography, message } from 'antd'
 import { useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { UserInfo } from '../api/auth'
@@ -18,6 +18,8 @@ import {
   aiResearch,
   convertProposal,
   createProposal,
+  deleteProposal,
+  editProposal,
   getProposal,
   listProposals,
   PROPOSAL_STATUS,
@@ -40,7 +42,7 @@ const STATUS_COLOR: Record<string, string> = {
 export default function Proposals() {
   const { me } = useOutletContext<{ me: UserInfo | null }>()
   const actionRef = useRef<ActionType>(null)
-  const [reviews, setReviews] = useState<Review[] | null>(null)
+  const [detail, setDetail] = useState<{ proposal: Proposal; reviews: Review[] } | null>(null)
   const detailRequestRef = useRef(0)
   const pending = usePendingActions()
   const canManage = hasManagerRole(me?.role_code)
@@ -48,8 +50,8 @@ export default function Proposals() {
 
   const openDetail = async (id: string) => {
     const requestId = ++detailRequestRef.current
-    const { reviews } = await getProposal(id)
-    if (requestId === detailRequestRef.current) setReviews(reviews)
+    const next = await getProposal(id)
+    if (requestId === detailRequestRef.current) setDetail(next)
   }
 
   const columns: ProColumns<Proposal>[] = [
@@ -74,6 +76,51 @@ export default function Proposals() {
       valueType: 'option',
       render: (_, r) => {
         const a = [<a key="d" onClick={() => openDetail(r.id)}>详情</a>]
+        if (r.status === 'draft' && r.creator_id === me?.id) {
+          a.push(
+            <ModalForm<{ title: string; background: string; plan: string; benefit_risk?: string; priority: string }>
+              key="edit"
+              title="编辑草稿"
+              trigger={<a>编辑</a>}
+              modalProps={{ destroyOnHidden: true }}
+              initialValues={{
+                title: r.title,
+                background: r.background,
+                plan: r.plan,
+                benefit_risk: r.benefit_risk ?? undefined,
+                priority: r.priority,
+              }}
+              onFinish={async (v) => {
+                await editProposal(r.id, v)
+                message.success('已保存')
+                reload()
+                return true
+              }}
+            >
+              <ProFormText name="title" label="标题" rules={[{ required: true }]} />
+              <ProFormTextArea name="background" label="背景与问题" rules={[{ required: true }]} />
+              <ProFormTextArea name="plan" label="方案" rules={[{ required: true }]} />
+              <ProFormTextArea name="benefit_risk" label="收益与风险" />
+              <ProFormSelect name="priority" label="优先级" options={[
+                { value: 'high', label: '高' }, { value: 'normal', label: '普通' }, { value: 'low', label: '低' }]} />
+            </ModalForm>,
+          )
+          a.push(
+            <Popconfirm
+              key="del"
+              title="删除该草稿提案？"
+              onConfirm={() => {
+                void pending.run(`delete:${r.id}`, async () => {
+                  await deleteProposal(r.id)
+                  message.success('已删除')
+                  reload()
+                }).catch(() => {})
+              }}
+            >
+              <a>删除</a>
+            </Popconfirm>,
+          )
+        }
         if (canManage && canResearchProposal(r.status)) {
           const researchKey = `research:${r.id}`
           a.push(
@@ -146,7 +193,13 @@ export default function Proposals() {
         rowKey="id"
         actionRef={actionRef}
         columns={columns}
-        request={async (p) => ({ data: await listProposals(p.status as string | undefined), success: true })}
+        request={async (p) => {
+          try {
+            return { data: await listProposals(p.status as string | undefined), success: true }
+          } catch {
+            return { data: [], success: false }
+          }
+        }}
         toolBarRender={() => [
           <ModalForm<{ title: string; background: string; plan: string; benefit_risk?: string; priority: string }>
             key="new"
@@ -169,18 +222,33 @@ export default function Proposals() {
           </ModalForm>,
         ]}
       />
-      <Modal open={reviews !== null} onCancel={() => { detailRequestRef.current += 1; setReviews(null) }} footer={null} title="评审记录" width={640}>
-        {(reviews || []).map((rv) => (
-          <div key={rv.id} style={{ marginBottom: 12 }}>
-            <Tag color={rv.review_type === 'ai_research' ? 'blue' : 'green'}>
-              {rv.review_type === 'ai_research' ? 'AI预研' : `真人评审 · ${rv.decision}`}
-            </Tag>
-            <Typography.Paragraph style={{ marginTop: 4 }}>
-              <Markdown>{rv.conclusion}</Markdown>
-            </Typography.Paragraph>
-          </div>
-        ))}
-        {reviews?.length === 0 && '暂无评审记录'}
+      <Modal open={detail !== null} onCancel={() => { detailRequestRef.current += 1; setDetail(null) }} footer={null} title={detail ? `${detail.proposal.code} · ${detail.proposal.title}` : '提案详情'} width={640}>
+        {detail && (
+          <>
+            <Typography.Title level={5} style={{ marginTop: 0 }}>背景与问题</Typography.Title>
+            <Markdown>{detail.proposal.background}</Markdown>
+            <Typography.Title level={5}>方案</Typography.Title>
+            <Markdown>{detail.proposal.plan}</Markdown>
+            {detail.proposal.benefit_risk && (
+              <>
+                <Typography.Title level={5}>收益与风险</Typography.Title>
+                <Markdown>{detail.proposal.benefit_risk}</Markdown>
+              </>
+            )}
+            <Typography.Title level={5}>评审记录</Typography.Title>
+            {detail.reviews.map((rv) => (
+              <div key={rv.id} style={{ marginBottom: 12 }}>
+                <Tag color={rv.review_type === 'ai_research' ? 'blue' : 'green'}>
+                  {rv.review_type === 'ai_research' ? 'AI预研' : `真人评审 · ${rv.decision}`}
+                </Tag>
+                <Typography.Paragraph style={{ marginTop: 4 }}>
+                  <Markdown>{rv.conclusion}</Markdown>
+                </Typography.Paragraph>
+              </div>
+            ))}
+            {detail.reviews.length === 0 && '暂无评审记录'}
+          </>
+        )}
       </Modal>
     </PageContainer>
   )

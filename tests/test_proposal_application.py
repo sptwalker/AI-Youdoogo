@@ -12,11 +12,17 @@ import pytest
 from app.contexts.business.proposal_management.application.contracts import (
     ConvertProposalCommand,
     CreateProposalCommand,
+    DeleteProposalCommand,
+    EditProposalCommand,
     ProposalResult,
     ProposalViewer,
     ResearchProposalCommand,
     ReviewProposalCommand,
     TaskResult,
+)
+from app.contexts.business.proposal_management.application.errors import (
+    ProposalError,
+    ProposalNotFound,
 )
 from app.contexts.business.proposal_management.application.ports import (
     AuditRequest,
@@ -48,6 +54,9 @@ class _Repository:
 
     async def save(self, proposal: Proposal) -> None:
         self.proposals[proposal.id] = copy.deepcopy(proposal)
+
+    async def delete(self, proposal_id: uuid.UUID) -> None:
+        self.proposals.pop(proposal_id, None)
 
     async def list_proposals(
         self,
@@ -275,3 +284,84 @@ async def test_human_review_and_conversion_use_ports_and_audit(
     assert approved.status == "approved"
     assert repository.proposals[proposal.id].converted_task_id == task.id
     assert [record.action for record in audit.records] == ["proposal.approve", "proposal.convert"]
+
+
+async def test_edit_amends_draft_fields(
+    application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
+) -> None:
+    app, repository, _, _ = application
+    creator = uuid.uuid4()
+    proposal = await app.create(
+        CreateProposalCommand(title="旧标题", background="b", plan="p", creator_id=creator)
+    )
+
+    edited = await app.edit(
+        EditProposalCommand(
+            proposal_id=proposal.id,
+            actor_id=creator,
+            title="新标题",
+            background="b2",
+            plan="p2",
+            priority="high",
+        )
+    )
+
+    assert edited.title == "新标题"
+    assert repository.proposals[proposal.id].plan == "p2"
+    assert repository.proposals[proposal.id].priority == "high"
+
+
+async def test_edit_by_non_creator_masks_as_not_found(
+    application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
+) -> None:
+    app, _, _, _ = application
+    proposal = await app.create(
+        CreateProposalCommand(title="t", background="b", plan="p", creator_id=uuid.uuid4())
+    )
+
+    with pytest.raises(ProposalNotFound):
+        await app.edit(
+            EditProposalCommand(
+                proposal_id=proposal.id,
+                actor_id=uuid.uuid4(),
+                title="x",
+                background="b",
+                plan="p",
+            )
+        )
+
+
+async def test_edit_non_draft_rejected(
+    application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
+) -> None:
+    app, _, _, _ = application
+    creator = uuid.uuid4()
+    proposal = await app.create(
+        CreateProposalCommand(title="t", background="b", plan="p", creator_id=creator)
+    )
+    await app.research(ResearchProposalCommand(proposal_id=proposal.id))
+
+    with pytest.raises(ProposalError, match="不可编辑/删除"):
+        await app.edit(
+            EditProposalCommand(
+                proposal_id=proposal.id,
+                actor_id=creator,
+                title="x",
+                background="b",
+                plan="p",
+            )
+        )
+
+
+async def test_delete_removes_own_draft(
+    application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
+) -> None:
+    app, repository, _, _ = application
+    creator = uuid.uuid4()
+    proposal = await app.create(
+        CreateProposalCommand(title="t", background="b", plan="p", creator_id=creator)
+    )
+
+    await app.delete(DeleteProposalCommand(proposal_id=proposal.id, actor_id=creator))
+
+    assert proposal.id not in repository.proposals

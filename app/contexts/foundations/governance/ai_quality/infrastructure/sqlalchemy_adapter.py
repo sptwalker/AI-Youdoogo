@@ -105,6 +105,26 @@ class SQLAlchemyFeedbackRepository:
             comment=feedback.comment,
         )
 
+    async def mine(
+        self, rater_id: uuid.UUID, task_record_ids: tuple[uuid.UUID, ...]
+    ) -> tuple[FeedbackResult, ...]:
+        if not task_record_ids:
+            return ()
+        statement = select(AgentFeedback).where(
+            AgentFeedback.rater_id == rater_id,
+            AgentFeedback.task_record_id.in_(task_record_ids),
+        )
+        return tuple(
+            FeedbackResult(
+                feedback_id=row.id,
+                task_record_id=row.task_record_id,
+                rater_id=row.rater_id,
+                score=row.score,
+                comment=row.comment,
+            )
+            for row in (await self._session.execute(statement)).scalars()
+        )
+
     async def low_scored(
         self, role_id: uuid.UUID, threshold: int, limit: int
     ) -> tuple[LowScoreSample, ...]:

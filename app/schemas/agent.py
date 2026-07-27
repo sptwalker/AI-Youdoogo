@@ -83,6 +83,9 @@ class TaskRecordOut(BaseModel):
     error_msg: str | None
     duration_ms: int | None
     create_time: datetime
+    # 当前用户对该记录的已有评分（回显 + 提交后只读，P1-9）；未评为 None。
+    my_score: int | None = None
+    my_comment: str | None = None
 
 
 class AgentRoleOut(BaseModel):

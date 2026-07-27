@@ -7,6 +7,7 @@ from typing import Any, Protocol, Self
 
 from app.contexts.business.task_management.application.contracts import (
     CreateTaskRequest,
+    EditTaskRequest,
     TaskExecutionRequest,
     TaskExecutionResult,
     TaskLogView,
@@ -60,6 +61,8 @@ class TaskCardRepositoryPort(Protocol):
     async def create_view(self, request: CreateTaskRequest) -> TaskView: ...
 
     async def get_view(self, task_id: uuid.UUID) -> TaskView: ...
+
+    async def edit_view(self, request: EditTaskRequest) -> TaskView: ...
 
     async def list_views(
         self,

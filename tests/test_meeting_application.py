@@ -76,6 +76,11 @@ class FakeRepository:
             row for row in self.votes if row.meeting_id == meeting_id and row.subject == subject
         )
 
+    async def list_vote_subjects(self, meeting_id: uuid.UUID):
+        return tuple(
+            sorted({row.subject for row in self.votes if row.meeting_id == meeting_id})
+        )
+
     async def add_resolution(self, resolution: Resolution) -> None:
         self.resolution_rows[resolution.id] = resolution
 

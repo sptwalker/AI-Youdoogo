@@ -83,7 +83,9 @@ async def test_config_and_audit_routes_preserve_envelopes(
         params={"action": "config.update"},
     )
     assert logs.status_code == 200
-    assert logs.json()["data"][0]["action"] == "config.update"
+    body = logs.json()["data"]
+    assert body["total"] >= 1
+    assert body["items"][0]["action"] == "config.update"
 
 
 async def test_grant_route_uses_access_control_and_audit_boundaries(

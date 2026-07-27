@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 
@@ -24,7 +25,18 @@ class AppendAuditRecordCommand:
 class AuditTrailQuery:
     action: str | None = None
     actor_id: uuid.UUID | None = None
+    start: datetime | None = None
+    end: datetime | None = None
     limit: int = 100
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AuditTrailPage:
+    """一页审计记录 + 满足筛选条件的总数（供前端服务端翻页）。"""
+
+    items: tuple[AuditRecordView, ...]
+    total: int
 
 
 @dataclass(frozen=True, slots=True)

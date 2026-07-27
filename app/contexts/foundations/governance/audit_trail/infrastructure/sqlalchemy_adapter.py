@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.governance.audit_trail.application.ports import (
@@ -18,6 +19,7 @@ from app.contexts.foundations.governance.audit_trail.application.use_cases impor
 from app.contexts.foundations.governance.audit_trail.contracts.audit import (
     AppendAuditRecordCommand,
     AuditRecordView,
+    AuditTrailPage,
     AuditTrailQuery,
 )
 from app.models.audit_log import AuditLog
@@ -41,13 +43,25 @@ class SQLAlchemyAuditRecordRepository:
             )
         )
 
-    async def list(self, query: AuditTrailQuery) -> tuple[AuditRecordView, ...]:
-        statement = select(AuditLog)
+    @staticmethod
+    def _apply_filters(statement: Select[Any], query: AuditTrailQuery) -> Select[Any]:
         if query.action:
             statement = statement.where(AuditLog.action == query.action)
         if query.actor_id:
             statement = statement.where(AuditLog.actor_id == query.actor_id)
-        statement = statement.order_by(AuditLog.create_time.desc()).limit(query.limit)
+        if query.start is not None:
+            statement = statement.where(AuditLog.create_time >= query.start)
+        if query.end is not None:
+            statement = statement.where(AuditLog.create_time <= query.end)
+        return statement
+
+    async def list(self, query: AuditTrailQuery) -> tuple[AuditRecordView, ...]:
+        statement = self._apply_filters(select(AuditLog), query)
+        statement = (
+            statement.order_by(AuditLog.create_time.desc())
+            .limit(query.limit)
+            .offset(query.offset)
+        )
         rows = (await self._session.execute(statement)).scalars()
         return tuple(
             AuditRecordView(
@@ -64,6 +78,10 @@ class SQLAlchemyAuditRecordRepository:
             )
             for row in rows
         )
+
+    async def count(self, query: AuditTrailQuery) -> int:
+        statement = self._apply_filters(select(func.count()).select_from(AuditLog), query)
+        return int((await self._session.execute(statement)).scalar_one())
 
 
 class SQLAlchemyAuditUnitOfWork:
@@ -110,3 +128,6 @@ class SQLAlchemyAuditTrail:
 
     async def query(self, query: AuditTrailQuery) -> tuple[AuditRecordView, ...]:
         return await self._query.execute(query)
+
+    async def query_page(self, query: AuditTrailQuery) -> AuditTrailPage:
+        return await self._query.execute_page(query)

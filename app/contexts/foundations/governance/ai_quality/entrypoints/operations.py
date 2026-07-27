@@ -49,6 +49,16 @@ async def record_feedback(
     return await build_ai_quality(session).record_feedback.execute(command)
 
 
+async def list_my_feedback(
+    session: AsyncSession,
+    rater_id: uuid.UUID,
+    task_record_ids: tuple[uuid.UUID, ...],
+) -> tuple[FeedbackResult, ...]:
+    return await build_ai_quality(session).list_my_feedback.execute(
+        rater_id, task_record_ids
+    )
+
+
 async def list_low_score_samples(
     session: AsyncSession,
     role_id: uuid.UUID,

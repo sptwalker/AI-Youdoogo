@@ -58,6 +58,16 @@ class TransitionTaskRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class EditTaskRequest:
+    """编辑/补指派未开跑的任务；None 字段表示不改（无法清空指派）。"""
+
+    task_id: uuid.UUID
+    title: str | None = None
+    priority: str | None = None
+    assignee_agent_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RunTaskRequest:
     task_id: uuid.UUID
     operator_id: uuid.UUID

@@ -47,22 +47,40 @@ interface BrowserLocation {
 }
 
 /** Build one consistent login hand-off for route guards and every API transport. */
-export function loginRedirectPath(location: BrowserLocation): string | null {
+export function loginRedirectPath(location: BrowserLocation, expired = false): string | null {
   if (location.pathname === '/login') return null
   const returnTo = `${location.pathname}${location.search}`
-  return `/login?${new URLSearchParams({ return_to: returnTo }).toString()}`
+  const params = new URLSearchParams({ return_to: returnTo })
+  if (expired) params.set('expired', '1')
+  return `/login?${params.toString()}`
 }
 
-export function clearSessionAndRedirectToLogin(): boolean {
+/** token 可能在 localStorage(记住登录)或 sessionStorage(仅本次会话)。 */
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY)
+}
+
+/** 记住登录=localStorage(跨会话)；否则 sessionStorage(关标签即失效,公用电脑更安全,P2-30)。 */
+export function setToken(token: string, remember: boolean): void {
+  const [keep, drop] = remember ? [localStorage, sessionStorage] : [sessionStorage, localStorage]
+  keep.setItem(TOKEN_KEY, token)
+  drop.removeItem(TOKEN_KEY)
+}
+
+export function clearSessionAndRedirectToLogin(expired = true): boolean {
   localStorage.removeItem(TOKEN_KEY)
-  const redirectPath = loginRedirectPath(window.location)
+  sessionStorage.removeItem(TOKEN_KEY)
+  const redirectPath = loginRedirectPath(window.location, expired)
   if (!redirectPath) return false
-  window.location.href = redirectPath
+  // SPA 编程式导航,避免整页硬刷白屏(P1-16);动态 import 断开与 router 的静态循环依赖。
+  void import('../router')
+    .then(({ router }) => router.navigate(redirectPath))
+    .catch(() => { window.location.href = redirectPath })
   return true
 }
 
 http.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -280,7 +298,7 @@ export async function sseRequest(
   if (options.signal?.aborted) abortFromCaller()
   else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
 
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getToken()
   armIdleTimeout()
   try {
     const resp = await fetch(`/api/v1${url}`, {
@@ -383,7 +401,7 @@ export function sseSubscribe(
       reportState('connecting')
       try {
         // 每次重连重新读取 token，避免长页面会话刷新后仍使用旧凭证。
-        const token = localStorage.getItem(TOKEN_KEY)
+        const token = getToken()
         const resp = await fetch(`/api/v1${url}`, {
           method: 'GET',
           headers: token ? { Authorization: `Bearer ${token}` } : {},

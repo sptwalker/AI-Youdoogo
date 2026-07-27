@@ -20,6 +20,7 @@ from app.schemas.proposal import (
     ConvertRequest,
     HumanReviewRequest,
     ProposalCreate,
+    ProposalEdit,
     ProposalOut,
     ReviewOut,
 )
@@ -89,6 +90,31 @@ async def get_proposal(proposal_id: uuid.UUID, db: DB, user: CurrentUser) -> dic
             ],
         }
     )
+
+
+@router.patch("/{proposal_id}")
+async def edit_proposal(
+    proposal_id: uuid.UUID, body: ProposalEdit, db: DB, user: CurrentUser
+) -> dict:
+    """编辑草稿提案（仅创建者本人、仅草稿状态可改，P3-7）。"""
+    p = await operations.edit_proposal(
+        db,
+        proposal_id,
+        actor_id=user.id,
+        title=body.title,
+        background=body.background,
+        plan=body.plan,
+        benefit_risk=body.benefit_risk,
+        priority=body.priority,
+    )
+    return ok(ProposalOut.model_validate(p).model_dump(mode="json"))
+
+
+@router.delete("/{proposal_id}")
+async def delete_proposal(proposal_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """删除草稿提案（软删除，仅创建者本人、仅草稿状态可删，P3-7）。"""
+    await operations.delete_proposal(db, proposal_id, actor_id=user.id)
+    return ok({"id": str(proposal_id)})
 
 
 @router.post("/{proposal_id}/ai-research")

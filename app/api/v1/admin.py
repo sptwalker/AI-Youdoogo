@@ -4,6 +4,7 @@
 """
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_roles
 from app.contexts.foundations.governance.audit_trail.public import (
     AuditTrailQuery,
-    query_audit_trail,
+    query_audit_trail_page,
 )
 from app.contexts.foundations.governance.system_configuration.connectivity.public import (
     test_external_connectivity,
@@ -39,29 +40,42 @@ async def list_audit_logs(
     _: Admin,
     action: Annotated[str | None, Query()] = None,
     actor_id: Annotated[uuid.UUID | None, Query()] = None,
+    start: Annotated[datetime | None, Query()] = None,
+    end: Annotated[datetime | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
-    """审计流（按时间倒序，可按 action/actor 过滤）。"""
-    records = await query_audit_trail(
+    """审计流（按时间倒序，可按 action/actor/时间范围过滤，服务端翻页）。"""
+    page = await query_audit_trail_page(
         db,
-        AuditTrailQuery(action=action, actor_id=actor_id, limit=limit),
+        AuditTrailQuery(
+            action=action,
+            actor_id=actor_id,
+            start=start,
+            end=end,
+            limit=limit,
+            offset=offset,
+        ),
     )
     return ok(
-        [
-            {
-                "id": str(record.record_id),
-                "actor_id": str(record.actor_id) if record.actor_id else None,
-                "actor_role": record.actor_role,
-                "action": record.action,
-                "target_type": record.target_type,
-                "target_id": str(record.target_id) if record.target_id else None,
-                "summary": record.summary,
-                "detail": dict(record.detail) if record.detail is not None else None,
-                "result": record.result,
-                "create_time": record.occurred_at,
-            }
-            for record in records
-        ]
+        {
+            "items": [
+                {
+                    "id": str(record.record_id),
+                    "actor_id": str(record.actor_id) if record.actor_id else None,
+                    "actor_role": record.actor_role,
+                    "action": record.action,
+                    "target_type": record.target_type,
+                    "target_id": str(record.target_id) if record.target_id else None,
+                    "summary": record.summary,
+                    "detail": dict(record.detail) if record.detail is not None else None,
+                    "result": record.result,
+                    "create_time": record.occurred_at,
+                }
+                for record in page.items
+            ],
+            "total": page.total,
+        }
     )
 
 

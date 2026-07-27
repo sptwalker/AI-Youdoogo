@@ -24,6 +24,16 @@ class HumanReviewRequest(BaseModel):
     conclusion: str = Field(min_length=1)
 
 
+class ProposalEdit(BaseModel):
+    """编辑草稿提案（仅草稿可改，P3-7）。"""
+
+    title: str = Field(min_length=1, max_length=200)
+    background: str = Field(min_length=1)
+    plan: str = Field(min_length=1)
+    benefit_risk: str | None = None
+    priority: str = Field(default="normal", max_length=16)
+
+
 class ConvertRequest(BaseModel):
     """提案转任务卡。"""
 

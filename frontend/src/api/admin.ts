@@ -24,7 +24,19 @@ export interface SysConfig {
   is_set: boolean
 }
 
-export function listAuditLogs(params?: { action?: string; actor_id?: string }): Promise<AuditLog[]> {
+export interface AuditLogPage {
+  items: AuditLog[]
+  total: number
+}
+
+export function listAuditLogs(params?: {
+  action?: string
+  actor_id?: string
+  start?: string
+  end?: string
+  limit?: number
+  offset?: number
+}): Promise<AuditLogPage> {
   return request({ method: 'GET', url: '/audit-logs', params })
 }
 

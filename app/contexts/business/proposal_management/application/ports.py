@@ -78,6 +78,8 @@ class ProposalRepository(Protocol):
 
     async def save(self, proposal: Proposal) -> None: ...
 
+    async def delete(self, proposal_id: uuid.UUID) -> None: ...
+
     async def list_proposals(
         self,
         *,

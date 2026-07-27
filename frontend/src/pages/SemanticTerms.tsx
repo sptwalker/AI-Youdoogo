@@ -6,7 +6,6 @@ import {
   Button,
   Card,
   Col,
-  ConfigProvider,
   Empty,
   Form,
   Input,
@@ -71,17 +70,32 @@ const BLANK: FormVals = { canonical_name: '', term_type: 'metric' }
 
 export default function SemanticTerms() {
   const [terms, setTerms] = useState<SemanticTerm[]>([])
+  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)  // null=新建态
   const [form] = Form.useForm<FormVals>()
 
   const load = async () => {
-    const rows = await listTerms()
-    setTerms(rows)
-    return rows
+    setLoading(true)
+    try {
+      const rows = await listTerms()
+      setTerms(rows)
+      return rows
+    } catch {
+      message.error('加载术语失败，请重试')
+      return []
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => {
     void load()
   }, [])
+
+  const kw = query.trim().toLowerCase()
+  const shown = kw
+    ? terms.filter((t) => `${t.canonical_name}${t.aliases.join('')}`.toLowerCase().includes(kw))
+    : terms
 
   const showInForm = (values: FormVals) => {
     form.resetFields()
@@ -126,89 +140,94 @@ export default function SemanticTerms() {
       title="业务术语字典"
       subTitle="统一跨部门口径：注入 AI 提示词 + 别名查询扩展。仅口径参考，不触发业务决议"
     >
-      <ConfigProvider theme={{ token: { fontSize: 10 } }}>
-        <Row gutter={16}>
-          {/* 左栏：术语列表 */}
-          <Col xs={24} md={9}>
-            <Card
-              size="small"
-              title={`术语（${terms.length}）`}
-              extra={<Button type="primary" size="small" onClick={startNew}>+ 新建</Button>}
-              styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', padding: 0 } }}
-            >
-              <List
-                size="small"
-                dataSource={terms}
-                locale={{ emptyText: <Empty description="暂无术语" /> }}
-                renderItem={(t) => (
-                  <List.Item
-                    onClick={() => pick(t)}
-                    style={{
-                      cursor: 'pointer', padding: '8px 12px',
-                      background: t.id === selectedId ? '#e6f4ff' : undefined,
-                    }}
-                  >
-                    <Space size={6} wrap>
-                      <Tag color={TYPE_COLOR[t.term_type]}>{TYPE_LABEL[t.term_type] ?? t.term_type}</Tag>
-                      <span>{t.canonical_name}</span>
-                      {t.aliases.length > 0 && (
-                        <span style={{ color: '#999' }}>· {t.aliases.join('、')}</span>
-                      )}
-                    </Space>
-                  </List.Item>
-                )}
+      <Row gutter={16}>
+        {/* 左栏：术语列表 */}
+        <Col xs={24} md={9}>
+          <Card
+            size="small"
+            title={`术语（${shown.length}${kw ? `/${terms.length}` : ''}）`}
+            extra={<Button type="primary" size="small" onClick={startNew}>+ 新建</Button>}
+            styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', padding: 0 } }}
+          >
+            <div style={{ padding: 8 }}>
+              <Input.Search
+                allowClear placeholder="搜索规范名 / 别名"
+                onChange={(e) => setQuery(e.target.value)}
               />
-            </Card>
-          </Col>
+            </div>
+            <List
+              size="small"
+              loading={loading}
+              dataSource={shown}
+              locale={{ emptyText: <Empty description={kw ? '无匹配术语' : '暂无术语'} /> }}
+              renderItem={(t) => (
+                <List.Item
+                  onClick={() => pick(t)}
+                  style={{
+                    cursor: 'pointer', padding: '8px 12px',
+                    background: t.id === selectedId ? '#e6f4ff' : undefined,
+                  }}
+                >
+                  <Space size={6} wrap>
+                    <Tag color={TYPE_COLOR[t.term_type]}>{TYPE_LABEL[t.term_type] ?? t.term_type}</Tag>
+                    <span>{t.canonical_name}</span>
+                    {t.aliases.length > 0 && (
+                      <span style={{ color: '#999' }}>· {t.aliases.join('、')}</span>
+                    )}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
 
-          {/* 右栏：详情编辑 */}
-          <Col xs={24} md={15}>
-            <Card size="small" title={selectedId ? '编辑术语' : '新建术语'}>
-              <Form<FormVals>
-                form={form}
-                layout="vertical"
-                initialValues={BLANK}
-                onFinish={onSave}
+        {/* 右栏：详情编辑 */}
+        <Col xs={24} md={15}>
+          <Card size="small" title={selectedId ? '编辑术语' : '新建术语'}>
+            <Form<FormVals>
+              form={form}
+              layout="vertical"
+              initialValues={BLANK}
+              onFinish={onSave}
+            >
+              <Form.Item
+                name="canonical_name" label="规范名"
+                tooltip="全公司统一口径的标准称呼，如「累计激活设备数」"
+                rules={[{ required: true, message: '规范名必填' }]}
               >
-                <Form.Item
-                  name="canonical_name" label="规范名"
-                  tooltip="全公司统一口径的标准称呼，如「累计激活设备数」"
-                  rules={[{ required: true, message: '规范名必填' }]}
-                >
-                  <Input placeholder="累计激活设备数" />
-                </Form.Item>
-                <Form.Item
-                  name="aliases" label="别名/同义词"
-                  tooltip="逗号或顿号分隔，如「新增设备、激活量」。查询命中别名会映射到规范名"
-                >
-                  <Input placeholder="新增设备、激活量" />
-                </Form.Item>
-                <Form.Item name="term_type" label="类型" rules={[{ required: true }]}>
-                  <Select options={TYPE_OPTIONS} />
-                </Form.Item>
-                <Form.Item name="definition" label="口径定义" tooltip="一句话说清算法/边界">
-                  <Input.TextArea rows={2} placeholder="new_device 事件按 device_id 去重，跨全部日期" />
-                </Form.Item>
-                <Form.Item name="linked_view" label="关联数据源" tooltip="指标类可填 TD 视图名，如 v_event_4">
-                  <Input placeholder="v_event_4" />
-                </Form.Item>
-                <Form.Item name="sql_template" label="取数模板" tooltip="指标类可填参考 SQL（可选）">
-                  <Input.TextArea rows={2} />
-                </Form.Item>
-                <Space>
-                  <Button type="primary" htmlType="submit">保存</Button>
-                  <Button onClick={startNew}>清空/新建</Button>
-                  {selectedId && (
-                    <Popconfirm title="删除此术语？" onConfirm={onDelete}>
-                      <Button danger>删除</Button>
-                    </Popconfirm>
-                  )}
-                </Space>
-              </Form>
-            </Card>
-          </Col>
-        </Row>
-      </ConfigProvider>
+                <Input placeholder="累计激活设备数" />
+              </Form.Item>
+              <Form.Item
+                name="aliases" label="别名/同义词"
+                tooltip="逗号或顿号分隔，如「新增设备、激活量」。查询命中别名会映射到规范名"
+              >
+                <Input placeholder="新增设备、激活量" />
+              </Form.Item>
+              <Form.Item name="term_type" label="类型" rules={[{ required: true }]}>
+                <Select options={TYPE_OPTIONS} />
+              </Form.Item>
+              <Form.Item name="definition" label="口径定义" tooltip="一句话说清算法/边界">
+                <Input.TextArea rows={2} placeholder="new_device 事件按 device_id 去重，跨全部日期" />
+              </Form.Item>
+              <Form.Item name="linked_view" label="关联数据源" tooltip="指标类可填 TD 视图名，如 v_event_4">
+                <Input placeholder="v_event_4" />
+              </Form.Item>
+              <Form.Item name="sql_template" label="取数模板" tooltip="指标类可填参考 SQL（可选）">
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Space>
+                <Button type="primary" htmlType="submit">保存</Button>
+                <Button onClick={startNew}>清空/新建</Button>
+                {selectedId && (
+                  <Popconfirm title="删除此术语？" onConfirm={onDelete}>
+                    <Button danger>删除</Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            </Form>
+          </Card>
+        </Col>
+      </Row>
     </PageContainer>
   )
 }

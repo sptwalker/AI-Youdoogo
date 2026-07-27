@@ -104,6 +104,17 @@ class SQLAlchemyProposalRepository:
         await self._session.flush()
         self._tracked[proposal.id] = row
 
+    async def delete(self, proposal_id: uuid.UUID) -> None:
+        # 软删除，与 get/list 的 is_delete 过滤一致（不做物理删，保留潜在追溯）。
+        row = self._tracked.get(proposal_id)
+        if row is None:
+            row = await self._session.get(ProposalCard, proposal_id)
+        if row is None or row.is_delete:
+            return
+        row.is_delete = True
+        await self._session.flush()
+        self._tracked.pop(proposal_id, None)
+
     async def list_proposals(
         self,
         *,

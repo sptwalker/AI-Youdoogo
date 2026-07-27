@@ -49,3 +49,14 @@ export function updateDataSource(
 export function deleteDataSource(id: string): Promise<null> {
   return request({ method: 'DELETE', url: `/data-sources/${id}` })
 }
+
+export interface DataSourceTestResult {
+  status: 'ok' | 'fail' | 'not_configured' | 'unsupported'
+  message: string
+  row_count?: number
+}
+
+/** 测试数据接口连通性（真跑一次，不落库、不回显密钥，P2-26）。 */
+export function testDataSource(id: string): Promise<DataSourceTestResult> {
+  return request({ method: 'POST', url: `/data-sources/${id}/test` })
+}

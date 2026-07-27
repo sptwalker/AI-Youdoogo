@@ -1,12 +1,16 @@
 """数据接口注册表管理接口（F2，仅 admin）。密钥仅回显状态位，不回显值。"""
 
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
+from app.contexts.business.operational_analytics.entrypoints import (
+    operations as analytics,
+)
 from app.contexts.foundations.integration.connector_management.application.contracts import (
     RegisterConnector,
     UpdateConnector,
@@ -70,3 +74,22 @@ async def delete_ds(ds_id: uuid.UUID, db: DB, _: Admin) -> dict:
     """软删数据接口。"""
     await operations.delete_connector(db, ds_id)
     return ok()
+
+
+@router.post("/{ds_id}/test")
+async def test_ds(ds_id: uuid.UUID, db: DB, _: Admin) -> dict:
+    """测试数据接口连通性（用生效配置真跑一次，不落库、不回显密钥，P2-26）。"""
+    connector = await operations.get_connector(db, ds_id)
+    if connector.connector_type != "thinkingdata":
+        return ok(
+            {
+                "status": "unsupported",
+                "message": (
+                    f"暂仅支持 thinkingdata 类型连通测试，当前类型 {connector.connector_type}"
+                ),
+            }
+        )
+    # ponytail: TD 连通复用运营分析的系统级 TD 读取校验（读系统配置的 TD 地址/密钥/日指标 SQL），
+    # 非按本连接器 config 独立建连；多 TD 连接器时都测同一套系统 TD 配置。需按连接器独立建连再拆。
+    result = await analytics.test_connector(db, date.today())
+    return ok(result.to_dict())

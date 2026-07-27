@@ -1,4 +1,5 @@
 /** 路由：/login 公开，其余经 RequireAuth 守卫（无 token 跳登录）。 */
+import { PageLoading } from '@ant-design/pro-components'
 import { createBrowserRouter } from 'react-router-dom'
 import RequireAuth from './components/RequireAuth'
 import AppLayout from './layouts/AppLayout'
@@ -10,11 +11,13 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     errorElement: <RouteErrorPage />,
+    HydrateFallback: PageLoading,
     lazy: async () => ({ Component: (await import('./pages/Login')).default }),
   },
   {
     path: '/',
     errorElement: <RouteErrorPage />,
+    HydrateFallback: PageLoading,
     element: (
       <RequireAuth>
         <AppLayout />

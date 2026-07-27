@@ -227,6 +227,12 @@ async def tally_votes(
     return result.as_dict()
 
 
+async def list_vote_subjects(
+    session: AsyncSession, meeting_id: uuid.UUID
+) -> tuple[str, ...]:
+    return await build_meeting_application(session).list_vote_subjects(meeting_id)
+
+
 async def generate_minutes(
     session: AsyncSession,
     meeting_id: uuid.UUID,

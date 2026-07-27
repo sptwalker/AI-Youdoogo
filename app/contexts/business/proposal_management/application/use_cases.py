@@ -7,6 +7,8 @@ import uuid
 from app.contexts.business.proposal_management.application.contracts import (
     ConvertProposalCommand,
     CreateProposalCommand,
+    DeleteProposalCommand,
+    EditProposalCommand,
     GetProposalQuery,
     ListProposalsQuery,
     ProposalDetailResult,
@@ -106,6 +108,27 @@ class ProposalApplication:
             await uow.proposals.add(proposal)
             await uow.commit()
         return _proposal_result(proposal)
+
+    async def edit(self, command: EditProposalCommand) -> ProposalResult:
+        async with self._uow_factory() as uow:
+            proposal = await self._get_owned(uow.proposals, command.proposal_id, command.actor_id)
+            proposal.edit_draft(
+                title=command.title,
+                background=command.background,
+                plan=command.plan,
+                benefit_risk=command.benefit_risk,
+                priority=command.priority,
+            )
+            await uow.proposals.save(proposal)
+            await uow.commit()
+        return _proposal_result(proposal)
+
+    async def delete(self, command: DeleteProposalCommand) -> None:
+        async with self._uow_factory() as uow:
+            proposal = await self._get_owned(uow.proposals, command.proposal_id, command.actor_id)
+            proposal.assert_deletable()
+            await uow.proposals.delete(command.proposal_id)
+            await uow.commit()
 
     async def get(self, query: GetProposalQuery) -> ProposalResult:
         async with self._uow_factory() as uow:
@@ -245,5 +268,15 @@ class ProposalApplication:
     ) -> Proposal:
         proposal = await repository.get(proposal_id)
         if proposal is None:
+            raise ProposalNotFound()
+        return proposal
+
+    @classmethod
+    async def _get_owned(
+        cls, repository: ProposalRepository, proposal_id: uuid.UUID, actor_id: uuid.UUID
+    ) -> Proposal:
+        # 编辑/删除仅限创建者；非本人一律按「不存在」掩盖，不泄露他人草稿存在性。
+        proposal = await cls._get_required(repository, proposal_id)
+        if proposal.creator_id != actor_id:
             raise ProposalNotFound()
         return proposal
