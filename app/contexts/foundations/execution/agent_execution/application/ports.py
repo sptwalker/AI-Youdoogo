@@ -12,9 +12,6 @@ from app.contexts.foundations.execution.agent_execution.contracts.execution impo
     AgentExecutionStreamEvent,
     ExecutionError,
     KnowledgeAugmentation,
-    LlmExecutionRequest,
-    LlmExecutionResponse,
-    LlmStreamChunk,
 )
 from app.contexts.foundations.execution.agent_execution.contracts.records import (
     AgentExecutionRecordView,
@@ -23,9 +20,14 @@ from app.contexts.foundations.execution.capability_execution.contracts.execution
     CapabilityExecutionRequest,
     CapabilityExecutionResult,
 )
+from app.contexts.foundations.model_gateway.contracts.completion import LlmCompletionPort
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
+
+# The canonical LLM completion port lives in model_gateway; keep the historic name
+# as an alias so agent_execution use cases and tests need no change.
+LlmExecutionPort = LlmCompletionPort
 
 
 class PromptAssemblyPort(Protocol):
@@ -40,12 +42,6 @@ class KnowledgeAugmentationPort(Protocol):
 
 class UsageAuthorizationPort(Protocol):
     def authorize(self, request: AgentExecutionRequest) -> ExecutionError | None: ...
-
-
-class LlmExecutionPort(Protocol):
-    async def invoke(self, request: LlmExecutionRequest) -> LlmExecutionResponse: ...
-
-    def stream(self, request: LlmExecutionRequest) -> AsyncIterator[LlmStreamChunk]: ...
 
 
 class AgentExecutionRecorderPort(Protocol):

@@ -12,9 +12,7 @@ from app.contexts.business.operational_analytics.entrypoints.agent_operations im
     create_anomaly_alert,
     detect_anomalies,
 )
-from app.contexts.foundations.execution.agent_execution.infrastructure import (
-    composition as agent_execution_composition,
-)
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
@@ -108,9 +106,7 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def test_generate_anomaly_alert(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        agent_execution_composition,
-        "get_llm_for_role",
+    monkeypatch.setattr(_mg_public, "get_llm_for_role",
         lambda *a, **k: _FakeLLM(),
     )
     alerts = detect_anomalies([_row("A", 400)], [_row("A", 1000)])

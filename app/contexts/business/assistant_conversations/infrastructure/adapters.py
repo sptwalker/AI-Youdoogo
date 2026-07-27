@@ -31,7 +31,6 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 from app.contexts.foundations.workforce.expert_management import public as expert_management
 from app.contexts.shared_kernel import ResourceNotFound
-from app.llm.roles import get_llm_for_role
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.platform.object_storage import gateway as storage
@@ -249,7 +248,6 @@ class PublishedConversationArchiveAdapter:
                 principal_id=request.principal_id,
                 source_type="assistant_conversation",
             ),
-            llm_factory=get_llm_for_role,
         )
         title_suffix = "记忆" if draft is not None else "存档"
         await knowledge_indexing.index_text(

@@ -18,6 +18,7 @@ from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
 )
 from app.contexts.foundations.knowledge.organizational_memory.contracts import MemoryDraft
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.desktop import SPEAKER_USER, DesktopMessage
 from app.models.system import SysUser
@@ -57,7 +58,7 @@ async def test_distill_success(db: AsyncSession, monkeypatch: pytest.MonkeyPatch
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
             return _Reply()
 
-    monkeypatch.setattr(memory_service, "get_llm_for_role", lambda *a, **k: _LLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
     out = await memory_service.distill_conversation(db, "用户：查下A5\n助理：好的")
     assert out is not None and "摘要" in out and "盒子A5" in out
 
@@ -71,7 +72,7 @@ async def test_distill_failure_returns_none(
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
             raise RuntimeError("模型不可用")
 
-    monkeypatch.setattr(memory_service, "get_llm_for_role", lambda *a, **k: _LLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
     assert await memory_service.distill_conversation(db, "内容") is None
 
 

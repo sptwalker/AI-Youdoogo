@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +19,9 @@ from app.contexts.foundations.execution.work_planning.contracts.planning import 
     WorkIntent,
 )
 from app.contexts.foundations.execution.work_planning.infrastructure.langchain_planner import (
-    LangChainPlanningModelAdapter,
+    CompletionPlanningModelAdapter,
 )
-from app.llm import get_llm_for_role
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
 from app.models.task import TaskCard
 from app.services import task_service
 
@@ -67,15 +65,13 @@ def parse_plan(raw: str) -> list[PlanStep] | None:
 async def plan(
     db: AsyncSession,
     request: str,
-    *,
-    llm_factory: Callable[..., Any] = get_llm_for_role,
 ) -> list[PlanStep] | None:
     del db
     if not request or not request.strip():
         return None
     try:
         result = await PlanWorkApplication(
-            LangChainPlanningModelAdapter(llm_factory)
+            CompletionPlanningModelAdapter(build_local_llm_completion_port())
         ).execute(
             PlanWorkRequest(
                 WorkIntent(request=request.strip(), creator_id=uuid.UUID(int=0))

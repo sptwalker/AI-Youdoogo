@@ -14,15 +14,15 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
     RecordFeedbackCommand,
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.legacy_execution import (
-    LangChainPromptSuggestion,
+    CompletionPromptSuggestion,
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyAIQualityUnitOfWork,
     SQLAlchemyEvaluationSubject,
     get_feedback_record,
 )
-from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage, record_usage
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.llm.usage import record_usage
 from app.models.feedback import AgentFeedback
 
 
@@ -65,10 +65,9 @@ async def optimize_prompt(
     suggestion = await SuggestPromptImprovement(
         SQLAlchemyAIQualityUnitOfWork(db),
         SQLAlchemyEvaluationSubject(db),
-        LangChainPromptSuggestion(
+        CompletionPromptSuggestion(
             db,
-            llm_factory=get_llm_for_role,
-            usage_extractor=extract_usage,
+            port=build_local_llm_completion_port(),
             usage_recorder=record_usage,
         ),
     ).execute(

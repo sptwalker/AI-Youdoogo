@@ -7,7 +7,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base, scheduler
+from app.agents import scheduler
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.system import SysUser
@@ -38,7 +39,7 @@ async def test_new_department_agent_via_config_only(
 ) -> None:
     """新增“销售AI总监”仅需建一行角色，任务卡即可跑通——验证边际成本=数据。"""
     session, uid = ctx
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
 
     role = await agent_role_service.create_agent_role(
         session,

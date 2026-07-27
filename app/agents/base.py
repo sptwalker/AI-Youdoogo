@@ -37,7 +37,6 @@ from app.contexts.foundations.execution.agent_execution.contracts.execution impo
 )
 from app.contexts.foundations.execution.agent_execution.infrastructure.langchain_gateway import (
     CurrentUsageAuthorizationAdapter,
-    LangChainLlmExecutionAdapter,
 )
 from app.contexts.foundations.execution.agent_execution.infrastructure.sqlalchemy_recorder import (
     SQLAlchemyAgentExecutionRecorder,
@@ -45,12 +44,14 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.sqlalchem
 from app.contexts.foundations.execution.agent_execution.infrastructure.system_clock import (
     SystemExecutionClock,
 )
+from app.contexts.foundations.model_gateway.public import (
+    build_local_llm_completion_port,
+)
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertSnapshotQuery,
     snapshot_from_role,
 )
-from app.llm import get_llm_for_role
-from app.llm.usage import budget_exceeded, extract_usage, record_usage
+from app.llm.usage import budget_exceeded, record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.services import config_service as config_service
 
@@ -113,10 +114,7 @@ def _application(db: AsyncSession, role: AgentRole) -> AgentExecutionApplication
         prompt_port=LegacyPromptAssemblyAdapter(db, role, _DEFAULT_GLOBAL_PROMPT),
         knowledge_port=LegacyKnowledgeAugmentationAdapter(db, role),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
-        llm_port=LangChainLlmExecutionAdapter(
-            llm_factory=get_llm_for_role,
-            usage_extractor=extract_usage,
-        ),
+        llm_port=build_local_llm_completion_port(),
         recorder=SQLAlchemyAgentExecutionRecorder(db, role, record_usage),
         clock=SystemExecutionClock(),
     )

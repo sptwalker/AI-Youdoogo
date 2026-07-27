@@ -5,13 +5,15 @@ from __future__ import annotations
 import time
 
 import httpx
-from langchain_core.messages import HumanMessage
 
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionRequest,
+)
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
 from app.core import runtime_config
 from app.core.config import get_settings
 from app.integrations.feishu.client import FeishuClient
 from app.knowledge.embedding import _api_key, embed_query
-from app.llm import get_llm_for_role
 
 from ..contracts import ConnectivityProbeResult
 
@@ -24,8 +26,14 @@ class LLMConnectivityProbe:
     async def probe(self) -> ConnectivityProbeResult:
         started_at = time.monotonic()
         try:
-            llm = get_llm_for_role("default", temperature=0)
-            await llm.ainvoke([HumanMessage(content="ping")])
+            await build_local_llm_completion_port().invoke(
+                LlmCompletionRequest(
+                    model_role="default",
+                    system_prompt="",
+                    user_message="ping",
+                    temperature=0,
+                )
+            )
             return ConnectivityProbeResult("llm", "ok", _elapsed(started_at), "模型可达")
         except Exception as exc:  # noqa: BLE001 - probes report rather than fail
             return ConnectivityProbeResult(

@@ -17,7 +17,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +28,12 @@ from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.confi
 from app.contexts.foundations.knowledge.semantic_catalog.public import (
     expand_query as expand_semantic_query,
 )
-from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage, record_usage
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionPort,
+    LlmCompletionRequest,
+)
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.llm.usage import record_usage
 from app.models.knowledge import KnowledgeFile, KnowledgeVector
 
 logger = logging.getLogger(__name__)
@@ -259,32 +262,35 @@ async def answer(
     *,
     user_id: uuid.UUID | None = None,
     visible_kb_ids: list[uuid.UUID] | None = None,
+    port: LlmCompletionPort | None = None,
 ) -> dict[str, Any]:
     """检索 → 拼资料 → LLM 生成带来源标注的答案。命中为空时不调用模型。
 
     visible_kb_ids 为请求方可见知识库范围（契约② 隔离），由 API 层按请求用户算出。
+    port 可注入（默认本地端口）——LLM 完成统一经 model_gateway 接缝，便于远端切换与测试替身。
     """
     hits = await search(db, query, top_k, visible_kb_ids=visible_kb_ids)
     if not hits:
         return {"answer": "资料不足，无法回答（知识库中未检索到相关内容）。", "sources": []}
 
     context = "\n\n".join(f"[{i + 1}] {h.chunk_text}" for i, h in enumerate(hits))
-    llm = get_llm_for_role("default", temperature=0.3)
+    port = port or build_local_llm_completion_port()
     t0 = time.monotonic()
-    reply = await llm.ainvoke(
-        [
-            SystemMessage(content=_SYSTEM_PROMPT),
-            HumanMessage(content=f"【资料】\n{context}\n\n【问题】\n{query}"),
-        ]
+    resp = await port.invoke(
+        LlmCompletionRequest(
+            model_role="default",
+            system_prompt=_SYSTEM_PROMPT,
+            user_message=f"【资料】\n{context}\n\n【问题】\n{query}",
+            temperature=0.3,
+        )
     )
-    prompt_tok, completion_tok, total_tok = extract_usage(reply)
     await record_usage(
         db,
         role="default",
-        model=str(reply.response_metadata.get("model_name") or "default"),
-        prompt_tokens=prompt_tok,
-        completion_tokens=completion_tok,
-        total_tokens=total_tok,
+        model=resp.model or "default",
+        prompt_tokens=resp.usage.prompt_tokens,
+        completion_tokens=resp.usage.completion_tokens,
+        total_tokens=resp.usage.total_tokens,
         duration_ms=int((time.monotonic() - t0) * 1000),
         user_id=user_id,
     )
@@ -298,4 +304,4 @@ async def answer(
         }
         for i, h in enumerate(hits)
     ]
-    return {"answer": reply.content, "sources": sources}
+    return {"answer": resp.content, "sources": sources}

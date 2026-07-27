@@ -1,13 +1,12 @@
-"""LangChain adapter for the Work Planning model port."""
+"""Planning model adapter over the unified LLM completion port (model_gateway seam)."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from app.contexts.foundations.execution.work_planning.contracts.planning import WorkIntent
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionPort,
+    LlmCompletionRequest,
+)
 
 PLANNER_SYSTEM = (
     "你是任务编排规划器。判断用户请求是否是「需要多个有序步骤」的复合任务。"
@@ -28,16 +27,17 @@ PLANNER_SYSTEM = (
 )
 
 
-class LangChainPlanningModelAdapter:
-    def __init__(self, llm_factory: Callable[..., Any]) -> None:
-        self._llm_factory = llm_factory
+class CompletionPlanningModelAdapter:
+    def __init__(self, port: LlmCompletionPort) -> None:
+        self._port = port
 
     async def propose(self, intent: WorkIntent) -> str:
-        llm = self._llm_factory("reasoning", temperature=0.0)
-        reply = await llm.ainvoke(
-            [
-                SystemMessage(content=PLANNER_SYSTEM),
-                HumanMessage(content=f"用户请求:{intent.request.strip()}"),
-            ]
+        resp = await self._port.invoke(
+            LlmCompletionRequest(
+                model_role="reasoning",
+                system_prompt=PLANNER_SYSTEM,
+                user_message=f"用户请求:{intent.request.strip()}",
+                temperature=0.0,
+            )
         )
-        return reply.content if isinstance(reply.content, str) else str(reply.content)
+        return resp.content

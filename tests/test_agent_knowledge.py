@@ -15,6 +15,7 @@ from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure impor
 from app.contexts.foundations.knowledge.wiki_management.public import (
     agent_visible_knowledge_base_ids,
 )
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.knowledge import KnowledgeBase
@@ -64,7 +65,7 @@ async def test_run_agent_injects_knowledge(
 ) -> None:
     """use_knowledge=True：命中的资料注入到消息里（开卷）。"""
     llm = _CaptureLLM()
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: llm)
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: llm)
     hit = retrieval.Hit(
         file_id=uuid.uuid4(), file_name="公司资料.txt", chunk_index=0,
         chunk_text="创想悦动成立于2020年", distance=0.1,
@@ -93,7 +94,7 @@ async def test_run_agent_persists_sources(
 ) -> None:
     """检索引用溯源落库到 AgentTaskRecord.sources（H2.3），可事后重建用了哪些资料。"""
     llm = _CaptureLLM()
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: llm)
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: llm)
     fid = uuid.uuid4()
     hit = retrieval.Hit(
         file_id=fid, file_name="公司资料.txt", chunk_index=2,
@@ -154,7 +155,7 @@ async def test_run_agent_knowledge_failure_graceful(
 ) -> None:
     """检索失败不阻断任务：照常执行、无注入。"""
     llm = _CaptureLLM()
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: llm)
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: llm)
 
     async def boom(*a: Any, **k: Any) -> list[retrieval.Hit]:
         raise RuntimeError("embedding 服务不可用")
@@ -177,7 +178,7 @@ async def test_run_agent_without_knowledge_unchanged(
 ) -> None:
     """use_knowledge 默认 False：不检索、消息原样（保护既有调用方）。"""
     llm = _CaptureLLM()
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: llm)
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: llm)
     called = {"n": 0}
 
     async def spy(*a: Any, **k: Any) -> list[retrieval.Hit]:

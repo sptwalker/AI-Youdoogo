@@ -24,6 +24,7 @@ from app.contexts.foundations.execution.deliverable_management.entrypoints.agent
 from app.contexts.foundations.integration.governed_data_query.entrypoints.agent_capability import (
     DataQuerySkillExecutor,
 )
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.collab import CollabRequest
@@ -196,7 +197,7 @@ async def test_agent_and_llm_records_keep_workflow_trace(
                 usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
             )
 
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
     context = ExecutionContext(
         workflow_run_id=run.id,
         workflow_step_id=step.id,

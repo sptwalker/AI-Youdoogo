@@ -17,16 +17,16 @@ from app.contexts.foundations.governance.ai_quality.application.use_cases import
     SuggestPromptImprovement,
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.legacy_execution import (
-    LangChainEvaluationJudge,
-    LangChainPromptSuggestion,
+    CompletionEvaluationJudge,
+    CompletionPromptSuggestion,
     LegacyAgentEvaluationExecutor,
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyAIQualityUnitOfWork,
     SQLAlchemyEvaluationSubject,
 )
-from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage, record_usage
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.llm.usage import record_usage
 
 
 class AIQualityOperations:
@@ -38,10 +38,9 @@ class AIQualityOperations:
             unit,
             SQLAlchemyEvaluationSubject(session),
             LegacyAgentEvaluationExecutor(session, run_agent),
-            LangChainEvaluationJudge(
+            CompletionEvaluationJudge(
                 session,
-                llm_factory=get_llm_for_role,
-                usage_extractor=extract_usage,
+                port=build_local_llm_completion_port(),
                 usage_recorder=record_usage,
             ),
         )
@@ -54,10 +53,9 @@ class AIQualityOperations:
         self.suggest_prompt_improvement = SuggestPromptImprovement(
             unit,
             SQLAlchemyEvaluationSubject(session),
-            LangChainPromptSuggestion(
+            CompletionPromptSuggestion(
                 session,
-                llm_factory=get_llm_for_role,
-                usage_extractor=extract_usage,
+                port=build_local_llm_completion_port(),
                 usage_recorder=record_usage,
             ),
         )

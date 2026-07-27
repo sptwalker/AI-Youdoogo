@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessageChunk
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.discussion import DiscussionChannel, DiscussionMessage
@@ -36,7 +36,7 @@ Ctx = tuple[AsyncSession, DiscussionChannel, list[AgentRole]]
 
 @pytest.fixture(autouse=True)
 def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
 
 
 @pytest.fixture

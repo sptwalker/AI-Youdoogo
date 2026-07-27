@@ -8,7 +8,6 @@ import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base
 from app.contexts.business.proposal_management import (
     InvalidProposalDecision,
     ProposalAlreadyConverted,
@@ -17,6 +16,7 @@ from app.contexts.business.proposal_management import (
     ProposalResearchNotAllowed,
     ProposalReviewNotAllowed,
 )
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.proposal import APPROVED, REJECTED, RESEARCHING, REVIEWED, ProposalCard
@@ -75,7 +75,7 @@ async def test_full_pipeline_approve_and_convert(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, _, uid = ctx
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     p = await _new_proposal(session, uid)
     assert p.code.startswith("PROP-")
 
@@ -98,7 +98,7 @@ async def test_reject_blocks_convert(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, _, uid = ctx
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     p = await _new_proposal(session, uid)
     await proposal_service.run_ai_research(session, p.id)
     rejected = await proposal_service.human_review(
@@ -137,7 +137,7 @@ async def test_researching_state_is_visible_before_external_ai_call(
     session, factory, uid = ctx
     proposal = await _new_proposal(session, uid)
     fake_llm = _FakeLLM(factory, proposal.id)
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *args, **kwargs: fake_llm)
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: fake_llm)
 
     await proposal_service.run_ai_research(session, proposal.id, operator_id=uid)
 
@@ -163,7 +163,7 @@ async def test_proposal_failure_semantics_are_stable(
             decision="abstain",
         )
 
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
     await proposal_service.run_ai_research(session, proposal.id)
     await proposal_service.human_review(
         session,

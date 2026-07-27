@@ -9,13 +9,11 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base, ops
+from app.agents import ops
 from app.contexts.business.operational_analytics.application import (
     agent_use_cases as operational_agent_use_cases,
 )
-from app.contexts.foundations.execution.agent_execution.infrastructure import (
-    composition as agent_execution_composition,
-)
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -74,13 +72,7 @@ async def test_generate_daily_report_success(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        base, "get_llm_for_role",
-        lambda *a, **k: _FakeLLM(
-            text="【核心指标概览】...", metadata={"model_name": "deepseek-chat"}
-        ),
-    )
-    monkeypatch.setattr(
-        agent_execution_composition,
+        _mg_public,
         "get_llm_for_role",
         lambda *a, **k: _FakeLLM(
             text="【核心指标概览】...", metadata={"model_name": "deepseek-chat"}
@@ -109,12 +101,7 @@ async def test_run_agent_failure_is_recorded(
 ) -> None:
     """LLM 抛异常 → 转 status=failed 留痕，不向上抛。"""
     monkeypatch.setattr(
-        base, "get_llm_for_role", lambda *a, **k: _FakeLLM(exc=TimeoutError("boom"))
-    )
-    monkeypatch.setattr(
-        agent_execution_composition,
-        "get_llm_for_role",
-        lambda *a, **k: _FakeLLM(exc=TimeoutError("boom")),
+        _mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM(exc=TimeoutError("boom"))
     )
     record = await ops.generate_daily_report(db, stat_date="2026-07-11", rows=_ROWS)
     assert record.status == "failed"
@@ -139,11 +126,7 @@ async def test_missing_role_rejected(db: AsyncSession, monkeypatch: pytest.Monke
 
 async def test_generate_proposal(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        base, "get_llm_for_role",
-        lambda *a, **k: _FakeLLM(text="【背景与问题】...【优先级建议】..."),
-    )
-    monkeypatch.setattr(
-        agent_execution_composition,
+        _mg_public,
         "get_llm_for_role",
         lambda *a, **k: _FakeLLM(text="【背景与问题】...【优先级建议】..."),
     )

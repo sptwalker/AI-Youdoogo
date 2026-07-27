@@ -6,9 +6,40 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionRequest as LlmExecutionRequest,
+)
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionResponse as LlmExecutionResponse,
+)
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionStreamChunk as LlmStreamChunk,
+)
+from app.contexts.foundations.model_gateway.contracts.completion import TokenUsage
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
+
+# Canonical LLM completion contracts now live in model_gateway; these names are
+# preserved here as aliases so existing agent_execution imports/tests stay unchanged.
+__all__ = [
+    "AgentExecutionRequest",
+    "AgentExecutionResult",
+    "AgentExecutionStatus",
+    "AgentExecutionStreamEvent",
+    "CapabilityActivity",
+    "ContextReference",
+    "EvidenceReference",
+    "ExecutionError",
+    "ExecutionTrace",
+    "KnowledgeAugmentation",
+    "LlmExecutionRequest",
+    "LlmExecutionResponse",
+    "LlmStreamChunk",
+    "ReflectionOutcome",
+    "SourceReference",
+    "TokenUsage",
+]
 
 
 class AgentExecutionStatus(StrEnum):
@@ -46,13 +77,6 @@ class EvidenceReference:
 
 
 @dataclass(frozen=True, slots=True)
-class TokenUsage:
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-@dataclass(frozen=True, slots=True)
 class CapabilityActivity:
     capability_key: str
     status: str
@@ -77,29 +101,6 @@ class ExecutionError:
 class KnowledgeAugmentation:
     message: str
     sources: tuple[SourceReference, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class LlmExecutionRequest:
-    model_role: str
-    system_prompt: str
-    user_message: str
-    temperature: float = 0.3
-
-
-@dataclass(frozen=True, slots=True)
-class LlmExecutionResponse:
-    content: str
-    model: str | None = None
-    usage: TokenUsage = TokenUsage()
-
-
-@dataclass(frozen=True, slots=True)
-class LlmStreamChunk:
-    delta: str
-    accumulated_content: str
-    model: str | None = None
-    usage: TokenUsage = TokenUsage()
 
 
 @dataclass(frozen=True, slots=True)

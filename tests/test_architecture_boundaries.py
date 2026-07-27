@@ -622,3 +622,66 @@ def test_zero_caller_legacy_facades_are_removed() -> None:
         APP / "services" / "tool_execution_service.py",
     )
     assert [path.relative_to(ROOT) for path in removed if path.exists()] == []
+
+
+# ── model_gateway 接缝守卫（ADR 0001）────────────────────────────────
+_LLM_COMPLETION_NAMES = {"get_llm_for_role", "create_llm", "BaseChatModel"}
+
+# 未迁移的 LLM 完成直连家族：显式挂账，随后续单模块逐个收编而递减（ADR 0001）。
+# Phase 0 已全部收编，白名单清空——任何新增直连都会被守卫直接判为越界。
+_LLM_COMPLETION_MIGRATION_DEBT: set[str] = set()
+
+# 本模块已收编、必须真正脱离直连的家族（不得回到白名单/直连）。
+_LLM_COMPLETION_MIGRATED = {
+    "app/contexts/foundations/knowledge/knowledge_retrieval/infrastructure/sqlalchemy_retrieval.py",
+    "app/contexts/foundations/governance/system_configuration/connectivity/infrastructure/adapters.py",
+    "app/contexts/foundations/execution/agent_execution/infrastructure/composition.py",
+    "app/contexts/foundations/execution/agent_execution/infrastructure/langchain_gateway.py",
+    "app/contexts/foundations/governance/ai_quality/infrastructure/composition.py",
+    "app/contexts/foundations/governance/ai_quality/infrastructure/legacy_execution.py",
+    "app/contexts/foundations/execution/work_planning/infrastructure/langchain_planner.py",
+    "app/contexts/foundations/knowledge/organizational_memory/infrastructure/llm_distillation.py",
+    "app/contexts/business/assistant_conversations/infrastructure/adapters.py",
+    "app/contexts/business/group_messaging/infrastructure/adapters.py",
+}
+
+
+def _touches_llm_completion(path: Path) -> bool:
+    """A file touches the LLM completion seam if it pulls in vendor chat types or the role factory.
+
+    仅针对「完成」语义：langchain*、``get_llm_for_role``/``create_llm``/``BaseChatModel``。
+    ``app.llm.usage``（用量记录，ADR 0001 记为独立债务）与 ``app.llm.factory``/embedding 不计入。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.startswith("langchain") for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").startswith("langchain"):
+                return True
+            if any(alias.name in _LLM_COMPLETION_NAMES for alias in node.names):
+                return True
+    return False
+
+
+def test_llm_completion_flows_through_model_gateway_seam() -> None:
+    """所有 LLM 完成调用必须经 model_gateway 接缝；未迁移家族须显式挂账，已迁移家族须真正脱离。"""
+    seam = APP / "contexts" / "foundations" / "model_gateway"
+    touching = {
+        path.relative_to(ROOT).as_posix()
+        for path in (APP / "contexts").rglob("*.py")
+        if _touches_llm_completion(path)
+    }
+    offenders = sorted(
+        rel
+        for rel in touching
+        if not (ROOT / rel).is_relative_to(seam) and rel not in _LLM_COMPLETION_MIGRATION_DEBT
+    )
+    assert offenders == [], f"新增 LLM 完成直连（应经 model_gateway.public）：{offenders}"
+    # 已迁移的家族确实脱离直连。
+    regressed = sorted(_LLM_COMPLETION_MIGRATED & touching)
+    assert regressed == [], f"已收编家族回退为直连：{regressed}"
+    # 债务白名单精确——不留已消除项，避免虚假债务。
+    stale = sorted(_LLM_COMPLETION_MIGRATION_DEBT - touching)
+    assert stale == [], f"债务白名单存在冗余项（已消除应删除）：{stale}"

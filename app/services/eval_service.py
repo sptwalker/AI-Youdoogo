@@ -22,15 +22,15 @@ from app.contexts.foundations.governance.ai_quality.domain.scoring import (
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.legacy_execution import (
     CallbackEvaluationJudge,
-    LangChainEvaluationJudge,
+    CompletionEvaluationJudge,
     LegacyAgentEvaluationExecutor,
 )
 from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyAIQualityUnitOfWork,
     SQLAlchemyEvaluationSubject,
 )
-from app.llm import get_llm_for_role
-from app.llm.usage import extract_usage, record_usage
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.llm.usage import record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
 
 
@@ -48,10 +48,9 @@ async def _judge(
     output: str,
     user_id: uuid.UUID | None,
 ) -> int:
-    return await LangChainEvaluationJudge(
+    return await CompletionEvaluationJudge(
         db,
-        llm_factory=get_llm_for_role,
-        usage_extractor=extract_usage,
+        port=build_local_llm_completion_port(),
         usage_recorder=record_usage,
     ).score(rubric, output, user_id)
 

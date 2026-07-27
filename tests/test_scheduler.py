@@ -7,7 +7,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base, scheduler
+from app.agents import scheduler
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
@@ -39,7 +40,7 @@ async def test_run_task_drives_to_reported(
     ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session, uid, role_id = ctx
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     task = await task_service.create_task(
         session, title="竞品分析", task_type="analysis", creator_id=uid,
         assignee_agent_id=role_id, payload={"scope": "产品A"},

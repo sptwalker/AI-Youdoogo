@@ -9,9 +9,11 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.contexts.business.task_management import legacy_public as legacy_taskcard_workflow
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.models import Base
 from app.models.system import SysUser
 from app.services import orchestration_service as orch
@@ -150,14 +152,11 @@ def test_parse_plan_caps_steps() -> None:
 async def test_plan_returns_none_on_single(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class _Reply:
-        content = _plan_json([], multi=False)
-
     class _LLM:
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
-            return _Reply()
+            return AIMessage(content=_plan_json([], multi=False))
 
-    monkeypatch.setattr(orch, "get_llm_for_role", lambda *a, **k: _LLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
     assert await orch.plan(db, "今天天气如何") is None
 
 
@@ -168,7 +167,7 @@ async def test_plan_llm_error_returns_none(
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
             raise RuntimeError("模型不可用")
 
-    monkeypatch.setattr(orch, "get_llm_for_role", lambda *a, **k: _LLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
     assert await orch.plan(db, "做个复合任务") is None  # 故障退回单步
 
 

@@ -9,12 +9,12 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base
 from app.agents.contracts import SkillResult
 from app.contexts.business.meeting_management.domain.models import parse_vote_choice
 from app.contexts.business.meeting_management.entrypoints import operations
 from app.contexts.business.meeting_management.infrastructure import adapters as meeting_adapters
 from app.contexts.foundations.identity.contracts import Principal, PrincipalType
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -86,7 +86,9 @@ def _human_principal(user_id: uuid.UUID) -> Principal:
 async def test_full_meeting_flow(ctx, monkeypatch: pytest.MonkeyPatch) -> None:
     session, uid = ctx
     monkeypatch.setattr(
-        base, "get_llm_for_role", lambda *a, **k: _FakeLLM("approve\n方案可行，收益明确。")
+        _mg_public,
+        "get_llm_for_role",
+        lambda *a, **k: _FakeLLM("approve\n方案可行，收益明确。"),
     )
     m = await _open_meeting(session, uid)
 
@@ -265,9 +267,7 @@ async def test_ai_consultant_reply_keeps_sse_shape_and_persists_each_message(
     async def fake_execute_all(*args: object, **kwargs: object) -> SkillResult:
         return SkillResult(consult_replies=[(consultant, consult_record)])
 
-    monkeypatch.setattr(
-        base,
-        "get_llm_for_role",
+    monkeypatch.setattr(_mg_public, "get_llm_for_role",
         lambda *a, **k: _FakeLLM("主专家意见"),
     )
     monkeypatch.setattr(meeting_adapters, "execute_all", fake_execute_all)

@@ -1,12 +1,9 @@
-"""LLM-backed memory distillation adapter."""
+"""LLM-backed memory distillation adapter (over the model_gateway completion port)."""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.knowledge.organizational_memory.contracts import (
@@ -16,7 +13,11 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 from app.contexts.foundations.knowledge.organizational_memory.domain.policies import (
     build_distillation_input,
 )
-from app.llm.usage import extract_usage, record_usage
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionPort,
+    LlmCompletionRequest,
+)
+from app.llm.usage import record_usage
 
 _DISTILL_SYSTEM = (
     "你是记忆整理助手。把一段对话记录提炼成结构化的长期记忆，供日后检索。"
@@ -29,36 +30,32 @@ _DISTILL_SYSTEM = (
 )
 
 
-LlmFactory = Callable[..., Any]
-
-
 class LlmMemoryDistillation:
-    def __init__(self, session: AsyncSession, llm_factory: LlmFactory) -> None:
+    def __init__(self, session: AsyncSession, port: LlmCompletionPort) -> None:
         self._session = session
-        self._llm_factory = llm_factory
+        self._port = port
 
     async def distill(self, command: DistillConversationCommand) -> MemoryDraft | None:
-        llm = self._llm_factory("default", temperature=0.2)
         started = time.monotonic()
-        reply = await llm.ainvoke(
-            [
-                SystemMessage(content=_DISTILL_SYSTEM),
-                HumanMessage(content=build_distillation_input(command.transcript)),
-            ]
+        resp = await self._port.invoke(
+            LlmCompletionRequest(
+                model_role="default",
+                system_prompt=_DISTILL_SYSTEM,
+                user_message=build_distillation_input(command.transcript),
+                temperature=0.2,
+            )
         )
-        prompt_tokens, completion_tokens, total_tokens = extract_usage(reply)
         await record_usage(
             self._session,
             role="memory_distill",
-            model=str(reply.response_metadata.get("model_name") or "default"),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
+            model=resp.model or "default",
+            prompt_tokens=resp.usage.prompt_tokens,
+            completion_tokens=resp.usage.completion_tokens,
+            total_tokens=resp.usage.total_tokens,
             duration_ms=int((time.monotonic() - started) * 1000),
             user_id=command.principal_id,
         )
-        content = reply.content if isinstance(reply.content, str) else str(reply.content)
-        normalized = content.strip()
+        normalized = resp.content.strip()
         if not normalized:
             return None
         return MemoryDraft(

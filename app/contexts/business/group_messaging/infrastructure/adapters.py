@@ -36,7 +36,6 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
     DistillConversationCommand,
 )
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
-from app.llm.roles import get_llm_for_role
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.platform import realtime
 from app.services import outbox_service, proposal_service, task_service
@@ -174,7 +173,6 @@ class OrganizationalMemoryArchiveAdapter:
                 source_type="discussion_channel",
                 source_id=request.channel_id,
             ),
-            llm_factory=get_llm_for_role,
         )
         knowledge_base = await wiki_management.get_default_knowledge_base(self._session)
         await knowledge_indexing.index_text(

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api import deps
-from app.contexts.foundations.execution.agent_execution.infrastructure import composition
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.core.database import get_db
 from app.main import app
 from app.models import Base
@@ -116,7 +116,7 @@ async def task_client(
     async def _current_user() -> SysUser:
         return actor["user"]
 
-    monkeypatch.setattr(composition, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[deps.get_current_user] = _current_user
     state: dict[str, Any] = {

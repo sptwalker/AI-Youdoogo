@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.contexts.foundations.governance.ai_quality import public as ai_quality
-from app.contexts.foundations.governance.ai_quality.infrastructure import composition
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -68,7 +68,7 @@ async def test_optimize_prompt_from_low_scores(
     ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session, role_id, record_id = ctx
-    monkeypatch.setattr(feedback_service, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     await feedback_service.add_feedback(
         session, task_record_id=record_id, rater_id=uuid.uuid4(), score=2, comment="缺来源标注"
     )
@@ -117,7 +117,7 @@ async def test_public_prompt_improvement_operation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, role_id, record_id = ctx
-    monkeypatch.setattr(composition, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     await ai_quality.record_feedback(
         session,
         ai_quality.RecordFeedbackCommand(

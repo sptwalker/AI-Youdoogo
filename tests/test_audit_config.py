@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agents import base, scheduler
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
@@ -115,7 +116,7 @@ async def test_run_agent_prepends_global_prompt(
             captured["messages"] = messages
             return AIMessage(content="ok", response_metadata={"model_name": "fake"})
 
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _CaptureLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _CaptureLLM())
     role = AgentRole(name="顾问", prompt_template="你是顾问。", model_role="daily")
     db.add(role)
     await db.commit()

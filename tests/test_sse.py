@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessageChunk
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.agents import base
+from app.contexts.foundations.model_gateway import public as _mg_public
 from app.core.database import get_db
 from app.core.security import hash_password
 from app.main import app
@@ -30,7 +30,7 @@ class _FakeLLM:
 
 @pytest.fixture
 async def ctx(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[tuple[AsyncClient, object], None]:
-    monkeypatch.setattr(base, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

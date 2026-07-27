@@ -6,9 +6,7 @@ import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Protocol, cast
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.governance.ai_quality.application.ports import (
@@ -19,6 +17,10 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
     LowScoreSample,
 )
 from app.contexts.foundations.governance.ai_quality.domain.scoring import judge_score
+from app.contexts.foundations.model_gateway.contracts.completion import (
+    LlmCompletionPort,
+    LlmCompletionRequest,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
@@ -36,12 +38,6 @@ _OPTIMIZER_SYSTEM = (
 )
 
 
-class ChatModel(Protocol):
-    async def ainvoke(self, messages: list[BaseMessage]) -> BaseMessage: ...
-
-
-LlmFactory = Callable[..., object]
-UsageExtractor = Callable[[object], tuple[int, int, int]]
 UsageRecorder = Callable[..., Awaitable[None]]
 AgentRunner = Callable[..., Awaitable[AgentTaskRecord]]
 JudgeCallable = Callable[[AsyncSession, str, str, uuid.UUID | None], Awaitable[int]]
@@ -105,61 +101,53 @@ class CallbackEvaluationJudge:
         return await self._callback(self._session, rubric, output, user_id)
 
 
-class LangChainEvaluationJudge:
+class CompletionEvaluationJudge:
     def __init__(
         self,
         session: AsyncSession,
         *,
-        llm_factory: LlmFactory,
-        usage_extractor: UsageExtractor,
+        port: LlmCompletionPort,
         usage_recorder: UsageRecorder,
     ) -> None:
         self._session = session
-        self._llm_factory = llm_factory
-        self._usage_extractor = usage_extractor
+        self._port = port
         self._usage_recorder = usage_recorder
 
     async def score(
         self, rubric: str, output: str, user_id: uuid.UUID | None
     ) -> int:
-        llm = cast(ChatModel, self._llm_factory("meeting_expert", temperature=0.0))
         started = time.monotonic()
-        reply = await llm.ainvoke(
-            [
-                SystemMessage(content=_JUDGE_SYSTEM),
-                HumanMessage(
-                    content=f"【评分标准】\n{rubric}\n\n【AI产出】\n{output[:2000]}"
-                ),
-            ]
+        resp = await self._port.invoke(
+            LlmCompletionRequest(
+                model_role="meeting_expert",
+                system_prompt=_JUDGE_SYSTEM,
+                user_message=f"【评分标准】\n{rubric}\n\n【AI产出】\n{output[:2000]}",
+                temperature=0.0,
+            )
         )
-        prompt, completion, total = self._usage_extractor(reply)
-        metadata = getattr(reply, "response_metadata", {}) or {}
         await self._usage_recorder(
             self._session,
             role="eval_judge",
-            model=str(metadata.get("model_name") or "meeting_expert"),
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=total,
+            model=resp.model or "meeting_expert",
+            prompt_tokens=resp.usage.prompt_tokens,
+            completion_tokens=resp.usage.completion_tokens,
+            total_tokens=resp.usage.total_tokens,
             duration_ms=int((time.monotonic() - started) * 1000),
             user_id=user_id,
         )
-        content = reply.content if isinstance(reply.content, str) else str(reply.content)
-        return judge_score(content)
+        return judge_score(resp.content)
 
 
-class LangChainPromptSuggestion:
+class CompletionPromptSuggestion:
     def __init__(
         self,
         session: AsyncSession,
         *,
-        llm_factory: LlmFactory,
-        usage_extractor: UsageExtractor,
+        port: LlmCompletionPort,
         usage_recorder: UsageRecorder,
     ) -> None:
         self._session = session
-        self._llm_factory = llm_factory
-        self._usage_extractor = usage_extractor
+        self._port = port
         self._usage_recorder = usage_recorder
 
     async def suggest(
@@ -173,29 +161,26 @@ class LangChainPromptSuggestion:
             f"\n产出摘要：{sample.output[:300]}"
             for index, sample in enumerate(samples)
         )
-        llm = cast(ChatModel, self._llm_factory("meeting_expert", temperature=0.4))
         started = time.monotonic()
-        reply = await llm.ainvoke(
-            [
-                SystemMessage(content=_OPTIMIZER_SYSTEM),
-                HumanMessage(
-                    content=f"当前系统提示词：\n{current_prompt}\n\n低分样本：\n{sample_text}"
-                ),
-            ]
+        resp = await self._port.invoke(
+            LlmCompletionRequest(
+                model_role="meeting_expert",
+                system_prompt=_OPTIMIZER_SYSTEM,
+                user_message=f"当前系统提示词：\n{current_prompt}\n\n低分样本：\n{sample_text}",
+                temperature=0.4,
+            )
         )
-        prompt, completion, total = self._usage_extractor(reply)
-        metadata = getattr(reply, "response_metadata", {}) or {}
         await self._usage_recorder(
             self._session,
             role="prompt_optimizer",
-            model=str(metadata.get("model_name") or "meeting_expert"),
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=total,
+            model=resp.model or "meeting_expert",
+            prompt_tokens=resp.usage.prompt_tokens,
+            completion_tokens=resp.usage.completion_tokens,
+            total_tokens=resp.usage.total_tokens,
             duration_ms=int((time.monotonic() - started) * 1000),
             user_id=user_id,
         )
-        return reply.content if isinstance(reply.content, str) else str(reply.content)
+        return resp.content
 
 
 def ensure_judge_port(value: EvaluationJudgePort) -> EvaluationJudgePort:

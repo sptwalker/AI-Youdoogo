@@ -14,13 +14,14 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 from app.contexts.foundations.knowledge.organizational_memory.infrastructure import (
     llm_distillation,
 )
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
 
 
 async def distill_conversation(
     session: AsyncSession,
     command: DistillConversationCommand,
-    *,
-    llm_factory: llm_distillation.LlmFactory,
 ) -> MemoryDraft | None:
-    port = llm_distillation.LlmMemoryDistillation(session, llm_factory)
+    port = llm_distillation.LlmMemoryDistillation(
+        session, build_local_llm_completion_port()
+    )
     return await OrganizationalMemory(port).distill(command)

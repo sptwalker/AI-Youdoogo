@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.workflow_engine import get_workflow_engine
 from app.contexts.business.task_management import legacy_public as legacy_taskcard_workflow
-from app.llm import get_llm_for_role
 from app.models.task import TaskCard
 from app.services import workflow_service
 from app.services.workflow_planning import (
@@ -45,10 +44,10 @@ _run_step = legacy_taskcard_workflow.run_step
 
 
 async def plan(db: AsyncSession, request: str) -> list[PlanStep] | None:
-    """兼容入口：注入 facade 上可替换的 LLM factory。"""
+    """兼容入口：规划经 model_gateway 统一完成端口（Phase 1 可整体改道远端）。"""
     from app.services import workflow_planning
 
-    return await workflow_planning.plan(db, request, llm_factory=get_llm_for_role)
+    return await workflow_planning.plan(db, request)
 
 
 async def advance(
