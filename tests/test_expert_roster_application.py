@@ -24,8 +24,12 @@ from app.contexts.foundations.workforce.expert_management.contracts.roster impor
     DepartmentExpertCount,
     ExpertRosterSnapshot,
 )
-from app.contexts.foundations.workforce.expert_management.domain.models import ExpertProfile
-from app.contexts.shared_kernel import ConflictDetected
+from app.contexts.foundations.workforce.expert_management.domain.models import (
+    ExpertExecutionDefinition,
+    ExpertProfile,
+    OrgExpertMember,
+)
+from app.contexts.shared_kernel import ConflictDetected, RuleViolation
 
 NOW = datetime(2026, 7, 23, tzinfo=UTC)
 EXPERT_ID = uuid.UUID("72000000-0000-0000-0000-000000000001")
@@ -33,23 +37,24 @@ DEPT_ID = uuid.UUID("72000000-0000-0000-0000-000000000002")
 
 
 def _snapshot(profile: ExpertProfile) -> ExpertRosterSnapshot:
+    member, execution = profile.member, profile.execution
     return ExpertRosterSnapshot(
         expert_id=profile.id,
         version=profile.version,
-        code=profile.code,
-        name=profile.name,
-        title=profile.title,
-        tier=profile.tier,
-        department_id=profile.department_id,
-        report_to_id=profile.report_to_id,
-        owner_user_id=profile.owner_user_id,
-        duty=profile.duty,
-        prompt_template=profile.prompt_template,
-        model_role=profile.model_role,
-        permission_scope_json=profile.permission_scope_json,
-        tools_json=profile.tools_json,
-        is_seed=profile.is_seed,
-        is_active=profile.is_active,
+        code=member.code,
+        name=member.name,
+        title=member.title,
+        tier=member.tier,
+        department_id=member.department_id,
+        report_to_id=member.report_to_id,
+        owner_user_id=member.owner_user_id,
+        duty=execution.duty,
+        prompt_template=execution.prompt_template,
+        model_role=execution.model_role,
+        permission_scope_json=execution.permission_scope_json,
+        tools_json=execution.tools_json,
+        is_seed=member.is_seed,
+        is_active=member.is_active,
         create_time=profile.create_time,
     )
 
@@ -62,10 +67,10 @@ class FakeRepository:
         return self.profile if self.profile and self.profile.id == expert_id else None
 
     async def get_by_code(self, code: str) -> ExpertProfile | None:
-        return self.profile if self.profile and self.profile.code == code else None
+        return self.profile if self.profile and self.profile.member.code == code else None
 
     async def get_by_name(self, name: str) -> ExpertProfile | None:
-        return self.profile if self.profile and self.profile.name == name else None
+        return self.profile if self.profile and self.profile.member.name == name else None
 
     async def add(self, expert: ExpertProfile) -> None:
         self.profile = expert
@@ -240,7 +245,7 @@ async def test_seed_is_idempotent_and_preserves_existing_prompt() -> None:
     assert created.prompt_template == "模板提示词"
 
     assert uow.experts.profile is not None
-    uow.experts.profile.prompt_template = "管理员自定义提示词"
+    uow.experts.profile.execution.prompt_template = "管理员自定义提示词"
     updated = await application.seed(command)
 
     assert updated.expert_id == created.expert_id
@@ -260,3 +265,93 @@ async def test_create_translates_unique_conflict_without_publishing() -> None:
 
     assert uow.source_changes.ids == []
     assert uow.commit_count == 0
+
+
+def _member() -> OrgExpertMember:
+    return OrgExpertMember(
+        code="c",
+        name="n",
+        title="t",
+        tier="member",
+        department_id=DEPT_ID,
+        report_to_id=None,
+        owner_user_id=None,
+        is_seed=False,
+        is_active=True,
+    )
+
+
+def _execution() -> ExpertExecutionDefinition:
+    return ExpertExecutionDefinition(
+        prompt_template="p",
+        model_role="daily",
+        permission_scope_json="{}",
+        tools_json="[]",
+        duty="d",
+    )
+
+
+def test_aggregate_boundary_org_change_does_not_touch_execution() -> None:
+    """待办② 逻辑拆聚合：org 变更只碰 org 字段，exec 字段恒等。"""
+    execution = _execution()
+    member = _member()
+    member.revise(
+        name="改名",
+        title="改衔",
+        tier="director",
+        report_to_id=None,
+        department_id=None,
+        is_active=False,
+    )
+    assert (member.name, member.title, member.tier, member.is_active) == (
+        "改名",
+        "改衔",
+        "director",
+        False,
+    )
+    # exec 聚合完全未被 org 变更触碰
+    assert (execution.prompt_template, execution.model_role, execution.duty) == (
+        "p",
+        "daily",
+        "d",
+    )
+
+
+def test_aggregate_boundary_execution_change_does_not_touch_org() -> None:
+    """exec 变更只碰 exec 字段，org 字段恒等；空 prompt 保留现有。"""
+    member = _member()
+    execution = _execution()
+    execution.revise(
+        prompt_template="",  # 空串不覆盖
+        model_role="reasoning",
+        permission_scope_json='{"depth":1}',
+        tools_json=None,
+        duty="新职责",
+    )
+    assert execution.prompt_template == "p"  # 保留
+    assert execution.model_role == "reasoning"
+    assert execution.duty == "新职责"
+    assert execution.permission_scope_json == '{"depth":1}'
+    # org 聚合完全未被 exec 变更触碰
+    assert (member.name, member.tier, member.title) == ("n", "member", "t")
+
+
+def test_each_aggregate_validates_its_own_enum() -> None:
+    """两聚合各自守住信任边界：非法 tier 归 org、非法 model_role 归 exec。"""
+    with pytest.raises(RuleViolation, match="tier"):
+        _member().revise(
+            name=None,
+            title=None,
+            tier="ceo",
+            report_to_id=None,
+            department_id=None,
+            is_active=None,
+        )
+    with pytest.raises(RuleViolation, match="model_role"):
+        _execution().revise(
+            prompt_template=None,
+            model_role="genius",
+            permission_scope_json=None,
+            tools_json=None,
+            duty=None,
+        )

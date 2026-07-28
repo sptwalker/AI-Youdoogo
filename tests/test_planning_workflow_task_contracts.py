@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import uuid
 from datetime import UTC, datetime
@@ -48,6 +49,7 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     PreparedWorkflowStep,
     StartWorkflowCommand,
     StepClaimStatus,
+    WorkflowLaunchStep,
     WorkflowProgressedV1,
     WorkflowRunStatus,
     WorkflowStepStatus,
@@ -74,7 +76,15 @@ def test_work_intent_and_plan_are_immutable_and_validate_dag() -> None:
     )
 
     assert PlanWorkRequest(intent).intent is intent
-    assert StartWorkflowCommand(plan).plan is plan
+    command = StartWorkflowCommand(
+        creator_id=intent.creator_id,
+        request=intent.request,
+        steps=(
+            WorkflowLaunchStep(0, "查询", "data_query", "查询昨日数据"),
+            WorkflowLaunchStep(1, "日报", "deliver", "生成日报", (0,)),
+        ),
+    )
+    assert command.steps[1].depends_on == (0,)
     with pytest.raises(dataclasses.FrozenInstanceError):
         plan.steps[0].title = "changed"  # type: ignore[misc]
     with pytest.raises(ValueError, match="acyclic"):
@@ -100,13 +110,16 @@ def test_workflow_and_task_events_are_versioned_plain_values() -> None:
         run_version=2,
         occurred_at=now,
         transition="step.waiting_human",
-        parent_task_id=uuid.uuid4(),
-        creator_id=creator_id,
-        title="日报流程",
-        request_text="生成日报",
         run_status=WorkflowRunStatus.WAITING_HUMAN,
+        business_key=str(task_id),
+        payload={
+            "parent_task_id": str(uuid.uuid4()),
+            "creator_id": str(creator_id),
+            "title": "日报流程",
+            "request_text": "生成日报",
+            "task_card_id": str(task_id),
+        },
         step_id=step_id,
-        task_card_id=task_id,
         step_version=3,
     )
     decision = TaskDecisionRecordedV1(
@@ -124,6 +137,43 @@ def test_workflow_and_task_events_are_versioned_plain_values() -> None:
     assert TASK_DECISION_RECORDED_V1.endswith(".v1")
     assert progressed.step_version == decision.expected_step_version
     assert dataclasses.is_dataclass(progressed) and dataclasses.is_dataclass(decision)
+
+
+def test_runtime_event_names_no_product_fields() -> None:
+    """ADR 0005：运行时事件不得具名产品概念，产品数据只能藏在不透明 payload。"""
+    product_tokens = {
+        "parent_task_id",
+        "creator_id",
+        "title",
+        "request_text",
+        "task_card_id",
+        "step_title",
+        "capability_key",
+        "instruction",
+        "red_line",
+        "expert_id",
+        "depends_on_task_ids",
+        "result_content",
+    }
+    field_names = {f.name for f in dataclasses.fields(WorkflowProgressedV1)}
+    assert field_names & product_tokens == set()
+    assert {"business_key", "payload"} <= field_names
+
+
+def test_runtime_contract_imports_no_cross_context_types() -> None:
+    """ADR 0007：运行时契约不得具名 import 任何别的 Context 产品类型（自身/shared_kernel 除外）。"""
+    path = ROOT / "app/contexts/foundations/execution/workflow_runtime/contracts/runtime.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    leaks = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and node.module.startswith("app.contexts.")
+        and "workflow_runtime" not in node.module
+        and "shared_kernel" not in node.module
+    }
+    assert leaks == set(), leaks
 
 
 def test_new_execution_contracts_do_not_import_framework_or_orm_modules() -> None:

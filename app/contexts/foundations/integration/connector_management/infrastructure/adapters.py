@@ -8,24 +8,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.platform.outbox.source_change as source_change_events
 from app.contexts.foundations.integration.connector_management.domain.models import Connector
-from app.contexts.foundations.workforce.expert_management import public as expert_public
+from app.contexts.foundations.workforce.expert_management.public import (
+    build_local_expert_directory_port,
+)
 from app.core.config import get_settings
 
 
 class ExpertRosterAdapter:
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        self._directory = build_local_expert_directory_port(session)
 
     async def exists(self, expert_id: uuid.UUID) -> bool:
-        return await expert_public.get_expert_roster(self._session, expert_id) is not None
+        return await self._directory.get_roster(expert_id) is not None
 
     async def names(self, expert_ids: tuple[uuid.UUID, ...]) -> dict[uuid.UUID, str]:
         if not expert_ids:
             return {}
         wanted = set(expert_ids)
-        roster = await expert_public.list_expert_roster(
-            self._session, include_personal=True
-        )
+        roster = await self._directory.list_roster(include_personal=True)
         return {
             snapshot.expert_id: snapshot.name
             for snapshot in roster

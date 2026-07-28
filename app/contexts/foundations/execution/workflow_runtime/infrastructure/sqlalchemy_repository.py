@@ -10,16 +10,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.execution.work_planning.contracts.planning import (
-    WorkflowPlan,
-    WorkflowPlanStep,
-)
 from app.contexts.foundations.execution.workflow_runtime.application.ports import (
     TaskProjectionPort,
 )
 from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
     StartWorkflowCommand,
     StartWorkflowResult,
+    WorkflowLaunchStep,
     WorkflowProgressedV1,
     WorkflowRunStatus,
     WorkflowStepStatus,
@@ -42,7 +39,7 @@ class _NewWorkflow:
     occurred_at: datetime
 
 
-def plan_to_json(plan: WorkflowPlan) -> list[dict[str, Any]]:
+def plan_to_json(steps: tuple[WorkflowLaunchStep, ...]) -> list[dict[str, Any]]:
     return [
         {
             "no": step.number,
@@ -51,7 +48,7 @@ def plan_to_json(plan: WorkflowPlan) -> list[dict[str, Any]]:
             "instruction": step.instruction,
             "depends_on": list(step.depends_on),
         }
-        for step in plan.steps
+        for step in steps
     ]
 
 
@@ -77,8 +74,7 @@ async def append_event(
     return event
 
 
-def _new_workflow(plan: WorkflowPlan) -> _NewWorkflow:
-    intent = plan.intent
+def _new_workflow(command: StartWorkflowCommand) -> _NewWorkflow:
     occurred_at = utcnow()
     run_id = uuid.uuid4()
     parent_task_id = uuid.uuid4()
@@ -86,13 +82,13 @@ def _new_workflow(plan: WorkflowPlan) -> _NewWorkflow:
     run = WorkflowRun(
         id=run_id,
         parent_task_id=parent_task_id,
-        creator_id=intent.creator_id,
-        assignee_agent_id=intent.assignee_expert_id,
-        title=(intent.title or intent.request)[:200],
-        request_text=intent.request,
+        creator_id=command.creator_id,
+        assignee_agent_id=command.assignee_expert_id,
+        title=(command.title or command.request)[:200],
+        request_text=command.request,
         status=RUN_QUEUED,
         trace_id=trace_id,
-        plan=plan_to_json(plan),
+        plan=plan_to_json(command.steps),
         version=0,
     )
     return _NewWorkflow(
@@ -110,18 +106,21 @@ def _workflow_created_progress(workflow: _NewWorkflow) -> WorkflowProgressedV1:
         run_version=0,
         occurred_at=workflow.occurred_at,
         transition="workflow.created",
-        parent_task_id=workflow.parent_task_id,
-        creator_id=run.creator_id,
-        title=run.title,
-        request_text=run.request_text,
         run_status=WorkflowRunStatus.QUEUED,
-        expert_id=run.assignee_agent_id,
+        business_key=str(workflow.parent_task_id),
+        payload={
+            "parent_task_id": str(workflow.parent_task_id),
+            "creator_id": str(run.creator_id),
+            "title": run.title,
+            "request_text": run.request_text,
+            "expert_id": str(run.assignee_agent_id) if run.assignee_agent_id else None,
+        },
     )
 
 
 def _step_created_progress(
     workflow: _NewWorkflow,
-    specification: WorkflowPlanStep,
+    specification: WorkflowLaunchStep,
     step_id: uuid.UUID,
     task_card_id: uuid.UUID,
     depends_on_task_ids: tuple[uuid.UUID, ...],
@@ -134,28 +133,31 @@ def _step_created_progress(
         run_version=0,
         occurred_at=workflow.occurred_at,
         transition="step.created",
-        parent_task_id=workflow.parent_task_id,
-        creator_id=run.creator_id,
-        title=run.title,
-        request_text=run.request_text,
         run_status=WorkflowRunStatus.QUEUED,
         step_status=WorkflowStepStatus.QUEUED,
         step_id=step_id,
-        task_card_id=task_card_id,
         step_version=0,
         step_number=specification.number,
-        step_title=specification.title,
-        capability_key=specification.capability_key,
-        instruction=specification.instruction,
-        red_line=red_line,
-        expert_id=run.assignee_agent_id,
-        depends_on_task_ids=depends_on_task_ids,
+        business_key=str(task_card_id),
+        payload={
+            "parent_task_id": str(workflow.parent_task_id),
+            "creator_id": str(run.creator_id),
+            "title": run.title,
+            "request_text": run.request_text,
+            "task_card_id": str(task_card_id),
+            "step_title": specification.title,
+            "capability_key": specification.capability_key,
+            "instruction": specification.instruction,
+            "red_line": red_line,
+            "expert_id": str(run.assignee_agent_id) if run.assignee_agent_id else None,
+            "depends_on_task_ids": [str(item) for item in depends_on_task_ids],
+        },
     )
 
 
 def _new_workflow_step(
     workflow: _NewWorkflow,
-    specification: WorkflowPlanStep,
+    specification: WorkflowLaunchStep,
     step_id: uuid.UUID,
     task_card_id: uuid.UUID,
     step_ids: dict[int, uuid.UUID],
@@ -178,12 +180,12 @@ def _new_workflow_step(
 async def _create_steps_and_projections(
     session: AsyncSession,
     task_projection: TaskProjectionPort,
-    plan: WorkflowPlan,
+    steps: tuple[WorkflowLaunchStep, ...],
     workflow: _NewWorkflow,
 ) -> None:
-    task_ids = {step.number: uuid.uuid4() for step in plan.steps}
-    step_ids = {step.number: uuid.uuid4() for step in plan.steps}
-    for specification in sorted(plan.steps, key=lambda item: item.number):
+    task_ids = {step.number: uuid.uuid4() for step in steps}
+    step_ids = {step.number: uuid.uuid4() for step in steps}
+    for specification in sorted(steps, key=lambda item: item.number):
         red_line = requires_human_review(specification.capability_key)
         depends_on_task_ids = tuple(task_ids[number] for number in specification.depends_on)
         await publish_workflow_progress(
@@ -234,10 +236,9 @@ async def create_workflow(
     *,
     task_projection: TaskProjectionPort,
 ) -> WorkflowRun:
-    plan = command.plan
-    if len(plan.steps) < 2:
+    if len(command.steps) < 2:
         raise RuleViolation("持久化编排至少需要两个步骤")
-    workflow = _new_workflow(plan)
+    workflow = _new_workflow(command)
     await publish_workflow_progress(
         session,
         task_projection,
@@ -245,9 +246,9 @@ async def create_workflow(
     )
     session.add(workflow.run)
     await session.flush()
-    await _create_steps_and_projections(session, task_projection, plan, workflow)
+    await _create_steps_and_projections(session, task_projection, command.steps, workflow)
     await session.flush()
-    await _append_initial_events(session, workflow.run, step_count=len(plan.steps))
+    await _append_initial_events(session, workflow.run, step_count=len(command.steps))
     return workflow.run
 
 

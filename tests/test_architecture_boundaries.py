@@ -729,6 +729,134 @@ def test_knowledge_search_flows_through_port_seam() -> None:
     )
 
 
+# ── knowledge_indexing 写侧接缝守卫（ADR 0006）──────────────────
+_KNOWLEDGE_INDEX_WRITE_FUNCS = {
+    "index_text",
+    "remove_document_index",
+    "list_documents",
+}
+_KNOWLEDGE_INDEXING_CTX = (
+    APP / "contexts" / "foundations" / "knowledge" / "knowledge_indexing"
+)
+
+
+def _imports_knowledge_index_write(path: Path) -> bool:
+    """文件是否直引会话级知识写函数（应改经 KnowledgeIndexPort 端口工厂）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.endswith("knowledge_indexing.public") or module.endswith(
+                "knowledge_indexing.entrypoints.operations"
+            ):
+                if any(alias.name in _KNOWLEDGE_INDEX_WRITE_FUNCS for alias in node.names):
+                    return True
+    return False
+
+
+def test_knowledge_index_flows_through_port_seam() -> None:
+    """跨 Context 知识写入须经 KnowledgeIndexPort 端口；禁止直引会话级写 entrypoint 函数。
+
+    ``knowledge_indexing`` 自身（public/operations 内部装配）与 ``app/api``、``app/knowledge``
+    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。``index_file``/
+    ``index_feishu_document``/``move_document`` 仅 app/api 消费，不纳入（ADR 0006 · 只含 3 方法）。
+    """
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (APP / "contexts").rglob("*.py")
+        if not path.is_relative_to(_KNOWLEDGE_INDEXING_CTX)
+        and _imports_knowledge_index_write(path)
+    )
+    assert offenders == [], (
+        f"跨 Context 直引会话级知识写 entrypoint（应经端口工厂）：{offenders}"
+    )
+
+
+# ── expert_management 目录接缝守卫（ADR 0003）──────────────────
+_EXPERT_SESSION_READ_FUNCS = {
+    "get_expert_execution",
+    "get_expert_roster",
+    "list_expert_roster",
+    "list_department_roster",
+    "count_by_department",
+}
+_EXPERT_MANAGEMENT_CTX = (
+    APP / "contexts" / "foundations" / "workforce" / "expert_management"
+)
+
+
+def _imports_expert_session_read(path: Path) -> bool:
+    """文件是否直引会话级专家目录只读函数（应改经端口工厂）。写函数不纳入（ADR 0003 · ② 待收）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.endswith("expert_management.public") or module.endswith(
+                "expert_management.entrypoints.operations"
+            ):
+                if any(alias.name in _EXPERT_SESSION_READ_FUNCS for alias in node.names):
+                    return True
+    return False
+
+
+def test_expert_directory_flows_through_port_seam() -> None:
+    """跨 Context 专家目录只读须经 ExpertDirectoryPort 端口；禁止直引会话级只读函数。
+
+    ``expert_management`` 自身（public/entrypoints 内部装配）与 ``app/api``、``app/services``
+    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。写侧（create/update/delete/seed）
+    不纳入本守卫，留 docs/21 §13-B ② 模块处理。
+    """
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (APP / "contexts").rglob("*.py")
+        if not path.is_relative_to(_EXPERT_MANAGEMENT_CTX)
+        and _imports_expert_session_read(path)
+    )
+    assert offenders == [], (
+        f"跨 Context 直引会话级专家目录只读函数（应经端口工厂）：{offenders}"
+    )
+
+
+# ── expert_management 写侧接缝守卫（ADR 0004）──────────────────
+_EXPERT_SESSION_WRITE_FUNCS = {
+    "create_expert",
+    "update_expert",
+    "delete_expert",
+    "seed_expert",
+}
+
+
+def _imports_expert_session_write(path: Path) -> bool:
+    """文件是否直引会话级专家写函数（应改经 ExpertProvisioningPort 端口工厂）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.endswith("expert_management.public") or module.endswith(
+                "expert_management.entrypoints.operations"
+            ):
+                if any(alias.name in _EXPERT_SESSION_WRITE_FUNCS for alias in node.names):
+                    return True
+    return False
+
+
+def test_expert_provisioning_flows_through_port_seam() -> None:
+    """跨 Context 专家写侧须经 ExpertProvisioningPort 端口；禁止直引会话级写函数。
+
+    ``expert_management`` 自身（public/entrypoints 内部装配）与 ``app/api``、``app/services``
+    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。
+    """
+    offenders = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (APP / "contexts").rglob("*.py")
+        if not path.is_relative_to(_EXPERT_MANAGEMENT_CTX)
+        and _imports_expert_session_write(path)
+    )
+    assert offenders == [], (
+        f"跨 Context 直引会话级专家写函数（应经端口工厂）：{offenders}"
+    )
+
+
 # ── usage_budget 记账接缝守卫（ADR 0002 · A2）────────────────────────
 def test_usage_recording_flows_through_usage_budget_public() -> None:
     """``app/contexts`` 下 LLM 用量记账一律经 usage_budget.public；禁止引 legacy ``app.llm.usage``。

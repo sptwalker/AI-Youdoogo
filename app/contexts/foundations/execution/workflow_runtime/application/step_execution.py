@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from app.contexts.foundations.execution.agent_execution.contracts.execution import (
     AgentExecutionRequest,
     AgentExecutionStatus,
@@ -24,6 +26,9 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     PrepareWorkflowStepCommand,
     StepClaimStatus,
     StepExecutionDisposition,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertExecutionSnapshot,
 )
 
 
@@ -90,7 +95,7 @@ class ExecuteWorkflowStep:
             )
         agent_result = await self._agents.execute(
             AgentExecutionRequest(
-                expert=prepared.expert,
+                expert=cast(ExpertExecutionSnapshot, prepared.expert),
                 task_type=prepared.capability_key,
                 input_summary=f"持久化步骤：{prepared.title[:40]}",
                 user_message=render_step_message(prepared),

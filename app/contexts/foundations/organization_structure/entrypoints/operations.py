@@ -120,8 +120,7 @@ async def create_department_expert(
     report_to_id: uuid.UUID | None,
 ) -> ExpertRosterSnapshot:
     await _application(session).get_node(department_id)
-    return await expert_public.create_expert(
-        session,
+    return await expert_public.build_local_expert_provisioning_port(session).create(
         name=name,
         prompt_template=prompt_template,
         duty=duty,
@@ -149,8 +148,7 @@ async def update_department_expert(
     report_to_id: uuid.UUID | None,
     department_id: uuid.UUID | None,
 ) -> ExpertRosterSnapshot:
-    return await expert_public.update_expert(
-        session,
+    return await expert_public.build_local_expert_provisioning_port(session).update(
         expert_id=expert_id,
         name=name,
         prompt_template=prompt_template,
@@ -167,7 +165,7 @@ async def update_department_expert(
 
 
 async def delete_department_expert(session: AsyncSession, expert_id: uuid.UUID) -> None:
-    await expert_public.delete_expert(session, expert_id)
+    await expert_public.build_local_expert_provisioning_port(session).delete(expert_id)
 
 
 async def seed_org_template(

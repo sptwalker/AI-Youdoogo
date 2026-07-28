@@ -1,4 +1,11 @@
-"""Expert profile rules independent from persistence and execution runtime."""
+"""Expert profile rules independent from persistence and execution runtime.
+
+待办② 逻辑拆聚合：`agent_role` 一行承载两个不同关注点——「这个人属于哪个部门」
+（组织归属/身份/生命周期）与「这次执行用哪个 Prompt/模型/工具」（执行定义）。docs/21 §5
+原则：二者不是同一聚合，不应共用同一变更面。本模块把它们拆成 OrgExpertMember 与
+ExpertExecutionDefinition 两个可独立变更的子聚合，ExpertProfile 降为组合根。DB 仍单表
+（repo 从一行重建/写回），物理拆表/独立事务/版本化 release 见 docs/21 Phase 3。
+"""
 
 from __future__ import annotations
 
@@ -23,9 +30,9 @@ def validate_tier(tier: str) -> None:
 
 
 @dataclass(slots=True)
-class ExpertProfile:
-    id: uuid.UUID
-    version: str
+class OrgExpertMember:
+    """「这个人属于哪个部门」——组织归属/身份/生命周期聚合。"""
+
     code: str | None
     name: str
     title: str
@@ -33,51 +40,30 @@ class ExpertProfile:
     department_id: uuid.UUID | None
     report_to_id: uuid.UUID | None
     owner_user_id: uuid.UUID | None
-    duty: str | None
-    prompt_template: str
-    model_role: str
-    permission_scope_json: str
-    tools_json: str
     is_seed: bool
     is_active: bool
-    create_time: datetime
     is_deleted: bool = False
 
-    def update(
+    def revise(
         self,
         *,
         name: str | None,
-        prompt_template: str | None,
-        duty: str | None,
-        model_role: str | None,
-        is_active: bool | None,
-        permission_scope_json: str | None,
-        tools_json: str | None,
         title: str | None,
         tier: str | None,
         report_to_id: uuid.UUID | None,
         department_id: uuid.UUID | None,
+        is_active: bool | None,
     ) -> None:
-        if model_role is not None:
-            validate_model_role(model_role)
-            self.model_role = model_role
+        """Partial update — None 表示不改（沿用旧 update 的每字段可空语义）。"""
         if tier is not None:
             validate_tier(tier)
             self.tier = tier
         if name is not None:
             self.name = name
-        if prompt_template:
-            self.prompt_template = prompt_template
-        if duty is not None:
-            self.duty = duty
-        if is_active is not None:
-            self.is_active = is_active
-        if permission_scope_json is not None:
-            self.permission_scope_json = permission_scope_json
-        if tools_json is not None:
-            self.tools_json = tools_json
         if title is not None:
             self.title = title
+        if is_active is not None:
+            self.is_active = is_active
         if report_to_id is not None:
             self.report_to_id = report_to_id
         if department_id is not None:
@@ -90,25 +76,78 @@ class ExpertProfile:
         name: str,
         title: str,
         tier: str,
-        model_role: str,
         department_id: uuid.UUID | None,
-        duty: str | None,
         report_to_id: uuid.UUID | None,
     ) -> None:
-        """Normalize mutable template fields without overwriting an existing prompt."""
-        validate_model_role(model_role)
-        validate_tier(tier)
+        """Normalize stable-template identity fields (tier 已由 use_case 前置校验)."""
         self.code = code
         self.name = name
         self.title = title
         self.tier = tier
-        self.model_role = model_role
         self.department_id = department_id
         self.is_seed = True
-        if not self.duty:
-            self.duty = duty
         if report_to_id is not None:
             self.report_to_id = report_to_id
 
     def delete(self) -> None:
         self.is_deleted = True
+
+
+@dataclass(slots=True)
+class ExpertExecutionDefinition:
+    """「这次执行用哪个 Prompt/模型/工具」——执行定义聚合（docs/21 §5：含 duty）。"""
+
+    prompt_template: str
+    model_role: str
+    permission_scope_json: str
+    tools_json: str
+    duty: str | None
+
+    def revise(
+        self,
+        *,
+        prompt_template: str | None,
+        model_role: str | None,
+        permission_scope_json: str | None,
+        tools_json: str | None,
+        duty: str | None,
+    ) -> None:
+        """Partial update — 空 prompt 保留现有（沿用旧 update 语义）。"""
+        if model_role is not None:
+            validate_model_role(model_role)
+            self.model_role = model_role
+        if prompt_template:
+            self.prompt_template = prompt_template
+        if duty is not None:
+            self.duty = duty
+        if permission_scope_json is not None:
+            self.permission_scope_json = permission_scope_json
+        if tools_json is not None:
+            self.tools_json = tools_json
+
+    def apply_seed(self, *, model_role: str, duty: str | None) -> None:
+        """Normalize template execution fields without overwriting an existing prompt."""
+        self.model_role = model_role
+        if not self.duty:
+            self.duty = duty
+
+
+@dataclass(slots=True)
+class ExpertProfile:
+    """组合根：单表下承载 org 与 execution 两个子聚合。
+
+    应用层直接对 `member`/`execution` 分发变更，聚合边界即在此——org 变更不触碰 exec，反之亦然。
+    """
+
+    id: uuid.UUID
+    version: str
+    create_time: datetime
+    member: OrgExpertMember
+    execution: ExpertExecutionDefinition
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.member.is_deleted
+
+    def delete(self) -> None:
+        self.member.delete()

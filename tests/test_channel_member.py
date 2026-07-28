@@ -189,8 +189,8 @@ async def test_archive_ingests_to_kb(db: AsyncSession, monkeypatch: pytest.Monke
 
     captured: dict[str, object] = {}
 
-    from app.contexts.foundations.knowledge.knowledge_indexing import (
-        public as knowledge_indexing,
+    from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.sqlalchemy_gateway import (  # noqa: E501
+        SqlAlchemyDocumentIndexGateway,
     )
     from app.contexts.foundations.knowledge.organizational_memory import (
         public as organizational_memory,
@@ -219,7 +219,7 @@ async def test_archive_ingests_to_kb(db: AsyncSession, monkeypatch: pytest.Monke
         return _KB()
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _fake_distill)
-    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_index)
+    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_index)
     monkeypatch.setattr(wiki_management, "get_default_knowledge_base", _fake_kb)
 
     await discussion_service.archive_channel(db, c.id)

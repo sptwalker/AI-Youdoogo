@@ -26,8 +26,7 @@ from app.contexts.foundations.workforce.expert_management.contracts.execution im
     ExpertExecutionSnapshot,
 )
 from app.contexts.foundations.workforce.expert_management.public import (
-    get_expert_execution,
-    list_expert_roster,
+    build_local_expert_directory_port,
 )
 from app.integrations.feishu import notify
 
@@ -57,15 +56,16 @@ class SQLAlchemyOperationalMetricHistory:
 class PublishedOperationalExpertAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._directory = build_local_expert_directory_port(session)
 
     async def get_by_code(self, code: str) -> ExpertExecutionSnapshot | None:
-        roster = await list_expert_roster(self._session, include_personal=True)
+        roster = await self._directory.list_roster(include_personal=True)
         match = next(
             (expert for expert in roster if expert.code == code and expert.is_active),
             None,
         )
         snapshot = (
-            await get_expert_execution(self._session, match.expert_id)
+            await self._directory.get_execution(match.expert_id)
             if match is not None
             else None
         )

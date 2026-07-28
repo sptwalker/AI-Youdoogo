@@ -13,7 +13,9 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 from app.contexts.business.assistant_conversations.entrypoints import (
     operations as assistant_conversations,
 )
-from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.sqlalchemy_gateway import (  # noqa: E501
+    SqlAlchemyDocumentIndexGateway,
+)
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
 )
@@ -121,7 +123,7 @@ async def test_archive_stores_distilled(db: AsyncSession, monkeypatch: pytest.Mo
         captured["text"] = command.text
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _fake_distill)
-    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
+    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
     n = await assistant_conversations.archive_old(db, _principal(user), days=10)
     assert n == 3
     assert "记忆" in captured["title"] and "提炼后的记忆" in captured["text"]
@@ -143,6 +145,6 @@ async def test_archive_falls_back_to_raw(db: AsyncSession, monkeypatch: pytest.M
         captured["text"] = command.text
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _fail_distill)
-    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
+    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
     await assistant_conversations.archive_old(db, _principal(user), days=10)
     assert "存档" in captured["title"] and "消息0" in captured["text"]  # 原文保底

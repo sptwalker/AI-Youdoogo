@@ -27,7 +27,7 @@ from app.contexts.foundations.governance.audit_trail.public import (
     append_audit_record,
 )
 from app.contexts.foundations.workforce.expert_management.public import (
-    get_expert_execution,
+    build_local_expert_directory_port,
 )
 from app.contexts.shared_kernel import RuleViolation
 
@@ -60,9 +60,10 @@ class PublishedTaskAuditAdapter:
 class PublishedTaskExecutionAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._directory = build_local_expert_directory_port(session)
 
     async def execute(self, request: TaskExecutionRequest) -> TaskExecutionResult:
-        expert = await get_expert_execution(self._session, request.assignee_agent_id)
+        expert = await self._directory.get_execution(request.assignee_agent_id)
         if expert is None:
             raise RuleViolation("指派的智能体角色不存在或已停用")
         result = await execute_agent(

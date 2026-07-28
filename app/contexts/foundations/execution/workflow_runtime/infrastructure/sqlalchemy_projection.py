@@ -82,12 +82,17 @@ async def refresh_run_status(
                     run_version=run.version,
                     occurred_at=now,
                     transition=f"workflow.{status}",
-                    parent_task_id=run.parent_task_id,
-                    creator_id=run.creator_id,
-                    title=run.title,
-                    request_text=run.request_text,
                     run_status=WorkflowRunStatus(status),
-                    expert_id=run.assignee_agent_id,
+                    business_key=str(run.parent_task_id),
+                    payload={
+                        "parent_task_id": str(run.parent_task_id),
+                        "creator_id": str(run.creator_id),
+                        "title": run.title,
+                        "request_text": run.request_text,
+                        "expert_id": (
+                            str(run.assignee_agent_id) if run.assignee_agent_id else None
+                        ),
+                    },
                     error=run.error_msg,
                 ),
             )

@@ -45,7 +45,7 @@ docs/21 §13 Phase 0 backlog 尚余两笔债务，均属「先抽象，再绞杀
 - **A1 只切 Search，`KnowledgeIndexPort` 延后**：索引写入的全部消费方（`assistant_conversations`/
   `group_messaging` 归档、`environment_projection` outbox）均**事务耦合**且一致性关键；docs §11 亦将
   index 远端化排在 Search 之后并要求 outbox 同步。此刻造一个会话无关的 IndexPort = 过早脚手架（YAGNI），
-  待 Phase 2 index 远端化立项时再切。
+  待 Phase 2 index 远端化立项时再切。**（更新：写侧接缝已由 [[ADR 0006]] 收编，index 远端 adapter 本体仍属 Phase 2。）**
 - **A1 端口只含 `search`**：`app/contexts` 内当前唯一跨 Context 知识消费者只用 search；`answer_knowledge`
   的消费方在 `app/api`（扫描面外）。future 跨 Context `answer` 消费者出现时再补端口方法。
 

@@ -19,7 +19,9 @@ from app.contexts.business.assistant_conversations.entrypoints import (
 from app.contexts.business.assistant_conversations.infrastructure.sqlalchemy_repository import (
     SQLAlchemyConversationRepository,
 )
-from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.sqlalchemy_gateway import (  # noqa: E501
+    SqlAlchemyDocumentIndexGateway,
+)
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
 )
@@ -419,7 +421,7 @@ async def test_archive_old_moves_and_deletes(
         ingested.append({"title": command.title, "text": command.text})
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _no_distill)
-    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
+    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
     u = await _user(db)
     await assistant_conversations.get_or_create_assistant(db, _principal(u))
     await _add_msg(db, u.id, "很久以前", days_ago=11)
@@ -448,7 +450,7 @@ async def test_archive_old_keeps_on_ingest_failure(
         raise RuntimeError("embedding down")
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _no_distill)
-    monkeypatch.setattr(knowledge_indexing, "index_text", _boom)
+    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _boom)
     u = await _user(db)
     await assistant_conversations.get_or_create_assistant(db, _principal(u))
     await _add_msg(db, u.id, "很久以前", days_ago=11)

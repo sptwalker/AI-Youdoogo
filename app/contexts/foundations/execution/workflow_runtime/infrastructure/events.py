@@ -42,6 +42,25 @@ async def publish_workflow_progress(
     outbox_event.status = OUTBOX_DONE
 
 
+# 运行时通用字段的序列化键；其余键归属不透明产品 payload（消费方 ACL 解码）
+_GENERIC_KEYS = frozenset(
+    {
+        "event_id",
+        "workflow_id",
+        "run_version",
+        "occurred_at",
+        "transition",
+        "run_status",
+        "business_key",
+        "step_status",
+        "step_id",
+        "step_version",
+        "step_number",
+        "error",
+    }
+)
+
+
 def workflow_progress_to_payload(event: WorkflowProgressedV1) -> dict[str, object]:
     return {
         "event_id": str(event.event_id),
@@ -49,56 +68,35 @@ def workflow_progress_to_payload(event: WorkflowProgressedV1) -> dict[str, objec
         "run_version": event.run_version,
         "occurred_at": event.occurred_at.isoformat(),
         "transition": event.transition,
-        "parent_task_id": str(event.parent_task_id),
-        "creator_id": str(event.creator_id),
-        "title": event.title,
-        "request_text": event.request_text,
         "run_status": event.run_status.value,
+        "business_key": event.business_key,
         "step_status": event.step_status.value if event.step_status else None,
         "step_id": str(event.step_id) if event.step_id else None,
-        "task_card_id": str(event.task_card_id) if event.task_card_id else None,
         "step_version": event.step_version,
         "step_number": event.step_number,
-        "step_title": event.step_title,
-        "capability_key": event.capability_key,
-        "instruction": event.instruction,
-        "red_line": event.red_line,
-        "expert_id": str(event.expert_id) if event.expert_id else None,
-        "depends_on_task_ids": [str(item) for item in event.depends_on_task_ids],
-        "result_content": event.result_content,
         "error": event.error,
+        **event.payload,  # payload 已 JSON 安全（uuid→str）
     }
 
 
 def workflow_progress_from_payload(payload: dict[str, Any]) -> WorkflowProgressedV1:
     raw_step_status = payload.get("step_status")
+    product_payload = {k: v for k, v in payload.items() if k not in _GENERIC_KEYS}
     return WorkflowProgressedV1(
         event_id=uuid.UUID(str(payload["event_id"])),
         workflow_id=uuid.UUID(str(payload["workflow_id"])),
         run_version=int(payload["run_version"]),
         occurred_at=datetime.fromisoformat(str(payload["occurred_at"])),
         transition=str(payload["transition"]),
-        parent_task_id=uuid.UUID(str(payload["parent_task_id"])),
-        creator_id=uuid.UUID(str(payload["creator_id"])),
-        title=str(payload["title"]),
-        request_text=str(payload["request_text"]),
         run_status=WorkflowRunStatus(str(payload["run_status"])),
+        business_key=str(payload["business_key"]),
+        payload=product_payload,
         step_status=(
             WorkflowStepStatus(str(raw_step_status)) if raw_step_status is not None else None
         ),
         step_id=_optional_uuid(payload.get("step_id")),
-        task_card_id=_optional_uuid(payload.get("task_card_id")),
         step_version=_optional_int(payload.get("step_version")),
         step_number=_optional_int(payload.get("step_number")),
-        step_title=_optional_str(payload.get("step_title")),
-        capability_key=_optional_str(payload.get("capability_key")),
-        instruction=_optional_str(payload.get("instruction")),
-        red_line=bool(payload.get("red_line", False)),
-        expert_id=_optional_uuid(payload.get("expert_id")),
-        depends_on_task_ids=tuple(
-            uuid.UUID(str(item)) for item in payload.get("depends_on_task_ids", [])
-        ),
-        result_content=_optional_str(payload.get("result_content")),
         error=_optional_str(payload.get("error")),
     )
 

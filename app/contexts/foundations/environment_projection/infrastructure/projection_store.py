@@ -22,9 +22,7 @@ from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
     IndexTextCommand,
 )
 from app.contexts.foundations.knowledge.knowledge_indexing.public import (
-    index_text,
-    list_documents,
-    remove_document_index,
+    build_local_knowledge_index_port,
 )
 from app.contexts.foundations.knowledge.wiki_management.public import (
     get_default_knowledge_base,
@@ -64,6 +62,7 @@ async def replace_archived_snapshot(
     category: str,
     text: str,
 ) -> None:
+    index = build_local_knowledge_index_port(session)
     documents = await _all_documents(session)
     existing = sorted(
         (
@@ -75,9 +74,8 @@ async def replace_archived_snapshot(
         key=lambda document: document.create_time,
     )
     for document in existing:
-        await remove_document_index(session, document.id)
-    await index_text(
-        session,
+        await index.remove_document_index(document.id)
+    await index.index_text(
         IndexTextCommand(
             title=title,
             text=text,
@@ -148,9 +146,10 @@ async def load_snapshot_source_metadata(
 
 
 async def _all_documents(session: AsyncSession) -> tuple[IndexedDocument, ...]:
+    index = build_local_knowledge_index_port(session)
     limit = 100
     while True:
-        documents = await list_documents(session, limit=limit)
+        documents = await index.list_documents(limit=limit)
         if len(documents) < limit:
             return documents
         limit *= 2

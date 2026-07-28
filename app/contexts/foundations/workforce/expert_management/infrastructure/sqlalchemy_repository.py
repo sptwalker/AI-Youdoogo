@@ -10,7 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.contexts.foundations.workforce.expert_management.domain.models import ExpertProfile
+from app.contexts.foundations.workforce.expert_management.domain.models import (
+    ExpertExecutionDefinition,
+    ExpertProfile,
+    OrgExpertMember,
+)
 from app.models.agent import AgentRole
 
 
@@ -29,49 +33,55 @@ def _load_list(value: str) -> list[Any]:
 
 
 def _to_domain(row: AgentRole) -> ExpertProfile:
+    # ponytail: 单表 agent_role 一行重建两子聚合；物理拆表待 docs/21 Phase 3
     return ExpertProfile(
         id=row.id,
         version=(
             row.update_time.isoformat() if row.update_time is not None else f"unpersisted:{row.id}"
         ),
-        code=row.code,
-        name=row.name,
-        title=row.title or "",
-        tier=row.tier,
-        department_id=row.department_id,
-        report_to_id=row.report_to_id,
-        owner_user_id=row.owner_user_id,
-        duty=row.duty,
-        prompt_template=row.prompt_template,
-        model_role=row.model_role,
-        permission_scope_json=_dump(row.permission_scope or {}),
-        tools_json=_dump(row.tools or []),
-        is_seed=row.is_seed,
-        is_active=row.is_active,
         create_time=row.create_time,
-        is_deleted=row.is_delete,
+        member=OrgExpertMember(
+            code=row.code,
+            name=row.name,
+            title=row.title or "",
+            tier=row.tier,
+            department_id=row.department_id,
+            report_to_id=row.report_to_id,
+            owner_user_id=row.owner_user_id,
+            is_seed=row.is_seed,
+            is_active=row.is_active,
+            is_deleted=row.is_delete,
+        ),
+        execution=ExpertExecutionDefinition(
+            prompt_template=row.prompt_template,
+            model_role=row.model_role,
+            permission_scope_json=_dump(row.permission_scope or {}),
+            tools_json=_dump(row.tools or []),
+            duty=row.duty,
+        ),
     )
 
 
 def _from_domain(expert: ExpertProfile) -> AgentRole:
+    member, execution = expert.member, expert.execution
     return AgentRole(
         id=expert.id,
-        code=expert.code,
-        name=expert.name,
-        title=expert.title,
-        tier=expert.tier,
-        department_id=expert.department_id,
-        report_to_id=expert.report_to_id,
-        owner_user_id=expert.owner_user_id,
-        duty=expert.duty,
-        prompt_template=expert.prompt_template,
-        model_role=expert.model_role,
-        permission_scope=_load_dict(expert.permission_scope_json),
-        tools=_load_list(expert.tools_json),
-        is_seed=expert.is_seed,
-        is_active=expert.is_active,
+        code=member.code,
+        name=member.name,
+        title=member.title,
+        tier=member.tier,
+        department_id=member.department_id,
+        report_to_id=member.report_to_id,
+        owner_user_id=member.owner_user_id,
+        duty=execution.duty,
+        prompt_template=execution.prompt_template,
+        model_role=execution.model_role,
+        permission_scope=_load_dict(execution.permission_scope_json),
+        tools=_load_list(execution.tools_json),
+        is_seed=member.is_seed,
+        is_active=member.is_active,
         create_time=expert.create_time,
-        is_delete=expert.is_deleted,
+        is_delete=member.is_deleted,
     )
 
 
@@ -115,18 +125,19 @@ class SQLAlchemyExpertRepository:
             row = await self._session.get(AgentRole, expert.id)
         if row is None:
             return
-        row.code = expert.code
-        row.name = expert.name
-        row.title = expert.title
-        row.tier = expert.tier
-        row.department_id = expert.department_id
-        row.report_to_id = expert.report_to_id
-        row.owner_user_id = expert.owner_user_id
-        row.duty = expert.duty
-        row.prompt_template = expert.prompt_template
-        row.model_role = expert.model_role
-        row.permission_scope = _load_dict(expert.permission_scope_json)
-        row.tools = _load_list(expert.tools_json)
-        row.is_seed = expert.is_seed
-        row.is_active = expert.is_active
-        row.is_delete = expert.is_deleted
+        member, execution = expert.member, expert.execution
+        row.code = member.code
+        row.name = member.name
+        row.title = member.title
+        row.tier = member.tier
+        row.department_id = member.department_id
+        row.report_to_id = member.report_to_id
+        row.owner_user_id = member.owner_user_id
+        row.duty = execution.duty
+        row.prompt_template = execution.prompt_template
+        row.model_role = execution.model_role
+        row.permission_scope = _load_dict(execution.permission_scope_json)
+        row.tools = _load_list(execution.tools_json)
+        row.is_seed = member.is_seed
+        row.is_active = member.is_active
+        row.is_delete = member.is_deleted

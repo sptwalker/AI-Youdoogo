@@ -18,6 +18,7 @@ from app.contexts.foundations.execution.work_planning.contracts.planning import 
 )
 from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
     StartWorkflowCommand,
+    WorkflowLaunchStep,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     sqlalchemy_repository,
@@ -49,6 +50,8 @@ async def create_workflow(
         for dependency in step.depends_on:
             if dependency not in known:
                 raise KeyError(dependency)
+    # 仍建 WorkflowPlan 以复用其 __post_init__ 的唯一性/未知依赖/无环校验（信任边界校验不可省），
+    # 随即翻译为运行时自持的拍平 StartWorkflowCommand——契约不再具名 work_planning 类型（ADR 0007）。
     plan = WorkflowPlan(
         intent=WorkIntent(
             request=request,
@@ -67,9 +70,25 @@ async def create_workflow(
             for step in steps
         ),
     )
+    command = StartWorkflowCommand(
+        creator_id=plan.intent.creator_id,
+        request=plan.intent.request,
+        title=plan.intent.title,
+        assignee_expert_id=plan.intent.assignee_expert_id,
+        steps=tuple(
+            WorkflowLaunchStep(
+                number=step.number,
+                title=step.title,
+                capability_key=step.capability_key,
+                instruction=step.instruction,
+                depends_on=step.depends_on,
+            )
+            for step in plan.steps
+        ),
+    )
     return await sqlalchemy_repository.create_workflow(
         db,
-        StartWorkflowCommand(plan),
+        command,
         task_projection=SQLAlchemyTaskManagementAdapter(db),
     )
 

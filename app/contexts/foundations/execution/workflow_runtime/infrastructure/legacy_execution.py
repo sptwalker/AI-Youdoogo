@@ -180,7 +180,7 @@ class _LegacyCapabilityExecutionAdapter:
     ) -> ExecuteWorkflowStepResult:
         if prepared.expert is None:
             return ExecuteWorkflowStepResult(False, "步骤无可用执行者", error="步骤无可用执行者")
-        role = _role_from_snapshot(prepared.expert)
+        role = _role_from_snapshot(cast(ExpertExecutionSnapshot, prepared.expert))
         text = agent_result.content or "（无产出）"
         result = await skills.execute_all(
             self._session,

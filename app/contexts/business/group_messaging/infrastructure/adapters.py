@@ -23,11 +23,11 @@ from app.contexts.business.group_messaging.application.contracts import (
 from app.contexts.business.group_messaging.infrastructure.sqlalchemy_repository import (
     SQLAlchemyGroupMessagingRepository,
 )
-from app.contexts.foundations.knowledge.knowledge_indexing import (
-    public as knowledge_indexing,
-)
 from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
     IndexTextCommand,
+)
+from app.contexts.foundations.knowledge.knowledge_indexing.public import (
+    build_local_knowledge_index_port,
 )
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
@@ -163,6 +163,7 @@ class OrganizationalMemoryArchiveAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._index = build_local_knowledge_index_port(session)
 
     async def archive(self, request: ArchiveRequest) -> None:
         draft = await organizational_memory.distill_conversation(
@@ -175,8 +176,7 @@ class OrganizationalMemoryArchiveAdapter:
             ),
         )
         knowledge_base = await wiki_management.get_default_knowledge_base(self._session)
-        await knowledge_indexing.index_text(
-            self._session,
+        await self._index.index_text(
             IndexTextCommand(
                 title=f"群聊存档·{request.channel_name}",
                 text=draft.content if draft is not None else request.transcript,

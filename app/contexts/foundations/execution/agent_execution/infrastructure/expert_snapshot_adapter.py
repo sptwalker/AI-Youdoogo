@@ -10,13 +10,13 @@ from app.contexts.foundations.workforce.expert_management.contracts.execution im
     ExpertExecutionSnapshot,
 )
 from app.contexts.foundations.workforce.expert_management.public import (
-    get_expert_execution,
+    build_local_expert_directory_port,
 )
 
 
 class PublishedExpertSnapshotAdapter:
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        self._directory = build_local_expert_directory_port(session)
 
     async def get_by_id(self, expert_id: uuid.UUID) -> ExpertExecutionSnapshot | None:
-        return await get_expert_execution(self._session, expert_id)
+        return await self._directory.get_execution(expert_id)

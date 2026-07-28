@@ -20,8 +20,7 @@ async def ensure_archivist(db: AsyncSession) -> expert_management.LegacyExpertVi
     """Ensure the archival expert through the sole Expert Management writer."""
     organization = await organization_structure.get_snapshot(db)
     root = organization.roots[0].department if organization.roots else None
-    snapshot = await expert_management.seed_expert(
-        db,
+    snapshot = await expert_management.build_local_expert_provisioning_port(db).seed(
         code=ARCHIVIST_CODE,
         name=ARCHIVIST_NAME,
         prompt_template=_ARCHIVIST_PROMPT,

@@ -20,10 +20,13 @@ from app.contexts.foundations.organization_structure.application.contracts impor
 from app.contexts.foundations.organization_structure.application.errors import (
     ExternalDepartmentUnavailable,
 )
-from app.contexts.foundations.workforce.expert_management import public as expert_public
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,
     ExpertRosterSnapshot,
+)
+from app.contexts.foundations.workforce.expert_management.public import (
+    build_local_expert_directory_port,
+    build_local_expert_provisioning_port,
 )
 from app.contexts.shared_kernel import DependencyUnavailable
 from app.integrations.feishu.client import FeishuAPIError, feishu_client
@@ -65,17 +68,18 @@ class PublishedExpertManagementAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._directory = build_local_expert_directory_port(session)
+        self._provisioning = build_local_expert_provisioning_port(session)
 
     async def list_department_roster(
         self, department_id: uuid.UUID
     ) -> tuple[ExpertRosterSnapshot, ...]:
-        return await expert_public.list_department_roster(self._session, department_id)
+        return await self._directory.list_department_roster(department_id)
 
     async def count_by_department(
         self, *, include_personal: bool
     ) -> tuple[DepartmentExpertCount, ...]:
-        return await expert_public.count_by_department(
-            self._session,
+        return await self._directory.count_by_department(
             include_personal=include_personal,
         )
 
@@ -83,8 +87,7 @@ class PublishedExpertManagementAdapter:
         return bool(await self.list_department_roster(department_id))
 
     async def seed_expert(self, spec: TemplateExpertSpec) -> ExpertRosterSnapshot:
-        return await expert_public.seed_expert(
-            self._session,
+        return await self._provisioning.seed(
             code=spec.code,
             name=spec.name,
             prompt_template=spec.prompt_template,

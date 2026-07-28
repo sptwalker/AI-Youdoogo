@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-
-from app.contexts.foundations.execution.work_planning.contracts.planning import WorkflowPlan
-from app.contexts.foundations.workforce.expert_management.contracts.execution import (
-    ExpertExecutionSnapshot,
-)
 
 
 class WorkflowRunStatus(StrEnum):
@@ -38,8 +34,27 @@ class StepClaimStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class WorkflowLaunchStep:
+    """Runtime-owned step spec: opaque to product concepts, decoded from the caller's plan.
+
+    字段名对齐 ``work_planning`` 的 ``WorkflowPlanStep``，但由运行时契约自持——
+    切断契约对 ``work_planning`` 的具名依赖（[[ADR 0007]]）。
+    """
+
+    number: int
+    title: str
+    capability_key: str
+    instruction: str
+    depends_on: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class StartWorkflowCommand:
-    plan: WorkflowPlan
+    creator_id: uuid.UUID
+    request: str
+    steps: tuple[WorkflowLaunchStep, ...]
+    title: str | None = None
+    assignee_expert_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +106,7 @@ class PreparedWorkflowStep:
     title: str
     capability_key: str
     instruction: str
-    expert: ExpertExecutionSnapshot | None
+    expert: object | None
     input_data: tuple[tuple[str, object], ...] = ()
 
 
@@ -153,26 +168,23 @@ WORKFLOW_PROGRESSED_V1 = "workflow.progressed.v1"
 
 @dataclass(frozen=True, slots=True)
 class WorkflowProgressedV1:
+    """Runtime-generic progress event.
+
+    产品字段不再具名于运行时契约：路由键 ``business_key`` 与产品负载 ``payload`` 均不透明，
+    由消费方 Context 的 ACL 解码（task_management：``workflow_event_acl``）。
+    ``payload`` 值一律 JSON 安全（uuid→str），保证 outbox 往返无损。
+    """
+
     event_id: uuid.UUID
     workflow_id: uuid.UUID
     run_version: int
     occurred_at: datetime
     transition: str
-    parent_task_id: uuid.UUID
-    creator_id: uuid.UUID
-    title: str
-    request_text: str
     run_status: WorkflowRunStatus
+    business_key: str
+    payload: Mapping[str, object]
     step_status: WorkflowStepStatus | None = None
     step_id: uuid.UUID | None = None
-    task_card_id: uuid.UUID | None = None
     step_version: int | None = None
     step_number: int | None = None
-    step_title: str | None = None
-    capability_key: str | None = None
-    instruction: str | None = None
-    red_line: bool = False
-    expert_id: uuid.UUID | None = None
-    depends_on_task_ids: tuple[uuid.UUID, ...] = ()
-    result_content: str | None = None
     error: str | None = None

@@ -7,8 +7,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.contexts.foundations.workforce.expert_management.contracts.directory import (
+    ExpertDirectoryPort as ExpertDirectoryPort,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.provisioning import (
+    ExpertProvisioningPort as ExpertProvisioningPort,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,
@@ -21,10 +27,18 @@ from app.contexts.foundations.workforce.expert_management.entrypoints.legacy imp
     LegacyExpertView,
     legacy_view,
 )
+from app.contexts.foundations.workforce.expert_management.infrastructure.directory_adapter import (
+    LocalExpertDirectoryAdapter,
+)
+from app.contexts.foundations.workforce.expert_management.infrastructure.provisioning_adapter import (  # noqa: E501
+    LocalExpertProvisioningAdapter,
+)
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertRosterQuery,
     SQLAlchemyExpertSnapshotQuery,
 )
+
+# ── 旧位置重复导入清理标记（此处为唯一 import 块）──
 
 
 async def get_expert_roster(
@@ -156,6 +170,16 @@ async def seed_expert(
         duty=duty,
         report_to_id=report_to_id,
     )
+
+
+def build_local_expert_directory_port(session: AsyncSession) -> ExpertDirectoryPort:
+    """Phase 1 换 RemoteExpertDirectoryAdapter 的唯一切换点——跨 Context 消费方一律经此拿端口。"""
+    return LocalExpertDirectoryAdapter(session)
+
+
+def build_local_expert_provisioning_port(session: AsyncSession) -> ExpertProvisioningPort:
+    """Phase 1 换 RemoteExpertProvisioningAdapter 的唯一切换点——跨 Context 写消费方一律经此落库。"""
+    return LocalExpertProvisioningAdapter(session)
 
 
 def to_legacy_view(snapshot: ExpertRosterSnapshot) -> LegacyExpertView:

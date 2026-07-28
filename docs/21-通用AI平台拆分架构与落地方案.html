@@ -954,7 +954,7 @@
                 <td><b>Runtime</b></td>
                 <td><code>workflow_runtime/contracts/runtime.py</code> 导入 <code>WorkflowPlan</code> 与 <code>ExpertExecutionSnapshot</code>。</td>
                 <td>运行时公开契约依赖规划域和专家域，不能独立演进。</td>
-                <td><span class="tag red">重耦合</span></td>
+                <td><span class="tag green">已解耦（ADR 0007）</span></td>
               </tr>
               <tr>
                 <td><b>Runtime 事件</b></td>
@@ -1564,7 +1564,7 @@ WorkflowStepDefinition
               <li>继续共享 MinIO 集群但改用独立 bucket / prefix 凭证或预签名 URL；修复 secure 配置并演练对象读取。</li>
               <li>批量回填文档元数据与索引，通过旧系统 Outbox Relay 同步新增 / 删除；原始对象可不重复复制。</li>
               <li>用固定评测集比较旧 / 新检索：Recall@K、NDCG、零结果率、延迟与引用一致性。</li>
-              <li>先切只读 Search，再切新文档写入；按 knowledge_base 分批迁移。</li>
+              <li>先切只读 Search，再切新文档写入；按 knowledge_base 分批迁移。<b>（读写两侧本地端口接缝均已就位：Search 见 ADR 0002·A1、Index 见 ADR 0006；此处仅剩远端 adapter 本体切换。）</b></li>
               <li>保留通用 AnswerKnowledge；Expert Platform 只调用 Search，防止 Knowledge ↔ Expert 形成循环依赖。</li>
             </ol>
             <b>验收</b>
@@ -1682,10 +1682,10 @@ WorkflowStepDefinition
             <h3>B. 现有代码解耦</h3>
             <ul class="checklist">
               <li>新增 LlmCompletionPort，禁止应用层依赖 BaseChatModel。</li>
-              <li>让 Expert public API 不再接收 AsyncSession。</li>
-              <li>把 OrgExpertMember 与 ExpertExecutionDefinition 分开。</li>
-              <li>定义 KnowledgeSearchPort / KnowledgeIndexPort。</li>
-              <li>起草 Runtime Contract v2，去除产品字段。</li>
+              <li>让 Expert public API 不再接收 AsyncSession。<b>（读写两侧均已完成：读侧 ExpertDirectoryPort 见 ADR 0003，写侧 ExpertProvisioningPort 见 ADR 0004）</b></li>
+              <li>把 OrgExpertMember 与 ExpertExecutionDefinition 分开。<b>（逻辑聚合边界已拆：domain 拆两子聚合 + 组合根、各自自校验变更面，见 ADR 0008；DB 仍单表、独立事务与物理拆表随 Phase 3。）</b></li>
+              <li>定义 KnowledgeSearchPort / KnowledgeIndexPort。<b>（读写两侧接缝均已收编：读侧 KnowledgeSearchPort 见 ADR 0002·A1，写侧 KnowledgeIndexPort 见 ADR 0006；index 远端 adapter 本体仍属 Phase 2。）</b></li>
+              <li>起草 Runtime Contract v2，去除产品字段。<strong>（已完成：运行时进度事件 WorkflowProgressedV1 产品字段已 opaque 化为 business_key + payload，见 ADR 0005；WorkflowPlan/ExpertExecutionSnapshot 类型解耦已由 ADR 0007 结清——契约仅剩 stdlib import，StartWorkflowCommand 拍平自持、expert 契约 opaque，消费端 cast 收窄。）</strong></li>
               <li>为四个 Port 提供 Local Adapter。</li>
             </ul>
           </div>

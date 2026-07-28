@@ -21,7 +21,7 @@ from app.contexts.foundations.execution.agent_execution.public import (
     execute_agent,
 )
 from app.contexts.foundations.workforce.expert_management.public import (
-    get_expert_execution,
+    build_local_expert_directory_port,
 )
 from app.models.task import TaskCard
 
@@ -112,7 +112,9 @@ async def run_step(
     db: AsyncSession, step: TaskCard, operator_id: uuid.UUID | None
 ) -> ProtocolResult | None:
     expert = (
-        await get_expert_execution(db, step.assignee_agent_id) if step.assignee_agent_id else None
+        await build_local_expert_directory_port(db).get_execution(step.assignee_agent_id)
+        if step.assignee_agent_id
+        else None
     )
     if expert is None:
         await to_reported(db, step, operator_id, "步骤无可用执行者", None)

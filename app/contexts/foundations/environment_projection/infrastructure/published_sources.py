@@ -21,21 +21,19 @@ from app.contexts.foundations.organization_structure import (
 from app.contexts.foundations.organization_structure.contracts import (
     OrganizationTreeNodeSnapshot,
 )
-from app.contexts.foundations.workforce.expert_management import (
-    public as expert_management,
+from app.contexts.foundations.workforce.expert_management.public import (
+    build_local_expert_directory_port,
 )
 
 
 class PublishedEnvironmentSourceReader:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._experts = build_local_expert_directory_port(session)
 
     async def read(self) -> EnvironmentSources:
         organization = await organization_structure.get_snapshot(self._session)
-        experts = await expert_management.list_expert_roster(
-            self._session,
-            include_personal=False,
-        )
+        experts = await self._experts.list_roster(include_personal=False)
         identities = await identity.list_users(self._session)
         connectors = await connector_management.connector_catalog(self._session)
         return EnvironmentSources(

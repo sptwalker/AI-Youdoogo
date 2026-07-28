@@ -8,6 +8,10 @@ from typing import Any, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.business.task_management.domain import state_machine
+from app.contexts.business.task_management.infrastructure.workflow_event_acl import (
+    WorkflowProjectionData,
+    decode_workflow_progress,
+)
 from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
     WorkflowProgressedV1,
     WorkflowRunStatus,
@@ -58,7 +62,8 @@ class SQLAlchemyWorkflowTaskProjection:
         self._records = records
 
     async def apply(self, event: WorkflowProgressedV1) -> bool:
-        task_id = event.task_card_id or event.parent_task_id
+        data = decode_workflow_progress(event)
+        task_id = data.task_card_id or data.parent_task_id
         task = await self._session.get(TaskCard, task_id)
         stream = f"step:{event.step_id}" if event.step_id else "run"
         incoming_version = event.step_version if event.step_id else event.run_version
@@ -67,7 +72,7 @@ class SQLAlchemyWorkflowTaskProjection:
         if task is not None and self._projection_version(task, stream) >= incoming_version:
             return False
         if task is None:
-            task = await self._create_projection_record(event, task_id)
+            task = await self._create_projection_record(event, data, task_id)
         if event.transition == "step.claimed":
             await self._drive(
                 task,
@@ -84,18 +89,18 @@ class SQLAlchemyWorkflowTaskProjection:
                 await self._records.transition_record(
                     task.id,
                     state_machine.REPORTED,
-                    operator_id=event.expert_id,
+                    operator_id=data.expert_id,
                     note=(
                         "workflow step 完成"
                         if event.step_status != WorkflowStepStatus.FAILED
                         else "workflow step 失败"
                     ),
-                    result_content=event.result_content,
+                    result_content=data.result_content,
                     publish_decision=False,
                 )
             if (
                 event.step_status == WorkflowStepStatus.SUCCEEDED
-                and not event.red_line
+                and not data.red_line
                 and task.status == state_machine.REPORTED
             ):
                 await self._records.transition_record(
@@ -115,7 +120,7 @@ class SQLAlchemyWorkflowTaskProjection:
                     "workflow_run_id": str(event.workflow_id),
                     "workflow_step_id": str(event.step_id),
                     "workflow_step_version": event.step_version,
-                    "red_line": event.red_line,
+                    "red_line": data.red_line,
                 }
             )
             task.payload = payload
@@ -123,29 +128,32 @@ class SQLAlchemyWorkflowTaskProjection:
         return True
 
     async def _create_projection_record(
-        self, event: WorkflowProgressedV1, task_id: uuid.UUID
+        self,
+        event: WorkflowProgressedV1,
+        data: WorkflowProjectionData,
+        task_id: uuid.UUID,
     ) -> TaskCard:
         is_step = event.step_id is not None
         task = await self._records.create_record(
             task_id=task_id,
-            title=(event.step_title if is_step else event.title) or event.title,
-            task_type=(event.capability_key if is_step else "orchestration") or "other",
-            creator_id=event.creator_id,
-            assignee_agent_id=event.expert_id,
-            parent_id=event.parent_task_id if is_step else None,
+            title=(data.step_title if is_step else data.title) or data.title,
+            task_type=(data.capability_key if is_step else "orchestration") or "other",
+            creator_id=data.creator_id,
+            assignee_agent_id=data.expert_id,
+            parent_id=data.parent_task_id if is_step else None,
             step_no=event.step_number if is_step else None,
             payload={
                 "origin": "workflow",
-                "request": event.request_text,
-                "instruction": event.instruction,
-                "skill": event.capability_key,
-                "red_line": event.red_line,
+                "request": data.request_text,
+                "instruction": data.instruction,
+                "skill": data.capability_key,
+                "red_line": data.red_line,
                 "workflow_run_id": str(event.workflow_id),
                 "workflow_step_id": str(event.step_id) if event.step_id else None,
                 "workflow_step_version": event.step_version,
             },
         )
-        task.depends_on = [str(item) for item in event.depends_on_task_ids]
+        task.depends_on = [str(item) for item in data.depends_on_task_ids]
         return task
 
     async def _apply_parent_status(
