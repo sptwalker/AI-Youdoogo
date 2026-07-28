@@ -15,7 +15,9 @@ from app.contexts.foundations.identity.application.contracts import IdentityUser
 from app.contexts.foundations.identity.contracts import Principal, PrincipalType
 from app.contexts.foundations.identity.public import get_user_by_id
 from app.contexts.shared_kernel import AuthenticationFailed, PermissionDenied
+from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.internal_token import InternalClaims, verify_internal_token
 from app.core.security import decode_access_token
 
 _bearer = HTTPBearer(auto_error=False)
@@ -82,5 +84,34 @@ def require_roles(*roles: str) -> Callable[..., Coroutine[Any, Any, IdentityUser
         if not decision.allowed:
             raise PermissionDenied(decision.reason)
         return user
+
+    return _guard
+
+
+def require_service(
+    *required_scopes: str,
+) -> Callable[..., Coroutine[Any, Any, InternalClaims]]:
+    """服务身份守卫依赖工厂（Internal JWT / C1）：require_service("llm:invoke")。
+
+    校验 Bearer 为本平台签发的 ES256 服务令牌，且 required_scopes ⊆ claims.scope。
+    返回 InternalClaims（**不查用户库**——服务身份不是用户，与 get_current_user 彻底分开）。
+
+    audience = 本平台 issuer（本轮单进程自签自验，平台既是签发方也是受众）；
+    ponytail: 跨服务部署时改为按目标服务分配的 aud（Phase 1 多服务）。
+    ponytail: 本轮仅提供依赖、不挂任何路由（无入站远端）；首个入站远端端点在 Phase 1 挂载。
+    """
+
+    async def _guard(
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    ) -> InternalClaims:
+        if credentials is None:
+            raise AuthenticationFailed("未携带服务令牌")
+        claims = verify_internal_token(
+            credentials.credentials, audience=get_settings().internal_jwt_issuer
+        )
+        missing = set(required_scopes) - set(claims.scope)
+        if missing:
+            raise PermissionDenied(f"服务令牌缺少权限：{sorted(missing)}")
+        return claims
 
     return _guard

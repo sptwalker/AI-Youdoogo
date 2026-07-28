@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     # 留空则回退 jwt_secret 派生；生产建议单独设置，与 jwt_secret 分离。
     app_secret_key: str = ""
 
+    # Internal JWT（服务间鉴权，C1 / docs/21 §9）：非对称 ES256 短期服务身份 token，与用户 HS256
+    # jwt_secret 彻底隔离——「不共享业务 JWT_SECRET」（§9 L1414）。留空=不签发（本地无出站时正常）；
+    # Phase 1 RemoteLlmAdapter 上线时此项转生产必填。私钥禁入库，只经 .env/Settings。
+    internal_jwt_private_key: str = ""  # ES256 私钥 PEM（签发用），见 .env.example 生成命令
+    internal_jwt_public_key: str = ""  # ES256 公钥 PEM（验签用）；留空则从私钥派生（自签自验）
+    internal_jwt_issuer: str = "youdoogo-platform"  # 本服务签发的 iss
+    internal_jwt_expire_seconds: int = 300  # 服务 token 有效期（秒），文档硬上限 exp≤5min
+
     # 数据库
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/youdoo"
 
@@ -87,6 +95,27 @@ class Settings(BaseSettings):
                 "生产环境 JWT_SECRET 必须覆盖默认值且长度≥32；"
                 '可用 python -c "import secrets;print(secrets.token_urlsafe(48))" 生成'
             )
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_internal_jwt(self) -> "Settings":
+        """Internal JWT 约束：exp≤5min（文档硬上限）；配了私钥则须能解析为 EC 私钥（启动即校验）。
+
+        私钥留空允许（本地无出站时不签发）；Phase 1 RemoteLlmAdapter 上线时另在其任务转生产必填。
+        """
+        if not (1 <= self.internal_jwt_expire_seconds <= 300):
+            raise ValueError("INTERNAL_JWT_EXPIRE_SECONDS 必须在 1..300（文档硬上限 exp≤5min）")
+        if self.internal_jwt_private_key:
+            # 尽早校验 PEM 合法，避免运行时首次签发才 500；仅在配了私钥时校验。
+            from cryptography.hazmat.primitives.asymmetric import ec
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+            try:
+                key = load_pem_private_key(self.internal_jwt_private_key.encode(), password=None)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("INTERNAL_JWT_PRIVATE_KEY 不是合法 PEM 私钥") from exc
+            if not isinstance(key, ec.EllipticCurvePrivateKey):
+                raise ValueError("INTERNAL_JWT_PRIVATE_KEY 必须是 EC（ES256）私钥，而非 RSA/其它")
         return self
 
 
