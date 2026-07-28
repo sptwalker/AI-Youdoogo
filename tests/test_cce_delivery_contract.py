@@ -246,6 +246,18 @@ def test_migration_job_is_once_only_and_bounded(tmp_path: Path) -> None:
     container = job["spec"]["template"]["spec"]["containers"][0]
     assert container["args"] == ["migrate"]
 
+
+def test_deploy_image_verification_targets_current_rollout_pods() -> None:
+    deploy = (ROOT / "scripts/ci/deploy-cce.sh").read_text(encoding="utf-8")
+    assert "--field-selector=status.phase=Running" in deploy
+    assert ".spec.template.metadata.labels.app\\.kubernetes\\.io/version" in deploy
+    assert (
+        'app.kubernetes.io/name=${deployment},app.kubernetes.io/version=${version}'
+        in deploy
+    )
+    assert "deployment/${deployment} uses ${actual}, expected ${expected}" in deploy
+
+
 def test_frontend_same_origin_proxy_and_spa() -> None:
     nginx = (ROOT / "docker/nginx/nginx.conf").read_text(encoding="utf-8")
     dockerfile = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
@@ -373,7 +385,7 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
     ]
     assert lines[-1] == "**地址**：[YOUDOOGO](https://ai.youdoogo.com/)"
 
-    canonical_chat_id = "oc_aae2fdb8d29cc64e86efa7ce6c0e60da"
+    canonical_chat_id = "oc_52174c913e452fa712e77439a07300ac"
     assert module.CHAT_ID == canonical_chat_id
     requests = []
 

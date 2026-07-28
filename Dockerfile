@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # 后端生产镜像：同一镜像支持一次性 migrate 与纯 serve 两种 CCE 命令。
 FROM python:3.12-alpine
 
@@ -19,8 +20,13 @@ WORKDIR /app
 
 # 先装依赖（利用层缓存；仅 pyproject/uv.lock 变化才重装）
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --no-cache \
-    && rm -rf /root/.cache/uv /bin/uv
+# BuildKit cache mount keeps uv's download cache across builds without baking it into
+# the image layer; the venv is materialised into /app/.venv (UV_LINK_MODE=copy) so the
+# final image carries no package-manager cache. `sharing=locked` serialises concurrent
+# builds on the shared runner. `/bin/uv` is dropped so the runtime image stays lean.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-install-project \
+    && rm -rf /bin/uv
 
 # 再拷业务代码与迁移
 COPY app ./app
