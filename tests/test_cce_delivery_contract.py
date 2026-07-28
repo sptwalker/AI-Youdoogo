@@ -346,8 +346,8 @@ def test_deploy_tools_image_and_bootstrap_contract() -> None:
     assert 'CI_PIPELINE_SOURCE == "push"' in automatic["rules"][0]["if"]
     recovery = pipeline["bootstrap_deploy_tools"]
     assert recovery["extends"] == ".deploy_tools_build"
-    assert recovery["rules"][0]["when"] == "manual"
-    assert recovery["rules"][0]["allow_failure"] is True
+    assert "when" not in recovery["rules"][0]
+    assert "allow_failure" not in recovery["rules"][0]
 
     docs = (ROOT / "ops/first-release-preflight.md").read_text(encoding="utf-8")
     for required_text in (
