@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent import AgentTaskRecord
 from app.models.ai_provider import AiProvider
 from app.models.llm_log import LlmCallLog
+from app.platform import outbox
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,13 @@ async def render_metrics(db: AsyncSession) -> str:
         output.append("# TYPE youdoo_agent_tasks_total counter")
         for status, count in sorted(task_by_status.items()):
             output.append(_line("youdoo_agent_tasks_total", count, {"status": status}))
+
+        # ponytail: 只暴露 backlog gauge；告警阈值归 Prometheus 规则，不在 app 内建告警器。
+        outbox_by_status = await outbox.backlog_counts(db)
+        output.append("# HELP youdoo_outbox_events_total Outbox events by status; failed=DLQ")
+        output.append("# TYPE youdoo_outbox_events_total gauge")
+        for status, count in sorted(outbox_by_status.items()):
+            output.append(_line("youdoo_outbox_events_total", count, {"status": status}))
     except Exception:  # noqa: BLE001 - one metric must not fail the scrape
         logger.warning("渲染指标部分失败", exc_info=True)
     output.append("# HELP youdoo_up Service up")

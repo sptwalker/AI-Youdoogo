@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -142,6 +142,73 @@ async def renew_lease(
     )
     await db.flush()
     return getattr(result, "rowcount", 0) == 1
+
+
+async def list_failed(
+    db: AsyncSession,
+    *,
+    limit: int,
+    offset: int = 0,
+) -> tuple[list[OutboxEvent], int]:
+    """Page the dead-letter queue (retry-exhausted events), newest available first."""
+    total = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(OutboxEvent)
+                .where(OutboxEvent.status == OUTBOX_FAILED)
+            )
+        ).scalar_one()
+    )
+    rows = list(
+        (
+            await db.execute(
+                select(OutboxEvent)
+                .where(OutboxEvent.status == OUTBOX_FAILED)
+                .order_by(OutboxEvent.available_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+    )
+    return rows, total
+
+
+async def replay(db: AsyncSession, event_id: uuid.UUID, *, reset_attempts: bool = True) -> bool:
+    """Re-drive one dead-lettered event by moving it FAILED → PENDING.
+
+    Only transitions out of FAILED — never re-drives a PENDING/PROCESSING event, which would
+    duplicate an in-flight delivery. Returns False when the event is absent or not in FAILED.
+    """
+    # ponytail: reset_attempts=True 给 worker 满额重试预算——修好根因后重放的常规姿势。
+    values: dict[str, Any] = {
+        "status": OUTBOX_PENDING,
+        "available_at": utcnow(),
+        "lease_owner": None,
+        "lease_until": None,
+        "last_error": None,
+    }
+    if reset_attempts:
+        values["attempts"] = 0
+    result = await db.execute(
+        update(OutboxEvent)
+        .where(OutboxEvent.id == event_id, OutboxEvent.status == OUTBOX_FAILED)
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    await db.flush()
+    return getattr(result, "rowcount", 0) == 1
+
+
+async def backlog_counts(db: AsyncSession) -> dict[str, int]:
+    """Count outbox events per status for backlog/failure metrics and alerting."""
+    # ponytail: 单条 group-by 扫全表；事件量大时加 status partial index，量小无碍。
+    rows = (
+        await db.execute(
+            select(OutboxEvent.status, func.count()).group_by(OutboxEvent.status)
+        )
+    ).all()
+    return {str(status): int(count) for status, count in rows}
 
 
 async def defer(

@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_roles
 from app.contexts.foundations.governance.audit_trail.public import (
+    AppendAuditRecordCommand,
     AuditTrailQuery,
+    append_audit_record,
     query_audit_trail_page,
 )
 from app.contexts.foundations.governance.system_configuration.connectivity.public import (
@@ -25,7 +27,9 @@ from app.contexts.foundations.governance.system_configuration.public import (
     update_configuration,
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
+from app.contexts.shared_kernel import RuleViolation
 from app.core.database import get_db
+from app.platform import outbox
 from app.platform.http_runtime import ok
 
 router = APIRouter(tags=["admin"])
@@ -124,3 +128,52 @@ async def update_config(key: str, body: ConfigUpdate, db: DB, admin: Admin) -> d
 async def test_connectivity(_: Admin) -> dict:
     """外部依赖连通性测试（LLM/飞书/ThinkingData），只回状态+延迟，不回显密钥。"""
     return ok([result.to_dict() for result in await test_external_connectivity()])
+
+
+@router.get("/outbox/dead-letters")
+async def list_dead_letters(
+    db: DB,
+    _: Admin,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """死信队列（重试耗尽的 outbox 事件，按可用时间倒序，服务端翻页）。"""
+    # ponytail: last_error 可能含敏感串——仅 admin 可见（同审计 detail 口径），需脱敏在此加。
+    rows, total = await outbox.list_failed(db, limit=limit, offset=offset)
+    return ok(
+        {
+            "items": [
+                {
+                    "id": str(event.id),
+                    "aggregate_type": event.aggregate_type,
+                    "aggregate_id": str(event.aggregate_id),
+                    "event_type": event.event_type,
+                    "attempts": event.attempts,
+                    "max_attempts": event.max_attempts,
+                    "last_error": event.last_error,
+                    "available_at": event.available_at,
+                }
+                for event in rows
+            ],
+            "total": total,
+        }
+    )
+
+
+@router.post("/outbox/dead-letters/{event_id}/replay")
+async def replay_dead_letter(event_id: uuid.UUID, db: DB, admin: Admin) -> dict:
+    """重放一条死信事件（failed→pending 由 worker 再驱动）；仅 failed 可重放，落审计。"""
+    if not await outbox.replay(db, event_id):
+        raise RuleViolation("该事件不存在或不处于 failed 终态，无法重放")
+    await append_audit_record(
+        db,
+        AppendAuditRecordCommand(
+            actor_id=admin.id,
+            actor_role=admin.role_code,
+            action="outbox.replay",
+            target_type="outbox_event",
+            target_id=event_id,
+            summary=f"重放死信事件 {event_id}",
+        ),
+    )
+    return ok()
