@@ -276,7 +276,13 @@ def test_deploy_tools_image_and_bootstrap_contract() -> None:
 
     assert pipeline["variables"]["DEPLOY_TOOLS_TAG"] == DEPLOY_TOOLS_TAG
     assert f'org.opencontainers.image.version="{DEPLOY_TOOLS_TAG}"' in dockerfile
-    assert "FROM alpine:3.22.1" in dockerfile
+    from_lines = [
+        line.strip()
+        for line in dockerfile.splitlines()
+        if line.strip().startswith("FROM ")
+    ]
+    assert from_lines == ["FROM m.daocloud.io/docker.io/library/alpine:3.22.1"]
+    assert "FROM alpine:3.22.1" not in dockerfile
     assert "latest" not in dockerfile.lower()
     assert f"ARG KUBECTL_VERSION={KUBECTL_VERSION}" in dockerfile
     assert f"ARG KUBECTL_SHA256={KUBECTL_SHA256}" in dockerfile

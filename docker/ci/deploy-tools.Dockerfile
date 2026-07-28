@@ -1,6 +1,6 @@
 # Reusable CCE deployment toolchain. The SWR tag is immutable and is built
 # only when this file changes; see build_deploy_tools in .gitlab-ci.yml.
-FROM alpine:3.22.1
+FROM m.daocloud.io/docker.io/library/alpine:3.22.1
 
 ARG KUBECTL_VERSION=v1.31.5
 ARG KUBECTL_SHA256=fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af
