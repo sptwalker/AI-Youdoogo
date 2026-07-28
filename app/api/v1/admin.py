@@ -25,7 +25,7 @@ from app.contexts.foundations.governance.system_configuration.public import (
     update_configuration,
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(tags=["admin"])

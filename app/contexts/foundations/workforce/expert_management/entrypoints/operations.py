@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.workforce.expert_management.application.contracts import (
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
     CreateExpertCommand,
     SeedExpertCommand,
     UpdateExpertCommand,
@@ -18,7 +18,7 @@ from app.contexts.foundations.workforce.expert_management.contracts.roster impor
     ExpertRosterSnapshot,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.composition import (
-    build_expert_management_application,
+    build_local_expert_management,
 )
 
 
@@ -41,7 +41,7 @@ async def create_expert(
     report_to_id: uuid.UUID | None,
     owner_user_id: uuid.UUID | None = None,
 ) -> ExpertRosterSnapshot:
-    return await build_expert_management_application(session).create(
+    return await build_local_expert_management(session).create(
         CreateExpertCommand(
             name=name,
             prompt_template=prompt_template,
@@ -74,7 +74,7 @@ async def update_expert(
     report_to_id: uuid.UUID | None,
     department_id: uuid.UUID | None,
 ) -> ExpertRosterSnapshot:
-    return await build_expert_management_application(session).update(
+    return await build_local_expert_management(session).update(
         UpdateExpertCommand(
             expert_id=expert_id,
             name=name,
@@ -105,7 +105,7 @@ async def seed_expert(
     duty: str | None = None,
     report_to_id: uuid.UUID | None = None,
 ) -> ExpertRosterSnapshot:
-    return await build_expert_management_application(session).seed(
+    return await build_local_expert_management(session).seed(
         SeedExpertCommand(
             code=code,
             name=name,
@@ -121,13 +121,13 @@ async def seed_expert(
 
 
 async def delete_expert(session: AsyncSession, expert_id: uuid.UUID) -> None:
-    await build_expert_management_application(session).delete(expert_id)
+    await build_local_expert_management(session).delete(expert_id)
 
 
 async def list_roster(
     session: AsyncSession, *, include_personal: bool = False
 ) -> tuple[ExpertRosterSnapshot, ...]:
-    return await build_expert_management_application(session).list_roster(
+    return await build_local_expert_management(session).list_roster(
         include_personal=include_personal
     )
 
@@ -135,12 +135,12 @@ async def list_roster(
 async def list_department_roster(
     session: AsyncSession, department_id: uuid.UUID
 ) -> tuple[ExpertRosterSnapshot, ...]:
-    return await build_expert_management_application(session).list_department_roster(department_id)
+    return await build_local_expert_management(session).list_department_roster(department_id)
 
 
 async def count_by_department(
     session: AsyncSession, *, include_personal: bool
 ) -> tuple[DepartmentExpertCount, ...]:
-    return await build_expert_management_application(session).count_by_department(
+    return await build_local_expert_management(session).count_by_department(
         include_personal=include_personal
     )

@@ -1,5 +1,5 @@
 /** 知识库集合 API（对应后端 app/api/v1/knowledge_bases.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface KnowledgeBase {
   id: string

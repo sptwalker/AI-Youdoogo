@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.contexts.business.group_messaging.entrypoints import operations
-from app.core.database import get_db
 from app.core.sse import sse_response
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 

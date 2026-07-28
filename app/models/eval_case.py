@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import Boolean, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 _ACTIVE = text("is_delete = false")
 

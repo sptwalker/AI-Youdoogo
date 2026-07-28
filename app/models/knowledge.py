@@ -23,7 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 EMBED_DIM = 1024  # 通义 text-embedding-v3 维度；换 embedding 模型须改此值并重建向量列/索引
 _JSONB = JSON().with_variant(JSONB(), "postgresql")

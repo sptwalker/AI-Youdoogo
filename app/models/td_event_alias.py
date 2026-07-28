@@ -7,7 +7,7 @@
 from sqlalchemy import Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 _ACTIVE = text("is_delete = false")  # 部分唯一索引条件（软删后可重建同键）
 

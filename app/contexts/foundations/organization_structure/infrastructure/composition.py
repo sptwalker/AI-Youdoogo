@@ -11,12 +11,11 @@ from app.contexts.foundations.organization_structure.infrastructure.adapters imp
     PublishedGroupMessagingAdapter,
     PublishedIdentityDirectoryAdapter,
     PublishedIdentitySyncAdapter,
-    SystemClock,
-    UUIDIdentifier,
 )
 from app.contexts.foundations.organization_structure.infrastructure.sqlalchemy_uow import (
     SQLAlchemyOrganizationUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_organization_structure_application(

@@ -267,7 +267,6 @@ async def answer(
     """检索 → 拼资料 → LLM 生成带来源标注的答案。命中为空时不调用模型。
 
     visible_kb_ids 为请求方可见知识库范围（契约② 隔离），由 API 层按请求用户算出。
-    port 可注入（默认本地端口）——LLM 完成统一经 model_gateway 接缝，便于远端切换与测试替身。
     """
     hits = await search(db, query, top_k, visible_kb_ids=visible_kb_ids)
     if not hits:
@@ -276,7 +275,7 @@ async def answer(
     context = "\n\n".join(f"[{i + 1}] {h.chunk_text}" for i, h in enumerate(hits))
     port = port or build_local_llm_completion_port()
     t0 = time.monotonic()
-    resp = await port.invoke(
+    response = await port.invoke(
         LlmCompletionRequest(
             model_role="default",
             system_prompt=_SYSTEM_PROMPT,
@@ -287,10 +286,10 @@ async def answer(
     await record_usage(
         db,
         role="default",
-        model=resp.model or "default",
-        prompt_tokens=resp.usage.prompt_tokens,
-        completion_tokens=resp.usage.completion_tokens,
-        total_tokens=resp.usage.total_tokens,
+        model=response.model or "default",
+        prompt_tokens=response.usage.prompt_tokens,
+        completion_tokens=response.usage.completion_tokens,
+        total_tokens=response.usage.total_tokens,
         duration_ms=int((time.monotonic() - t0) * 1000),
         user_id=user_id,
     )
@@ -304,4 +303,4 @@ async def answer(
         }
         for i, h in enumerate(hits)
     ]
-    return {"answer": resp.content, "sources": sources}
+    return {"answer": response.content, "sources": sources}

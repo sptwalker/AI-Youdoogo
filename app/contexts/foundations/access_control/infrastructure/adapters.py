@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,13 +42,3 @@ class LegacyKnowledgeVisibilityAdapter:
             extra_knowledge_base_ids=list(extra_knowledge_ids),
         )
         return tuple(ids)
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()

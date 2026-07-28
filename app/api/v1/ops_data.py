@@ -21,7 +21,7 @@ from app.contexts.foundations.integration.governed_data_query.entrypoints import
     operations as governed_query,
 )
 from app.contexts.shared_kernel import RuleViolation
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(prefix="/ops-data", tags=["ops-data"])

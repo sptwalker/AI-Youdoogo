@@ -8,13 +8,25 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.workforce.expert_management.contracts.directory import (
-    ExpertDirectoryPort as ExpertDirectoryPort,
+    ExpertDirectoryPort,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    CreateExpertCommand as CreateExpertCommand,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    ExpertManagementPort as ExpertManagementPort,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    SeedExpertCommand as SeedExpertCommand,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    UpdateExpertCommand as UpdateExpertCommand,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.provisioning import (
-    ExpertProvisioningPort as ExpertProvisioningPort,
+    ExpertProvisioningPort,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,
@@ -27,39 +39,55 @@ from app.contexts.foundations.workforce.expert_management.entrypoints.legacy imp
     LegacyExpertView,
     legacy_view,
 )
+from app.contexts.foundations.workforce.expert_management.infrastructure import (
+    provisioning_adapter,
+)
+from app.contexts.foundations.workforce.expert_management.infrastructure.composition import (
+    build_local_expert_management,
+)
 from app.contexts.foundations.workforce.expert_management.infrastructure.directory_adapter import (
     LocalExpertDirectoryAdapter,
 )
-from app.contexts.foundations.workforce.expert_management.infrastructure.provisioning_adapter import (  # noqa: E501
-    LocalExpertProvisioningAdapter,
-)
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
-    SQLAlchemyExpertRosterQuery,
     SQLAlchemyExpertSnapshotQuery,
+    snapshot_from_role,
 )
-
-# ── 旧位置重复导入清理标记（此处为唯一 import 块）──
+from app.models.agent import AgentRole
 
 
 async def get_expert_roster(
     session: AsyncSession, expert_id: uuid.UUID
 ) -> ExpertRosterSnapshot | None:
     """Return one immutable roster snapshot without exposing the query adapter."""
-    return await SQLAlchemyExpertRosterQuery(session).get_roster_by_id(expert_id)
+    return await build_local_expert_management(session).get_roster(expert_id)
 
 
 async def get_expert_execution(
     session: AsyncSession, expert_id: uuid.UUID
 ) -> ExpertExecutionSnapshot | None:
     """Return active immutable execution configuration for one expert."""
-    return await SQLAlchemyExpertSnapshotQuery(session).get_by_id(expert_id)
+    return await build_local_expert_management(session).get_execution(expert_id)
+
+
+async def get_active_expert_record_by_name(
+    session: AsyncSession, name: str
+) -> AgentRole | None:
+    """Return the active mapped expert row for execution adapters needing ORM data."""
+    return await SQLAlchemyExpertSnapshotQuery(session).get_record_by_name(name)
+
+
+def execution_snapshot_from_record(role: AgentRole) -> ExpertExecutionSnapshot:
+    """Publish the execution view of an already-resolved mapped expert row."""
+    return snapshot_from_role(role)
 
 
 async def list_expert_roster(
     session: AsyncSession, *, include_personal: bool = True
 ) -> tuple[ExpertRosterSnapshot, ...]:
     """Return immutable roster snapshots for published read-only collaboration."""
-    return await SQLAlchemyExpertRosterQuery(session).list_roster(include_personal=include_personal)
+    return await build_local_expert_management(session).list_roster(
+        include_personal=include_personal
+    )
 
 
 async def list_department_roster(
@@ -173,13 +201,11 @@ async def seed_expert(
 
 
 def build_local_expert_directory_port(session: AsyncSession) -> ExpertDirectoryPort:
-    """Phase 1 换 RemoteExpertDirectoryAdapter 的唯一切换点——跨 Context 消费方一律经此拿端口。"""
     return LocalExpertDirectoryAdapter(session)
 
 
 def build_local_expert_provisioning_port(session: AsyncSession) -> ExpertProvisioningPort:
-    """Phase 1 换 RemoteExpertProvisioningAdapter 的唯一切换点——跨 Context 写消费方一律经此落库。"""
-    return LocalExpertProvisioningAdapter(session)
+    return provisioning_adapter.LocalExpertProvisioningAdapter(session)
 
 
 def to_legacy_view(snapshot: ExpertRosterSnapshot) -> LegacyExpertView:

@@ -12,7 +12,7 @@ from app.contexts.foundations.execution.workflow_runtime.application.ports impor
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     sqlalchemy_projection,
     sqlalchemy_repository,
-    sqlalchemy_state,
+    step_leases,
 )
 from app.models.workflow import RUN_CANCELLED, RUN_FAILED, RUN_SUCCEEDED, RUN_WAITING_HUMAN
 from app.platform.outbox.repository import enqueue
@@ -31,7 +31,7 @@ async def enqueue_ready_steps(
     if run.status in (RUN_SUCCEEDED, RUN_FAILED, RUN_CANCELLED, RUN_WAITING_HUMAN):
         return 0
     steps = await sqlalchemy_repository.list_steps(session, workflow_id)
-    ready = sqlalchemy_state.ready_steps(steps)
+    ready = step_leases.ready_steps(steps)
     for step in ready:
         await enqueue(
             session,

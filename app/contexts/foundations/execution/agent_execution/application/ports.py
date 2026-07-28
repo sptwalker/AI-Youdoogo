@@ -25,8 +25,6 @@ from app.contexts.foundations.workforce.expert_management.contracts.execution im
     ExpertExecutionSnapshot,
 )
 
-# The canonical LLM completion port lives in model_gateway; keep the historic name
-# as an alias so agent_execution use cases and tests need no change.
 LlmExecutionPort = LlmCompletionPort
 
 
@@ -79,6 +77,4 @@ class AgentExecutionRecordQueryPort(Protocol):
 class CapabilityExecutionPort(Protocol):
     """Agent-owned view of synchronous capability invocation."""
 
-    async def execute(
-        self, request: CapabilityExecutionRequest
-    ) -> CapabilityExecutionResult: ...
+    async def execute(self, request: CapabilityExecutionRequest) -> CapabilityExecutionResult: ...

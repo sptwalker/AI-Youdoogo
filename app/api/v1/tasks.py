@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, HumanUser
 from app.contexts.business.task_management import public as task_management
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.task import (
     DecomposeRequest,

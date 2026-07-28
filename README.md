@@ -29,8 +29,8 @@ uv run uvicorn app.main:app --reload
 `queued/running` 进度；应用 lifespan 中的 outbox worker 负责租约抢占、执行、重试和真人停点恢复。
 `TaskCard` 只作为 UI/验收镜像，文件交付与协作请求通过 `ToolExecution` 幂等去重。
 
-运行时已按职责拆为 repository、state、projection、recovery、event handler 和 step executor；
-旧 `workflow_service`/`workflow_worker`/`orchestration_service`/`app.agents.skills` 路径保留为兼容 facade。
+运行时已按 Context 职责拆为状态、投影、恢复、事件处理和步骤执行；技能注册与提示词
+由 `app.agents.skill_registry` 维护，文本动作由 `ToolDispatcher` 直接调度，旧兼容 facade 已退休。
 步骤事件遇到仍有效的执行租约会 defer 到租约结束，不会被提前完成；周期恢复扫描还会确定性补发
 过期 `running` 步骤，关闭 Worker 崩溃后步骤永久悬挂的缺口。
 

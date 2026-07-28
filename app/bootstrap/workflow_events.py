@@ -33,6 +33,7 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     StepExecutionDisposition,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
+    human_decisions,
     legacy_execution,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.event_handler import (
@@ -40,9 +41,6 @@ from app.contexts.foundations.execution.workflow_runtime.infrastructure.event_ha
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
     workflow_progress_from_payload,
-)
-from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_state import (
-    apply_task_decision,
 )
 from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
     event_handler as knowledge_events,
@@ -146,7 +144,7 @@ async def handle_event(
         return StepExecutionDisposition.complete()
 
     if event.event_type == TASK_DECISION_RECORDED_V1:
-        await apply_task_decision(
+        await human_decisions.apply_task_decision(
             session,
             task_decision_from_payload(event.payload or {}),
             task_projection=_task_projection(session),

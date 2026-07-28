@@ -7,9 +7,17 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.organization_structure.application.contracts import (
+    ExternalDepartmentRecord,
+)
+from app.contexts.foundations.organization_structure.application.use_cases import (
+    sort_external_departments,
+)
+from app.contexts.foundations.organization_structure.entrypoints import (
+    operations as organization,
+)
 from app.models import Base
 from app.models.system import COMPANY, SysDepartment, SysUser
-from app.services import org_sync_service
 
 
 @pytest.fixture
@@ -38,15 +46,32 @@ def test_sort_parent_before_child() -> None:
         {"open_department_id": "a", "parent_department_id": "0", "name": "父"},
         {"open_department_id": "b", "parent_department_id": "a", "name": "子"},
     ]
-    ordered = org_sync_service._sort_by_hierarchy(depts)
-    ids = [d["open_department_id"] for d in ordered]
+    ordered = sort_external_departments(
+        tuple(
+            ExternalDepartmentRecord(
+                external_id=str(item["open_department_id"]),
+                parent_external_id=str(item["parent_department_id"]),
+                name=str(item["name"]),
+            )
+            for item in depts
+        )
+    )
+    ids = [item.external_id for item in ordered]
     assert ids.index("a") < ids.index("b") < ids.index("c")  # 父→子→孙
 
 
 def test_sort_handles_missing_parent() -> None:
     """父不在集合内（顶层挂根）→ 不死循环，正常返回。"""
     depts = [{"open_department_id": "x", "parent_department_id": "外部根", "name": "x"}]
-    assert len(org_sync_service._sort_by_hierarchy(depts)) == 1
+    records = tuple(
+        ExternalDepartmentRecord(
+            external_id=str(item["open_department_id"]),
+            parent_external_id=str(item["parent_department_id"]),
+            name=str(item["name"]),
+        )
+        for item in depts
+    )
+    assert len(sort_external_departments(records)) == 1
 
 
 # ── sync_from_feishu（打桩 client）──────────────────────
@@ -81,7 +106,7 @@ async def test_sync_builds_dept_tree_and_users(
         "d2": [{"open_id": "u2", "name": "李四", "department_ids": ["d2"]}],
     }
     _stub_client(monkeypatch, depts, users)
-    res = await org_sync_service.sync_from_feishu(db)
+    res = await organization.sync_from_feishu(db)
     assert res["departments"] == 2 and res["users_created"] == 2
 
     # 3 级部门被接受（放宽 2 级硬限）
@@ -103,8 +128,8 @@ async def test_sync_idempotent(db: AsyncSession, monkeypatch: pytest.MonkeyPatch
     users = {"d1": [{"open_id": "u1", "name": "张三", "department_ids": ["d1"]}]}
     _stub_client(monkeypatch, depts, users)
 
-    await org_sync_service.sync_from_feishu(db)
-    res2 = await org_sync_service.sync_from_feishu(db)
+    await organization.sync_from_feishu(db)
+    res2 = await organization.sync_from_feishu(db)
     assert res2["users_created"] == 0 and res2["users_updated"] == 1  # 第二次是更新
     # 部门/用户各只 1 条（未重复）
     ndept = (await db.execute(
@@ -124,7 +149,7 @@ async def test_sync_requires_root(db: AsyncSession, monkeypatch: pytest.MonkeyPa
 
     _stub_client(monkeypatch, [], {})
     with pytest.raises(ApplicationError, match="根节点"):
-        await org_sync_service.sync_from_feishu(db)
+        await organization.sync_from_feishu(db)
 
 
 async def test_sync_updates_existing_user(
@@ -136,11 +161,11 @@ async def test_sync_updates_existing_user(
     _stub_client(monkeypatch, depts, {"d1": [
         {"open_id": "u1", "name": "张三", "job_title": "工程师", "department_ids": ["d1"]}
     ]})
-    await org_sync_service.sync_from_feishu(db)
+    await organization.sync_from_feishu(db)
     # 改职务再同步
     _stub_client(monkeypatch, depts, {"d1": [
         {"open_id": "u1", "name": "张三", "job_title": "高级工程师", "department_ids": ["d1"]}
     ]})
-    await org_sync_service.sync_from_feishu(db)
+    await organization.sync_from_feishu(db)
     u = (await db.execute(select(SysUser).where(SysUser.feishu_open_id == "u1"))).scalar_one()
     assert u.title == "高级工程师"

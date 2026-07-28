@@ -7,8 +7,8 @@ from sqlalchemy import JSON, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
-from app.services.task_flow import CREATED
+from app.contexts.business.task_management.domain.state_machine import CREATED
+from app.platform.database.model import Base, CommonMixin
 
 _JSONB = JSON().with_variant(JSONB(), "postgresql")
 

@@ -2,9 +2,9 @@
 
 import pytest
 
+from app.contexts.foundations.identity import browser_login as feishu_login
 from app.core.config import Settings
 from app.integrations.feishu.oauth import FeishuOAuthConfig
-from app.services import feishu_login
 
 
 def test_prod_rejects_default_secret() -> None:

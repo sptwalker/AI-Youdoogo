@@ -9,16 +9,16 @@ from typing import Self
 
 import pytest
 
-from app.contexts.foundations.workforce.expert_management.application.contracts import (
-    CreateExpertCommand,
-    SeedExpertCommand,
-    UpdateExpertCommand,
-)
 from app.contexts.foundations.workforce.expert_management.application.errors import (
     ExpertWriteConflict,
 )
 from app.contexts.foundations.workforce.expert_management.application.use_cases import (
     ExpertManagementApplication,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    CreateExpertCommand,
+    SeedExpertCommand,
+    UpdateExpertCommand,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,

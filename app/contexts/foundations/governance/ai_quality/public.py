@@ -7,6 +7,8 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
     EvaluationResult,
     FeedbackResult,
     LowScoreSample,
+    OutputReviewRequest,
+    OutputReviewResult,
     PromptImprovementSuggestion,
     RecordFeedbackCommand,
     ShadowComparisonResult,
@@ -19,6 +21,7 @@ from app.contexts.foundations.governance.ai_quality.entrypoints.operations impor
     list_low_score_samples,
     list_my_feedback,
     record_feedback,
+    review_output,
     run_evaluation,
     suggest_prompt_improvement,
 )
@@ -30,6 +33,8 @@ __all__ = [
     "EvaluationResult",
     "FeedbackResult",
     "LowScoreSample",
+    "OutputReviewRequest",
+    "OutputReviewResult",
     "PromptImprovementSuggestion",
     "RecordFeedbackCommand",
     "ShadowComparisonResult",
@@ -40,6 +45,7 @@ __all__ = [
     "list_evaluation_cases",
     "list_my_feedback",
     "record_feedback",
+    "review_output",
     "run_evaluation",
     "suggest_prompt_improvement",
 ]

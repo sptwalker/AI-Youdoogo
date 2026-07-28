@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from app.contexts.foundations.workforce.expert_management.application.contracts import (
-    CreateExpertCommand,
-    SeedExpertCommand,
-    UpdateExpertCommand,
-)
 from app.contexts.foundations.workforce.expert_management.application.errors import (
     ExpertWriteConflict,
 )
@@ -19,6 +14,11 @@ from app.contexts.foundations.workforce.expert_management.application.management
 )
 from app.contexts.foundations.workforce.expert_management.application.ports import (
     ExpertRosterQueryPort,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    CreateExpertCommand,
+    SeedExpertCommand,
+    UpdateExpertCommand,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,

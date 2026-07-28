@@ -24,11 +24,8 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     sqlalchemy_repository,
-)
-from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_state import (
-    claim_step_result,
-    complete_step,
-    pipe_outputs,
+    step_completion,
+    step_leases,
 )
 from app.models.workflow import STEP_FAILED, STEP_RUNNING, STEP_WAITING_HUMAN, WorkflowStep
 from app.platform.outbox.repository import enqueue
@@ -53,7 +50,7 @@ class SQLAlchemyWorkflowRepository:
     async def claim(
         self, command: ClaimWorkflowStepCommand
     ) -> ClaimWorkflowStepResult:
-        result = await claim_step_result(
+        result = await step_leases.claim_step_result(
             self._session,
             command.step_id,
             worker_id=command.worker_id,
@@ -125,7 +122,7 @@ class SQLAlchemyWorkflowRepository:
                 str(item) for item in command.execution.capability_execution_ids
             ],
         }
-        applied = await complete_step(
+        applied = await step_completion.complete_step(
             self._session,
             step,
             worker_id=claim.worker_id,
@@ -139,7 +136,7 @@ class SQLAlchemyWorkflowRepository:
         if not applied:
             return FinalizeWorkflowStepResult(False, claim.workflow_id, claim.step_id)
         if command.execution.succeeded:
-            await pipe_outputs(
+            await step_completion.pipe_outputs(
                 self._session,
                 step,
                 datasets=datasets,

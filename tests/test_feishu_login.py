@@ -14,14 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.v1.auth import EXCHANGE_COOKIE, feishu_exchange, feishu_start, feishu_status
-from app.core.database import get_db
-from app.core.oauth_query_scrub import OAuthCallbackQueryScrubMiddleware
-from app.core.security import hash_password
-from app.integrations.feishu.oauth import FeishuIdentity, FeishuOAuthConfig, FeishuOAuthError
-from app.main import app
-from app.models import Base
-from app.models.system import SysUser
-from app.services.feishu_login import (
+from app.contexts.foundations.identity.browser_login import (
     FeishuLoginService,
     InvalidOAuthCallback,
     InvalidOAuthState,
@@ -30,6 +23,13 @@ from app.services.feishu_login import (
     OAuthUnavailable,
     get_feishu_login_service,
 )
+from app.core.oauth_query_scrub import OAuthCallbackQueryScrubMiddleware
+from app.core.security import hash_password
+from app.integrations.feishu.oauth import FeishuIdentity, FeishuOAuthConfig, FeishuOAuthError
+from app.main import app
+from app.models import Base
+from app.models.system import SysUser
+from app.platform.database import get_db
 
 TEST_CONFIG = FeishuOAuthConfig(
     app_id="cli_test_app",

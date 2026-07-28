@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.contexts.business.assistant_conversations.application.contracts import (
     Principal,
     SendMessageCommand,
+    conversation_archive_document_id,
 )
 from app.contexts.business.assistant_conversations.entrypoints import (
     operations as assistant_conversations,
@@ -19,20 +20,21 @@ from app.contexts.business.assistant_conversations.entrypoints import (
 from app.contexts.business.assistant_conversations.infrastructure.sqlalchemy_repository import (
     SQLAlchemyConversationRepository,
 )
-from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.sqlalchemy_gateway import (  # noqa: E501
-    SqlAlchemyDocumentIndexGateway,
+from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
+    sqlalchemy_index,
 )
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
 )
+from app.contexts.foundations.workforce.expert_management import public as experts
 from app.contexts.shared_kernel import ApplicationError
 from app.core.sse import Event
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.desktop import DesktopMessage
-from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
+from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase, KnowledgeFile
 from app.models.system import SysUser
-from app.services import agent_role_service
 
 AgentStream = Callable[..., AsyncIterator[str | AgentTaskRecord]]
 
@@ -66,6 +68,22 @@ async def _user(db: AsyncSession, username: str = "alice", real_name: str = "爱
     await db.commit()
     await db.refresh(u)
     return u
+
+
+async def _create_expert(db: AsyncSession, name: str):
+    return await experts.create_expert(
+        db,
+        name=name,
+        prompt_template="x",
+        duty=None,
+        model_role="daily",
+        department_id=None,
+        permission_scope={},
+        tools=[],
+        tier="member",
+        title="",
+        report_to_id=None,
+    )
 
 
 def _principal(user: SysUser) -> Principal:
@@ -157,8 +175,8 @@ async def test_list_agent_roles_excludes_assistant(db: AsyncSession) -> None:
     """组织智能体列表不含真人专属助理。"""
     u = await _user(db)
     await assistant_conversations.get_or_create_assistant(db, _principal(u))
-    await agent_role_service.create_agent_role(db, name="运营总监", prompt_template="x")
-    names = [r.name for r in await agent_role_service.list_agent_roles(db)]
+    await _create_expert(db, "运营总监")
+    names = [r.name for r in await experts.list_expert_roster(db, include_personal=False)]
     assert "运营总监" in names
     assert all("的助理" not in n for n in names)
 
@@ -167,13 +185,13 @@ async def test_send_roundtable_order_and_context(db: AsyncSession) -> None:
     """圆桌：助理 + 1 个被加入AI，2 轮 → 5 条消息；后发言者能看到先发言者内容；delta 流式送达。"""
     calls: list[str] = []
     u = await _user(db)
-    expert = await agent_role_service.create_agent_role(db, name="专家A", prompt_template="x")
+    expert = await _create_expert(db, "专家A")
 
     msgs, events = await _send_all(
         db,
         u,
         "帮我分析一下",
-        [expert.id],
+        [expert.expert_id],
         agent_stream=_fake_run_agent_stream(calls),
     )
     # 1 user + 2 参与者 × 2 轮 = 5
@@ -222,7 +240,7 @@ async def test_send_consult_directive_emits_extra_message(
         )
 
     u = await _user(db)
-    await agent_role_service.create_agent_role(db, name="财务总监", prompt_template="x")
+    await _create_expert(db, "财务总监")
 
     msgs, _ = await _send_all(
         db,
@@ -421,7 +439,7 @@ async def test_archive_old_moves_and_deletes(
         ingested.append({"title": command.title, "text": command.text})
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _no_distill)
-    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
+    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
     u = await _user(db)
     await assistant_conversations.get_or_create_assistant(db, _principal(u))
     await _add_msg(db, u.id, "很久以前", days_ago=11)
@@ -450,7 +468,7 @@ async def test_archive_old_keeps_on_ingest_failure(
         raise RuntimeError("embedding down")
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _no_distill)
-    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _boom)
+    monkeypatch.setattr(knowledge_indexing, "index_text", _boom)
     u = await _user(db)
     await assistant_conversations.get_or_create_assistant(db, _principal(u))
     await _add_msg(db, u.id, "很久以前", days_ago=11)
@@ -463,6 +481,59 @@ async def test_archive_old_keeps_on_ingest_failure(
         ).scalars()
     )
     assert len(remaining) == 1  # 未删，保留重试
+
+
+async def test_archive_old_replay_reuses_document_after_delete_failure(
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """知识入库成功但消息删除失败时，重试复用同一归档文档。"""
+
+    async def _no_distill(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def _embed(chunks: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2] for _ in chunks]
+
+    delete_calls = 0
+    original_delete = SQLAlchemyConversationRepository.delete
+
+    async def _flaky_delete(
+        repository: SQLAlchemyConversationRepository,
+        message_ids: tuple[uuid.UUID, ...],
+    ) -> None:
+        nonlocal delete_calls
+        delete_calls += 1
+        if delete_calls == 1:
+            raise RuntimeError("delete commit failed")
+        await original_delete(repository, message_ids)
+
+    monkeypatch.setattr(organizational_memory, "distill_conversation", _no_distill)
+    monkeypatch.setattr(sqlalchemy_index, "embed_texts", _embed)
+    monkeypatch.setattr(SQLAlchemyConversationRepository, "delete", _flaky_delete)
+    user = await _user(db)
+    principal = _principal(user)
+    await assistant_conversations.get_or_create_assistant(db, principal)
+    await _add_msg(db, user.id, "很久以前", days_ago=11)
+    message = (
+        await db.execute(
+            select(DesktopMessage).where(DesktopMessage.owner_user_id == user.id)
+        )
+    ).scalar_one()
+    expected_document_id = conversation_archive_document_id(user.id, (message.id,))
+
+    with pytest.raises(RuntimeError, match="delete commit failed"):
+        await assistant_conversations.archive_old(db, principal, days=10)
+
+    assert await assistant_conversations.archive_old(db, principal, days=10) == 1
+    archived = list(
+        (
+            await db.execute(
+                select(KnowledgeFile).where(KnowledgeFile.category == "conversation")
+            )
+        ).scalars()
+    )
+    assert [document.id for document in archived] == [expected_document_id]
 
 
 async def test_repository_list_messages_excludes_soft_deleted_and_stabilizes_equal_times(

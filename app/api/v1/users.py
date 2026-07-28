@@ -14,7 +14,7 @@ from app.contexts.foundations.governance.audit_trail.public import (
 from app.contexts.foundations.identity import public as identity
 from app.contexts.foundations.identity.public import IdentityUserResult
 from app.contexts.shared_kernel import InvalidInput
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.auth import AdminUserOut, UserCreate, UserUpdate
 

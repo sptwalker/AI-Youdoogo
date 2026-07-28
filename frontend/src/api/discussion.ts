@@ -11,7 +11,7 @@ import {
   type SseHandler,
   type SseRequestOptions,
   type SseSubscription,
-} from './client'
+} from './http'
 
 export interface DiscussionRequestOptions {
   signal?: AbortSignal

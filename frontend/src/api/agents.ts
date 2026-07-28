@@ -1,5 +1,5 @@
 /** 智能体 API（对应后端 app/api/v1/agents.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface TaskRecord {
   id: string

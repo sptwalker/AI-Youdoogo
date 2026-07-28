@@ -10,9 +10,8 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import app.agents.base as base
-import app.knowledge.ingest as ingest
 import app.platform.outbox.source_change as source_change_events
+from app.bootstrap import workflow_worker
 from app.contexts.foundations.environment_projection import public as projection
 from app.contexts.foundations.environment_projection.application.invalidation import (
     EnvironmentInvalidationState,
@@ -33,6 +32,9 @@ from app.contexts.foundations.environment_projection.entrypoints import (
 from app.contexts.foundations.environment_projection.infrastructure import (
     source_change_handler,
 )
+from app.contexts.foundations.execution.agent_execution.infrastructure import (
+    current_adapters as agent_execution_adapters,
+)
 from app.contexts.foundations.integration.connector_management.application.contracts import (
     RegisterConnector,
     UpdateConnector,
@@ -43,18 +45,22 @@ from app.contexts.foundations.integration.connector_management.contracts import 
 from app.contexts.foundations.integration.connector_management.entrypoints import (
     operations as connector_operations,
 )
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
+    sqlalchemy_index as ingest,
+)
+from app.contexts.foundations.organization_structure.entrypoints import (
+    operations as organization,
+)
+from app.contexts.foundations.workforce.expert_management import public as experts
+from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
+    snapshot_from_role,
+)
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.knowledge import SCOPE_COMPANY, KnowledgeBase, KnowledgeFile
 from app.models.system import COMPANY, DEPT_L1, SysDepartment, SysUser
 from app.platform.outbox.model import OUTBOX_DONE, OutboxEvent
-from app.services import (
-    agent_role_service,
-    org_service,
-    workflow_worker,
-)
-from app.services import environment_service as legacy_environment
 
 pytestmark = pytest.mark.usefixtures("_no_embed")
 
@@ -101,6 +107,32 @@ async def _env_files(db: AsyncSession) -> list[KnowledgeFile]:
         KnowledgeFile.is_delete.is_(False),
     )
     return list((await db.execute(stmt)).scalars())
+
+
+async def _create_expert(
+    db: AsyncSession,
+    *,
+    name: str,
+    prompt_template: str,
+    department_id: uuid.UUID | None = None,
+    title: str = "",
+) -> AgentRole:
+    snapshot = await experts.create_expert(
+        db,
+        name=name,
+        prompt_template=prompt_template,
+        duty=None,
+        model_role="daily",
+        department_id=department_id,
+        permission_scope={},
+        tools=[],
+        tier="member",
+        title=title,
+        report_to_id=None,
+    )
+    record = await db.get(AgentRole, snapshot.expert_id)
+    assert record is not None
+    return record
 
 
 async def _register_connector(
@@ -153,7 +185,7 @@ async def test_build_snapshot_content_and_determinism(db: AsyncSession) -> None:
                          node_type=DEPT_L1, level=1, path="")
     db.add(dept)
     await db.commit()
-    agent = await agent_role_service.create_agent_role(
+    agent = await _create_expert(
         db, name="运营总监", prompt_template="x", department_id=dept.id, title="总监"
     )
     await _register_connector(
@@ -174,7 +206,7 @@ async def test_context_snapshot_publishes_scope_versions_and_expiry(
 ) -> None:
     """Canonical reads expose freshness and source evidence without ORM objects."""
     await _seed_base(db)
-    agent = await agent_role_service.create_agent_role(
+    agent = await _create_expert(
         db,
         name="快照元数据AI",
         prompt_template="x",
@@ -228,22 +260,6 @@ async def test_context_snapshot_fails_closed_with_missing_source_metadata(
     assert await projection.get_env_context(db) == ""
 
 
-async def test_legacy_facade_preserves_builder_monkeypatch_seam(
-    db: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    await _seed_base(db)
-
-    async def _legacy_snapshot(_db: AsyncSession) -> str:
-        return "# legacy monkeypatch"
-
-    monkeypatch.setattr(legacy_environment, "build_snapshot", _legacy_snapshot)
-    snapshot = await legacy_environment.get_context_snapshot(db)
-
-    assert snapshot.content == "# legacy monkeypatch"
-    assert await legacy_environment.get_env_context(db) == snapshot.content
-
-
 def test_context_snapshot_contract_is_immutable() -> None:
     now = datetime.now(UTC)
     snapshot = ContextSnapshot(
@@ -288,8 +304,8 @@ async def test_refresh_env_doc_nonfatal(db: AsyncSession, monkeypatch: pytest.Mo
     async def _boom(*a: Any, **kw: Any) -> None:
         raise RuntimeError("embedding down")
 
-    monkeypatch.setattr(legacy_environment.ingest, "ingest_text", _boom)
-    await legacy_environment.refresh_env_doc(db)  # 不应抛
+    monkeypatch.setattr(ingest, "ingest_text", _boom)
+    await projection.refresh_env_doc(db)  # 不应抛
 
 
 async def test_sources_publish_versioned_changes_without_sync_refresh(
@@ -303,9 +319,9 @@ async def test_sources_publish_versioned_changes_without_sync_refresh(
     async def _spy(_db: AsyncSession) -> None:
         calls.append("refresh")
 
-    monkeypatch.setattr(legacy_environment, "refresh_env_doc", _spy)
-    await org_service.create_node(db, name="新部门", parent_id=root.id)
-    await agent_role_service.create_agent_role(db, name="新AI", prompt_template="x")
+    monkeypatch.setattr(projection, "refresh_env_doc", _spy)
+    await organization.create_department(db, name="新部门", parent_id=root.id, code=None)
+    await _create_expert(db, name="新AI", prompt_template="x")
     await _register_connector(db, name="接口A", connector_type="http_api")
     events = list(
         (
@@ -333,7 +349,9 @@ async def test_sources_publish_versioned_changes_without_sync_refresh(
 async def test_outbox_worker_is_the_single_snapshot_refresh_path(db: AsyncSession) -> None:
     """worker 消费来源事件后刷新文档并完成 Outbox。"""
     root, _, _ = await _seed_base(db)
-    await org_service.create_node(db, name="事件驱动部门", parent_id=root.id)
+    await organization.create_department(
+        db, name="事件驱动部门", parent_id=root.id, code=None
+    )
     assert await workflow_worker.process_one(db, worker_id="environment-test")
     event = (
         await db.execute(
@@ -470,18 +488,23 @@ async def test_env_context_injection_flag(
 ) -> None:
     """注入开关：开→system prompt 含快照；关→不含；构建失败→不阻断。"""
     root, _, _ = await _seed_base(db)
-    agent = await agent_role_service.create_agent_role(
+    agent = await _create_expert(
         db, name="助理甲", prompt_template="你是助理。"
     )
 
-    _, system_on, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    prompt = agent_execution_adapters.CurrentPromptAssemblyAdapter(db, agent)
+    system_on = await prompt.build(snapshot_from_role(agent))
     assert "【系统环境快照】" in system_on and "助理甲" in system_on
 
     async def _off(_db: AsyncSession, key: str, default: Any) -> Any:
         return False if key == "agent_env_context" else default
 
-    monkeypatch.setattr(base.config_service, "resolve", _off)
-    _, system_off, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    monkeypatch.setattr(
+        agent_execution_adapters,
+        "resolve_configuration",
+        _off,
+    )
+    system_off = await prompt.build(snapshot_from_role(agent))
     assert "【系统环境快照】" not in system_off
 
     monkeypatch.undo()
@@ -491,14 +514,14 @@ async def test_env_context_injection_flag(
         raise RuntimeError("db down")
 
     monkeypatch.setattr(projection_operations, "build_snapshot", _boom)
-    _, system_fail, _, _ = await base._prepare(db, agent, "hi", use_knowledge=False)
+    system_fail = await prompt.build(snapshot_from_role(agent))
     assert "【系统环境快照】" not in system_fail  # 失败静默跳过，不抛
 
 
 async def test_ds_owner_agent_roundtrip(db: AsyncSession) -> None:
     """数据源对接AI：创建/更新往返；指派不存在的 AI 报 404。"""
     await _seed_base(db)
-    a = await agent_role_service.create_agent_role(db, name="数据AI", prompt_template="x")
+    a = await _create_expert(db, name="数据AI", prompt_template="x")
     ds = await _register_connector(
         db,
         name="接口B",
@@ -508,7 +531,7 @@ async def test_ds_owner_agent_roundtrip(db: AsyncSession) -> None:
     assert ds.owner_expert_id == a.id
     listed = await connector_operations.list_connectors(db)
     assert listed[0].owner_expert_name == "数据AI"
-    b = await agent_role_service.create_agent_role(db, name="数据AI2", prompt_template="x")
+    b = await _create_expert(db, name="数据AI2", prompt_template="x")
     ds = await connector_operations.update_connector(
         db,
         UpdateConnector(connector_id=ds.id, owner_expert_id=b.id),
@@ -530,7 +553,7 @@ async def test_snapshot_counts_match(db: AsyncSession) -> None:
     """快照 AI 花名册与 agent_role 表一致（排除专属助理由 list_agent_roles 保证）。"""
     await _seed_base(db)
     for i in range(3):
-        await agent_role_service.create_agent_role(db, name=f"AI{i}", prompt_template="x")
+        await _create_expert(db, name=f"AI{i}", prompt_template="x")
     snap = await projection.build_snapshot(db)
     n = (await db.execute(select(func.count()).select_from(AgentRole))).scalar_one()
     assert n == 3

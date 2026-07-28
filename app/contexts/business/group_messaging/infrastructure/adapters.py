@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.platform.object_storage.gateway as storage
-from app.agents.base import run_agent, run_agent_stream
 from app.agents.contracts import ExecutionContext
-from app.agents.skills import execute_all, fold_notes
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.business.group_messaging.application.contracts import (
     DISBAND_ARCHIVE_EVENT,
     AgentReplyRequest,
@@ -23,11 +21,17 @@ from app.contexts.business.group_messaging.application.contracts import (
 from app.contexts.business.group_messaging.infrastructure.sqlalchemy_repository import (
     SQLAlchemyGroupMessagingRepository,
 )
+from app.contexts.business.proposal_management import public as proposal_management
+from app.contexts.business.task_management import public as task_management
+from app.contexts.foundations.execution.agent_execution.public import (
+    run_agent,
+    run_agent_stream,
+)
+from app.contexts.foundations.knowledge.knowledge_indexing import (
+    public as knowledge_indexing,
+)
 from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
     IndexTextCommand,
-)
-from app.contexts.foundations.knowledge.knowledge_indexing.public import (
-    build_local_knowledge_index_port,
 )
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
@@ -37,8 +41,7 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 )
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 from app.models.agent import AgentRole, AgentTaskRecord
-from app.platform import realtime
-from app.services import outbox_service, proposal_service, task_service
+from app.platform import outbox, realtime
 
 
 class RedisRealtimeDeliveryAdapter:
@@ -57,7 +60,7 @@ class RedisRealtimeSubscriptionAdapter:
     async def _subscribe_user(
         self, *, user_id: uuid.UUID, channel_ids: tuple[uuid.UUID, ...]
     ) -> AsyncIterator[MessageStreamEvent]:
-        from app.core.database import async_session_factory
+        from app.platform.database import async_session_factory
 
         async def _still_member(channel_id: str) -> bool:
             try:
@@ -114,17 +117,17 @@ class LegacyAgentReplyAdapter:
         if record is None:
             raise RuntimeError("Agent reply completed without an execution record")
         reply = record.output_content or record.error_msg or "（无产出）"
-        protocol_result = await execute_all(
+        protocol_result = await ToolDispatcher().dispatch_text(
             self._session,
             role,
             reply,
-            user_id=request.user_id,
-            execution_context=ExecutionContext(
+            ExecutionContext(
                 user_id=request.user_id,
                 agent_runner=run_agent,
             ),
+            user_id=request.user_id,
         )
-        reply = fold_notes(reply, protocol_result)
+        reply = protocol_result.fold_notes(reply)
         yield AgentReplyStreamEvent(
             name="complete",
             speaker_agent_id=role.id,
@@ -163,7 +166,6 @@ class OrganizationalMemoryArchiveAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._index = build_local_knowledge_index_port(session)
 
     async def archive(self, request: ArchiveRequest) -> None:
         draft = await organizational_memory.distill_conversation(
@@ -176,7 +178,8 @@ class OrganizationalMemoryArchiveAdapter:
             ),
         )
         knowledge_base = await wiki_management.get_default_knowledge_base(self._session)
-        await self._index.index_text(
+        await knowledge_indexing.index_text(
+            self._session,
             IndexTextCommand(
                 title=f"群聊存档·{request.channel_name}",
                 text=draft.content if draft is not None else request.transcript,
@@ -188,26 +191,29 @@ class OrganizationalMemoryArchiveAdapter:
         )
 
 
-class LegacyPromotionAdapter:
+class PublishedPromotionAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def promote(self, request: PromotionRequest) -> uuid.UUID:
         if request.target == "proposal":
-            proposal = await proposal_service.create_proposal(
+            proposal = await proposal_management.create_proposal(
                 self._session,
                 title=request.title,
                 background=request.content,
                 plan="（讨论升格，方案待补充）",
                 creator_id=request.creator_id,
+                source_message_id=request.source_message_id,
             )
             return proposal.id
-        task = await task_service.create_task(
+        task = await task_management.create_task_in_transaction(
             self._session,
-            title=request.title,
-            task_type="manual",
-            creator_id=request.creator_id,
-            payload={"from_message_id": str(request.source_message_id)},
+            task_management.CreateTaskRequest(
+                title=request.title,
+                task_type="manual",
+                creator_id=request.creator_id,
+                payload=(("from_message_id", str(request.source_message_id)),),
+            ),
         )
         return task.id
 
@@ -217,7 +223,7 @@ class SQLAlchemyOutboxAdapter:
         self._session = session
 
     async def enqueue_disband_archive(self, channel_id: uuid.UUID) -> None:
-        await outbox_service.enqueue(
+        await outbox.enqueue(
             self._session,
             aggregate_type="discussion_channel",
             aggregate_id=channel_id,
@@ -225,16 +231,3 @@ class SQLAlchemyOutboxAdapter:
             dedupe_key=f"discussion-channel:{channel_id}:archive:v1",
             payload={"channel_id": str(channel_id)},
         )
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()
-
-    def new_object_token(self) -> str:
-        return uuid.uuid4().hex

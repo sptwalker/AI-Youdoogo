@@ -10,13 +10,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.foundations.execution.workflow_runtime.application.ports import (
     TaskProjectionPort,
 )
+from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
+    StartWorkflowCommand,
+    StartWorkflowResult,
+)
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
+    human_decisions,
     sqlalchemy_projection,
     sqlalchemy_repository,
 )
-from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_state import (
-    accept_human_step,
+from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_uow import (
+    SQLAlchemyWorkflowUnitOfWorkFactory,
 )
+
+
+async def start_workflow(
+    session: AsyncSession,
+    command: StartWorkflowCommand,
+    *,
+    task_projection: TaskProjectionPort,
+) -> StartWorkflowResult:
+    """Atomically persist a validated plan and its Task projections."""
+    unit = SQLAlchemyWorkflowUnitOfWorkFactory(session, task_projection)()
+    async with unit:
+        try:
+            result = await unit.workflows.start(command)
+            await unit.commit()
+            return result
+        except Exception:
+            await unit.rollback()
+            raise
 
 
 async def resume_task_step(
@@ -31,7 +54,7 @@ async def resume_task_step(
     """Atomically record human acceptance and enqueue workflow continuation."""
     if step_number is None or parent_task_id is None:
         return None
-    run = await accept_human_step(
+    run = await human_decisions.accept_human_step(
         session,
         task_card_id,
         operator_id=operator_id,

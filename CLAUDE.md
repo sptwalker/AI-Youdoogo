@@ -35,9 +35,7 @@ app/
 ├── core/            # 迁移期配置、安全等兼容入口；旧异常 facade 已删除
 ├── models/          # 迁移期 ORM 兼容入口
 ├── schemas/         # 迁移期 HTTP DTO 兼容入口
-├── services/        # 迁移期业务 facade；禁止继续新增新业务实现
 ├── agents/          # 迁移期 Agent runtime 兼容入口
-├── knowledge/       # 迁移期知识能力兼容入口
 ├── llm/             # 迁移期 LLM gateway 兼容入口
 └── integrations/    # 迁移期供应商 client 兼容入口
 ```
@@ -45,20 +43,23 @@ app/
 复杂 Context 内按需使用 `contracts/domain/application/entrypoints/infrastructure`；简单 Context 可保持少量文件，
 但依赖方向必须是 Entrypoints → Application → Domain、Infrastructure → Application Ports/Domain。
 
-**目录/表/服务只在当前阶段用到时创建，禁止预建空壳。** 旧路径仅作为兼容 facade；新代码禁止反向依赖
-`app/services`、`app/models` 等旧横向实现。完整 Context Map、数据所有权和迁移顺序以 docs/20 为准。
+**目录/表/服务只在当前阶段用到时创建，禁止预建空壳。** `app/services` 与 `app/knowledge` 已退出，禁止
+恢复这两个横向 facade；新代码也禁止反向依赖 `app/models` 等迁移期实现。完整 Context Map、数据所有权和
+迁移顺序以 docs/20 为准。
 
 当前 OpenSpec 迁移的 P0～P4 已完成：Bootstrap/Database/Outbox/HTTP Runtime、Proposal、
 Expert/Agent/Capability、Planning/Workflow/Task、Identity/Organization/Knowledge/Environment、
 Communication/Meeting/Analytics/Governance 均已有 Context-owned 边界；HTTP route 已迁到 Context
-entrypoint，route 对 ORM、旧 Service 和具体 Agent/LLM 的依赖已清除，6 个零调用 facade 已删除。
-实施 ownership map、保留 facade 清单、零调用证据和退出条件见
+entrypoint，route 对 ORM、旧 Service 和具体 Agent/LLM 的依赖已清除；`app/services`、`app/knowledge`、
+旧 `agents/scheduler.py` 与 `agents/workflow_engine.py` 已删除。实施 ownership map、历史职责归属、退出证据
+和不得回归规则见
 `docs/20-DDD领域边界与分层架构规范.md` 第 11 节。
 
 应用错误不携带 HTTP 元数据；HTTP status/code 只允许在 Bootstrap 或 Context entrypoint/HTTP adapter
-中映射。旧 `AppError` 调用和 `app.core.exceptions` 兼容层已全部移除。最终门禁已通过 Ruff、Mypy、
-683 个非交付 Pytest、前端 test/lint/build、单一 migration head、app/worker smoke；Graphify 代码图已刷新
-并验证无 import cycle、无 Context→legacy 反向依赖、无重复持久化 writer。
+中映射。旧 `AppError` 调用和 `app.core.exceptions` 兼容层已全部移除。架构门禁持续验证无 import cycle、
+无 Context→legacy 反向依赖、无重复持久化 writer，并显式阻止 `app/services`、`app/knowledge` 与旧
+`app.agents.scheduler` / `app.agents.workflow_engine` 回归。零调用门禁以 AST 真实 import 为准；架构测试中的
+历史路径字符串是负向样本，必须保留而不能为文本零命中删除。
 
 ## 开发铁律
 
@@ -68,7 +69,7 @@ entrypoint，route 对 ORM、旧 Service 和具体 Agent/LLM 的依赖已清除�
 4. **密钥禁止硬编码**：可存 `.env`（`app/core/config.py`）或 `sys_config`（系统配置页 UI 填写，`is_secret=true`）；app 经 `app/core/runtime_config.py` 覆盖层读取（sys_config 覆盖 .env）；list 接口对密钥脱敏、审计 detail 打码。**LLM 模型密钥走 `ai_provider` 卡片（「AI 配置」页填，list 只回 hint 末4位）**；embedding/飞书/TD 仍走 sys_config/.env
 5. **接口双校验**：所有接口必须有权限校验 + 参数校验；统一返回 `{code, msg, data}`
 6. **人工兜底**：权限、数据修改、核心决策代码必须人工审核；所有AI输出可编辑/驳回/终止
-7. **提交前**：后端 `ruff + mypy + pytest -m "not delivery_contract"`、前端 `npm run test + lint + build` 全绿；系统级部署契约由 CI 独立环境验证
+7. **提交前**：后端 `ruff + mypy + pytest -m "not delivery_contract"`、前端 `npm run test + lint + build` 全绿；兼容层退出后的基线为全量收集 707 项 Pytest；系统级部署契约由 CI 独立环境验证
 
 ## 常用命令
 

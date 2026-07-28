@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { parseRealtimeMessageEvent } from '../../../api/discussion'
-import { parseStreamEvent } from '../../../api/client'
+import { parseStreamEvent } from '../../../api/http'
 import {
   discussionWorkspaceApi,
   type ChannelWithUnread,

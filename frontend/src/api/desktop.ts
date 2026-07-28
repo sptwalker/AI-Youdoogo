@@ -8,7 +8,7 @@ import {
   TOKEN_KEY,
   type SseHandler,
   type SseRequestOptions,
-} from './client'
+} from './http'
 import type { Attachment } from './discussion'
 
 export type { Attachment } from './discussion'

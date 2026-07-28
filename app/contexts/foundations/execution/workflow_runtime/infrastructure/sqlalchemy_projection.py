@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,8 +35,32 @@ from app.models.workflow import (
     STEP_SUCCEEDED,
     STEP_WAITING_HUMAN,
     WorkflowRun,
+    WorkflowStep,
 )
 from app.platform.outbox.repository import utcnow
+
+
+def derive_run_status(steps: Sequence[WorkflowStep]) -> str:
+    """Derive aggregate status while preserving the established precedence rules."""
+    statuses = {step.status for step in steps}
+    if steps and statuses == {STEP_SUCCEEDED}:
+        return RUN_SUCCEEDED
+    if STEP_CANCELLED in statuses:
+        return RUN_CANCELLED
+    if STEP_FAILED in statuses:
+        return RUN_FAILED
+    if STEP_WAITING_HUMAN in statuses:
+        return RUN_WAITING_HUMAN
+    if STEP_RUNNING in statuses or STEP_SUCCEEDED in statuses:
+        return RUN_RUNNING
+    return RUN_QUEUED
+
+
+def _failed_error(steps: Sequence[WorkflowStep]) -> str:
+    return next(
+        (step.last_error for step in steps if step.status == STEP_FAILED and step.last_error),
+        "工作流步骤执行失败",
+    )
 
 
 async def refresh_run_status(
@@ -46,29 +71,13 @@ async def refresh_run_status(
 ) -> str:
     steps = await sqlalchemy_repository.list_steps(session, run.id)
     now = utcnow()
-    if steps and all(step.status == STEP_SUCCEEDED for step in steps):
-        status = RUN_SUCCEEDED
-    elif any(step.status == STEP_CANCELLED for step in steps):
-        status = RUN_CANCELLED
-    elif any(step.status == STEP_FAILED for step in steps):
-        status = RUN_FAILED
-    elif any(step.status == STEP_WAITING_HUMAN for step in steps):
-        status = RUN_WAITING_HUMAN
-    elif any(step.status == STEP_RUNNING for step in steps):
-        status = RUN_RUNNING
-    elif any(step.status == STEP_SUCCEEDED for step in steps):
-        status = RUN_RUNNING
-    else:
-        status = RUN_QUEUED
+    status = derive_run_status(steps)
     changed = run.status != status
     run.status = status
     if status in (RUN_SUCCEEDED, RUN_FAILED, RUN_CANCELLED):
         run.completed_at = now
     if status == RUN_FAILED:
-        run.error_msg = next(
-            (step.last_error for step in steps if step.status == STEP_FAILED and step.last_error),
-            "工作流步骤执行失败",
-        )
+        run.error_msg = _failed_error(steps)
     if changed:
         run.version += 1
         await sqlalchemy_repository.append_event(session, run, f"workflow.{status}")

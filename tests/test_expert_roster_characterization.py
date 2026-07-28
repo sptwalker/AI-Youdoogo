@@ -1,5 +1,6 @@
 """Characterize Expert roster, partial update, and source-change behavior."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -7,10 +8,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.workforce.expert_management import public as experts
 from app.models import Base
 from app.models.agent import AgentRole
 from app.platform.outbox.model import OutboxEvent
-from app.services import agent_role_service
 
 
 @pytest.fixture
@@ -25,25 +26,34 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def test_create_expert_commits_source_change_with_profile(db: AsyncSession) -> None:
-    expert = await agent_role_service.create_agent_role(
+    expert = await experts.create_expert(
         db,
         name="战略专家",
         prompt_template="分析战略",
+        duty=None,
+        model_role="daily",
+        department_id=None,
         tools=["knowledge_search", {"key": "data_query", "enabled": True}],
         permission_scope={"scope": "department", "depth": 2},
+        tier="member",
+        title="",
+        report_to_id=None,
     )
 
     event = (
         await db.execute(
             select(OutboxEvent).where(
-                OutboxEvent.aggregate_id == expert.id,
+                OutboxEvent.aggregate_id == expert.expert_id,
                 OutboxEvent.event_type == "environment.source.changed.v1",
             )
         )
     ).scalar_one()
     assert event.payload["source_type"] == "expert"
-    assert expert.permission_scope == {"scope": "department", "depth": 2}
-    assert expert.tools[1]["key"] == "data_query"
+    assert json.loads(expert.permission_scope_json) == {
+        "scope": "department",
+        "depth": 2,
+    }
+    assert json.loads(expert.tools_json)[1]["key"] == "data_query"
 
 
 async def test_roster_includes_inactive_but_excludes_deleted_and_personal(
@@ -67,7 +77,7 @@ async def test_roster_includes_inactive_but_excludes_deleted_and_personal(
     db.add_all([inactive, deleted, personal])
     await db.commit()
 
-    roster = await agent_role_service.list_agent_roles(db)
+    roster = await experts.list_expert_roster(db, include_personal=False)
 
     assert [expert.name for expert in roster] == ["停用专家"]
 
@@ -86,10 +96,18 @@ async def test_partial_update_ignores_empty_prompt_and_null_assignments(
     db.add(expert)
     await db.commit()
 
-    updated = await agent_role_service.update_agent_role(
+    updated = await experts.update_expert(
         db,
-        expert.id,
+        expert_id=expert.id,
+        name=None,
         prompt_template="",
+        duty=None,
+        model_role=None,
+        is_active=None,
+        permission_scope=None,
+        tools=None,
+        title=None,
+        tier=None,
         department_id=None,
         report_to_id=None,
     )

@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.agents.base as agent_runtime
 from app.contexts.business.proposal_management.application.contracts import (
     ProposalViewer,
     TaskResult,
@@ -25,18 +23,21 @@ from app.contexts.business.proposal_management.application.ports import (
     TaskCreationRequest,
 )
 from app.contexts.business.proposal_management.domain.models import Proposal
+from app.contexts.business.task_management import public as task_management
+from app.contexts.foundations.execution.agent_execution import (
+    public as agent_execution,
+)
+from app.contexts.foundations.governance.ai_quality import public as ai_quality
+from app.contexts.foundations.governance.audit_trail import public as audit_trail
+from app.contexts.foundations.workforce.expert_management import (
+    public as expert_management,
+)
 from app.models.agent import AgentRole
-from app.services import audit_service, reflection_service, task_service
+from app.platform.deterministic import UUIDIdentifier as PlatformUUIDIdentifier
 
 
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()
+class ProposalIdentifier(PlatformUUIDIdentifier):
+    """在通用标识符之上补充提案编号规则（本 Context 特有）。"""
 
     def new_proposal_code(self) -> str:
         return f"PROP-{uuid.uuid4().hex[:8].upper()}"
@@ -76,7 +77,9 @@ class LegacyExpertResearchAdapter:
         self._roles: dict[uuid.UUID, AgentRole] = {}
 
     async def find_expert(self, name: str) -> ExpertReference | None:
-        role = await agent_runtime.get_agent_role(self._session, name)
+        role = await expert_management.get_active_expert_record_by_name(
+            self._session, name
+        )
         if role is None:
             return None
         self._roles[role.id] = role
@@ -91,7 +94,7 @@ class LegacyExpertResearchAdapter:
         if role is None or role.is_delete or not role.is_active:
             raise ProposalExpertUnavailable()
 
-        record = await agent_runtime.run_agent(
+        record = await agent_execution.run_agent(
             self._session,
             role,
             task_type=request.task_type,
@@ -100,13 +103,15 @@ class LegacyExpertResearchAdapter:
             user_id=request.operator_id,
         )
         draft = record.output_content or record.error_msg or "（无产出）"
-        reflection = await reflection_service.reflect(
+        reflection = await ai_quality.review_output(
             self._session,
-            role,
-            output=draft,
-            task_context=request.user_message,
-            rubric=self._RUBRIC,
-            user_id=request.operator_id,
+            ai_quality.OutputReviewRequest(
+                expert_id=role.id,
+                output=draft,
+                task_context=request.user_message,
+                rubric=self._RUBRIC,
+                user_id=request.operator_id,
+            ),
         )
         conclusion = reflection.final_output
         if reflection.revised:
@@ -116,21 +121,23 @@ class LegacyExpertResearchAdapter:
         return ExpertResearchResult(conclusion=conclusion)
 
 
-class LegacyTaskCreationAdapter:
-    """Translate a plain Task request to the current Task compatibility API."""
+class PublishedTaskCreationAdapter:
+    """Translate a Proposal Task request to Task Management's published operation."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def create_task(self, request: TaskCreationRequest) -> TaskResult:
-        task = await task_service.create_task(
+        task = await task_management.create_task_in_transaction(
             self._session,
-            title=request.title,
-            task_type=request.task_type,
-            creator_id=request.creator_id,
-            priority=request.priority,
-            assignee_agent_id=request.assignee_agent_id,
-            payload=dict(request.payload),
+            task_management.CreateTaskRequest(
+                title=request.title,
+                task_type=request.task_type,
+                creator_id=request.creator_id,
+                priority=request.priority,
+                assignee_agent_id=request.assignee_agent_id,
+                payload=request.payload,
+            ),
         )
         return TaskResult(
             id=task.id,
@@ -147,19 +154,21 @@ class LegacyTaskCreationAdapter:
         )
 
 
-class LegacyAuditAdapter:
+class PublishedAuditAdapter:
     """Preserve best-effort audit evidence through the current audit facility."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def record(self, request: AuditRequest) -> None:
-        await audit_service.audit(
+        await audit_trail.append_audit_record(
             self._session,
-            actor_id=request.actor_id,
-            actor_role=request.actor_role,
-            action=request.action,
-            summary=request.summary,
-            target_type=request.target_type,
-            target_id=request.target_id,
+            audit_trail.AppendAuditRecordCommand(
+                actor_id=request.actor_id,
+                actor_role=request.actor_role,
+                action=request.action,
+                summary=request.summary,
+                target_type=request.target_type,
+                target_id=request.target_id,
+            ),
         )

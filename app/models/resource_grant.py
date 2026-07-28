@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, Index, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 # grantee 类型（docs 决策⑪：砍 role 级授权，只 user/agent/department）
 GRANTEE_USER = "user"

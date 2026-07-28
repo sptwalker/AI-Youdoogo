@@ -22,8 +22,8 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 from app.contexts.business.assistant_conversations.entrypoints import (  # noqa: E402
     operations as assistant_conversations,
 )
-from app.core.database import async_session_factory  # noqa: E402
 from app.models.system import SysUser  # noqa: E402
+from app.platform.database import async_session_factory  # noqa: E402
 
 
 def _principal(user: SysUser) -> Principal:

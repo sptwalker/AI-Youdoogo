@@ -15,8 +15,8 @@ import pytest
 
 from app.contexts.business.group_messaging.infrastructure import adapters
 from app.platform import realtime
+from app.platform import realtime as realtime_service
 from app.platform.realtime import redis_pubsub
-from app.services import realtime_service
 
 
 def test_channel_key() -> None:

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.business.task_management.contracts.tasks import TaskDecisionRecordedV1
 from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
-    SQLAlchemyTaskTransaction,
     task_decision_from_payload,
     task_decision_to_payload,
 )
@@ -20,9 +19,7 @@ from app.contexts.business.task_management.infrastructure.task_decisions import 
 from app.contexts.business.task_management.infrastructure.task_decisions import (
     task_decision_to_payload as extracted_task_decision_to_payload,
 )
-from app.contexts.business.task_management.infrastructure.transaction import (
-    SQLAlchemyTaskTransaction as ExtractedSQLAlchemyTaskTransaction,
-)
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
 class RecordingSession:
@@ -55,10 +52,9 @@ def test_sqlalchemy_adapter_reexports_extracted_task_decision_codec() -> None:
     assert task_decision_from_payload(task_decision_to_payload(event)) == event
 
 
-async def test_sqlalchemy_adapter_reexports_extracted_transaction() -> None:
-    assert SQLAlchemyTaskTransaction is ExtractedSQLAlchemyTaskTransaction
+async def test_task_transaction_commits_and_rolls_back() -> None:
     session = RecordingSession()
-    transaction = SQLAlchemyTaskTransaction(cast(AsyncSession, session))
+    transaction = SessionUnitOfWork(cast(AsyncSession, session))
 
     await transaction.commit()
     await transaction.rollback()

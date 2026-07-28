@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent, run_agent_stream
 from app.contexts.business.assistant_conversations.application.ports import (
     AgentExecutionPort,
     AssistantDirectoryPort,
@@ -19,16 +18,19 @@ from app.contexts.business.assistant_conversations.infrastructure.adapters impor
     AgentStream,
     KnowledgeAttachmentStorageAdapter,
     LegacyAgentExecutionAdapter,
-    LegacyConfigurationAdapter,
-    LegacyOrchestrationAdapter,
+    PublishedConfigurationAdapter,
     PublishedConversationArchiveAdapter,
+    PublishedOrchestrationAdapter,
     SQLAlchemyAssistantDirectoryAdapter,
-    SystemClock,
-    UUIDIdentifier,
 )
 from app.contexts.business.assistant_conversations.infrastructure.sqlalchemy_uow import (
     SQLAlchemyConversationUnitOfWork,
 )
+from app.contexts.foundations.execution.agent_execution.public import (
+    run_agent,
+    run_agent_stream,
+)
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_assistant_conversations_application(
@@ -44,14 +46,14 @@ def build_assistant_conversations_application(
     return AssistantConversationsApplication(
         uow_factory=lambda: SQLAlchemyConversationUnitOfWork(session),
         assistants=assistants or SQLAlchemyAssistantDirectoryAdapter(session),
-        configuration=LegacyConfigurationAdapter(session),
+        configuration=PublishedConfigurationAdapter(session),
         agents=agents
         or LegacyAgentExecutionAdapter(
             session,
             agent_stream=agent_stream or run_agent_stream,
             agent_runner=agent_runner or run_agent,
         ),
-        orchestration=LegacyOrchestrationAdapter(session),
+        orchestration=PublishedOrchestrationAdapter(session),
         archive_port=archive_port or PublishedConversationArchiveAdapter(session),
         attachment_storage=attachment_storage or KnowledgeAttachmentStorageAdapter(),
         clock=SystemClock(),

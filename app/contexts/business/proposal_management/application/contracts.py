@@ -22,6 +22,7 @@ class CreateProposalCommand:
     background: str
     plan: str
     creator_id: uuid.UUID
+    source_message_id: uuid.UUID | None = None
     benefit_risk: str | None = None
     priority: str = "normal"
     department_id: uuid.UUID | None = None

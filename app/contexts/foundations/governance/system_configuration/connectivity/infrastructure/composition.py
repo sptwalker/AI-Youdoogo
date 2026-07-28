@@ -1,6 +1,6 @@
-"""Composition for external connectivity probes."""
+"""Composition and execution for external connectivity probes."""
 
-from ..application.use_cases import TestExternalConnectivity
+from ..contracts import ConnectivityProbeResult
 from .adapters import (
     EmbeddingConnectivityProbe,
     FeishuConnectivityProbe,
@@ -9,12 +9,11 @@ from .adapters import (
 )
 
 
-def build_connectivity_test() -> TestExternalConnectivity:
-    return TestExternalConnectivity(
-        (
-            LLMConnectivityProbe(),
-            EmbeddingConnectivityProbe(),
-            FeishuConnectivityProbe(),
-            ThinkingDataConnectivityProbe(),
-        )
+async def probe_external_dependencies() -> tuple[ConnectivityProbeResult, ...]:
+    probes = (
+        LLMConnectivityProbe(),
+        EmbeddingConnectivityProbe(),
+        FeishuConnectivityProbe(),
+        ThinkingDataConnectivityProbe(),
     )
+    return tuple([await probe.probe() for probe in probes])

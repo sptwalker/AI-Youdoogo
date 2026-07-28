@@ -16,7 +16,7 @@ from app.contexts.foundations.integration.connector_management.application.contr
     UpdateConnector,
 )
 from app.contexts.foundations.integration.connector_management.entrypoints import operations
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.knowledge import DataSourceCreate, DataSourceUpdate
 

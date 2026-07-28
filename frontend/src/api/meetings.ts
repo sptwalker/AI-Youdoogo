@@ -1,5 +1,5 @@
 /** 会议 API（对应后端 app/api/v1/meetings.py）。 */
-import { request, sseRequest, type SseHandler, type SseRequestOptions } from './client'
+import { request, sseRequest, type SseHandler, type SseRequestOptions } from './http'
 
 export interface Meeting {
   id: string
@@ -30,6 +30,12 @@ export interface Resolution {
   create_time: string
 }
 
+export interface MeetingDetail {
+  meeting: Meeting
+  discussions: Discuss[]
+  resolutions: Resolution[]
+}
+
 export const MEETING_STATUS: Record<string, string> = {
   scheduled: '待开始',
   in_progress: '进行中',
@@ -40,9 +46,7 @@ export function listMeetings(): Promise<Meeting[]> {
   return request({ method: 'GET', url: '/meetings' })
 }
 
-export function getMeeting(
-  id: string,
-): Promise<{ meeting: Meeting; discussions: Discuss[]; resolutions: Resolution[] }> {
+export function getMeeting(id: string): Promise<MeetingDetail> {
   return request({ method: 'GET', url: `/meetings/${id}` })
 }
 

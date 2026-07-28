@@ -13,6 +13,8 @@ from app.contexts.foundations.execution.agent_execution.entrypoints.operations i
     execute_agent,
     get_execution_record,
     list_execution_records,
+    run_agent,
+    run_agent_stream,
 )
 
 __all__ = [
@@ -24,4 +26,6 @@ __all__ = [
     "execute_agent",
     "get_execution_record",
     "list_execution_records",
+    "run_agent",
+    "run_agent_stream",
 ]

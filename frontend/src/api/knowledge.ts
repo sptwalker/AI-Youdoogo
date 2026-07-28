@@ -1,5 +1,5 @@
 /** 知识库 API（对应后端 app/api/v1/knowledge.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface KnowledgeFile {
   id: string

@@ -1,5 +1,5 @@
 /** 协作治理 API（对应后端 app/api/v1/collab.py）。桌面复核 + 发起协作请求。 */
-import { request } from './client'
+import { request } from './http'
 
 export function reviewCollab(
   id: string,

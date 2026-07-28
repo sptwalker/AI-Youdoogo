@@ -9,13 +9,17 @@ from langchain_core.messages import AIMessageChunk
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.contexts.foundations.model_gateway import public as _mg_public
+from app.contexts.business.group_messaging.domain.models import MAX_FANOUT
+from app.contexts.business.group_messaging.entrypoints import operations as discussion_service
+from app.contexts.foundations.model_gateway import public as model_gateway
+from app.contexts.foundations.organization_structure.entrypoints import (
+    operations as organization,
+)
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.discussion import DiscussionChannel, DiscussionMessage
 from app.models.proposal import ProposalCard
 from app.models.system import COMPANY, SysDepartment
-from app.services import discussion_service, org_service
 
 
 class _FakeLLM:
@@ -36,7 +40,9 @@ Ctx = tuple[AsyncSession, DiscussionChannel, list[AgentRole]]
 
 @pytest.fixture(autouse=True)
 def _stub_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(
+        model_gateway, "get_llm_for_role", lambda *a, **k: _FakeLLM()
+    )
 
 
 @pytest.fixture
@@ -116,7 +122,7 @@ async def test_fanout_capped_at_three(
         s, channel.id, speaker_id=uuid.uuid4(), speaker_name="老板", content="看法？",
         mentioned_agent_ids=[a.id for a in agents],
     )
-    assert len(result["ai"]) == discussion_service.MAX_FANOUT == 3
+    assert len(result["ai"]) == MAX_FANOUT == 3
 
 
 async def test_promote_to_proposal(
@@ -153,11 +159,13 @@ async def test_create_node_auto_channel(
     root.path = f"/{root.id}/"
     await s.commit()
 
-    node = await org_service.create_node(s, name="平台运营部", parent_id=root.id)
+    node = await organization.create_department(
+        s, name="平台运营部", parent_id=root.id, code=None
+    )
     n = (
         await s.execute(
             select(func.count()).select_from(DiscussionChannel).where(
-                DiscussionChannel.department_id == node.id
+                DiscussionChannel.department_id == node.department_id
             )
         )
     ).scalar_one()

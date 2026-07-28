@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.agents.base as agent_runtime
 from app.agents.contracts import ExecutionContext
-from app.agents.skills import execute_all, fold_notes
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.business.meeting_management.application.contracts import TaskResult
 from app.contexts.business.meeting_management.application.ports import (
     AdvisoryEventKind,
@@ -24,25 +21,21 @@ from app.contexts.business.meeting_management.application.ports import (
     VoteAdvisoryRequest,
 )
 from app.contexts.business.meeting_management.domain.models import Meeting
+from app.contexts.business.task_management import public as task_management
 from app.contexts.foundations.access_control.contracts import PolicyDecision
+from app.contexts.foundations.execution.agent_execution import (
+    public as agent_execution,
+)
 from app.contexts.foundations.identity.contracts import Principal
+from app.contexts.foundations.workforce.expert_management import (
+    public as expert_management,
+)
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
-from app.services import task_service
 
 if TYPE_CHECKING:
     from app.models.agent import AgentRole
 
 EXPERT_NAME = "会商AI专家"
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()
 
 
 class AccessControlMeetingVisibilityPolicy:
@@ -102,7 +95,7 @@ class LegacyMeetingAdvisoryAdapter:
             expert_name=role.name,
         )
         record = None
-        async for item in agent_runtime.run_agent_stream(
+        async for item in agent_execution.run_agent_stream(
             self._session,
             role,
             task_type="meeting_discuss",
@@ -122,17 +115,17 @@ class LegacyMeetingAdvisoryAdapter:
         if record is None:
             raise RuntimeError("Agent stream completed without a result")
         content = record.output_content or record.error_msg or "（无产出）"
-        result = await execute_all(
+        result = await ToolDispatcher().dispatch_text(
             self._session,
             role,
             content,
-            user_id=request.operator_id,
-            execution_context=ExecutionContext(
+            ExecutionContext(
                 user_id=request.operator_id,
-                agent_runner=agent_runtime.run_agent,
+                agent_runner=agent_execution.run_agent,
             ),
+            user_id=request.operator_id,
         )
-        content = fold_notes(content, result)
+        content = result.fold_notes(content)
         yield AdvisoryStreamEvent(
             kind=AdvisoryEventKind.COMPLETED,
             expert_id=role.id,
@@ -161,7 +154,7 @@ class LegacyMeetingAdvisoryAdapter:
 
     async def vote(self, request: VoteAdvisoryRequest) -> AdvisoryResult:
         role = await self._expert_required()
-        record = await agent_runtime.run_agent(
+        record = await agent_execution.run_agent(
             self._session,
             role,
             task_type="meeting_vote",
@@ -185,7 +178,7 @@ class LegacyMeetingAdvisoryAdapter:
             f"{name}（{speaker_type}）：{content}"
             for name, speaker_type, content in request.discussions
         )
-        record = await agent_runtime.run_agent(
+        record = await agent_execution.run_agent(
             self._session,
             role,
             task_type="meeting_minutes",
@@ -203,26 +196,30 @@ class LegacyMeetingAdvisoryAdapter:
         )
 
     async def _expert_required(self) -> AgentRole:
-        role = await agent_runtime.get_agent_role(self._session, EXPERT_NAME)
+        role = await expert_management.get_active_expert_record_by_name(
+            self._session, EXPERT_NAME
+        )
         if role is None:
             raise RuleViolation("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
         return role
 
 
 class TaskManagementCreationAdapter:
-    """Translate Meeting-owned Task intent to Task Management's facade."""
+    """Translate Meeting-owned Task intent to Task Management's published operation."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def create_task(self, request: TaskCreationRequest) -> TaskResult:
-        task = await task_service.create_task(
+        task = await task_management.create_task_in_transaction(
             self._session,
-            title=request.title,
-            task_type=request.task_type,
-            creator_id=request.creator_id,
-            assignee_agent_id=request.assignee_agent_id,
-            payload=dict(request.payload),
+            task_management.CreateTaskRequest(
+                title=request.title,
+                task_type=request.task_type,
+                creator_id=request.creator_id,
+                assignee_agent_id=request.assignee_agent_id,
+                payload=request.payload,
+            ),
         )
         return TaskResult(
             id=task.id,

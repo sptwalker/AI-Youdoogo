@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>AI-Youdoogo 架构与工程读本</title>
+<style>
+:root{
+  --ink:#142033;--ink2:#34445a;--muted:#66768c;--faint:#91a0b3;
+  --paper:#e9eef5;--white:#fff;--soft:#f6f8fb;--line:#dbe3ed;--line2:#c5d1df;
+  --navy:#0b1b2e;--navy2:#142b45;--blue:#3157d5;--blue2:#eaf0ff;
+  --cyan:#087f8c;--cyan2:#e3f5f6;--green:#197647;--green2:#e8f6ee;
+  --amber:#9b5c09;--amber2:#fff2d9;--red:#a93232;--red2:#fdeaea;
+  --violet:#6d50b3;--violet2:#f0eafd;--shadow:0 25px 65px rgba(19,32,51,.16);
+  --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;overflow:hidden;font-family:var(--sans);color:var(--ink);background:radial-gradient(circle at 8% 0,rgba(49,87,213,.16),transparent 30rem),radial-gradient(circle at 100% 4%,rgba(8,127,140,.12),transparent 28rem),var(--paper)}
+#stage{position:fixed;inset:0;display:grid;place-items:center}
+.slide{position:relative;width:1280px;height:720px;padding:34px 46px 45px;display:none;flex-direction:column;overflow:hidden;background:var(--white);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);transform:scale(var(--k,1))}
+.slide.on{display:flex}.slide:before{content:"";position:absolute;left:0;top:0;bottom:0;width:7px;background:linear-gradient(180deg,var(--blue),#43c5c8 60%,#f3af56)}
+.dark{color:#fff;background:radial-gradient(circle at 88% 12%,rgba(67,197,200,.2),transparent 24rem),linear-gradient(135deg,#091725,#10273e 62%,#123747);border-color:#24415b}.dark:before{background:linear-gradient(180deg,#6ce3df,#6b87ff,#ffc06f)}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding-bottom:11px;border-bottom:1px solid var(--line)}.dark .head{border-color:rgba(255,255,255,.16)}
+.eyebrow{font-size:11px;line-height:1.2;letter-spacing:.16em;font-weight:850;color:var(--faint);text-transform:uppercase}.dark .eyebrow{color:#8bdedb}
+h1,h2,h3,p{margin-top:0}h1{margin-bottom:0;font-size:55px;line-height:1.1;letter-spacing:-1.2px}h2{margin:3px 0 0;font-size:29px;line-height:1.22;letter-spacing:-.4px}h3{margin-bottom:6px;font-size:15px;line-height:1.35}
+.no{flex:none;width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:var(--navy);color:#fff;font-weight:900;font-size:15px}.dark .no{background:#6adfdc;color:#0c2831}
+.body{flex:1;min-height:0;padding-top:12px;display:flex;flex-direction:column;gap:9px}.sub{margin-bottom:0;color:var(--muted);font-size:13.2px;line-height:1.5}.dark .sub{color:#b8c8d7}.small{font-size:11.4px;line-height:1.42;color:var(--muted)}.dark .small{color:#afc2d1}
+code{font-family:var(--mono);font-size:.88em;color:#294078;background:#eef2fb;border:1px solid #dce4f2;border-radius:5px;padding:.06em .28em;overflow-wrap:anywhere}.dark code{color:#dce8ff;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.17)}
+.tag{display:inline-flex;align-items:center;padding:3px 7px;border-radius:999px;border:1px solid currentColor;font-size:9.8px;font-weight:850;line-height:1.1;white-space:nowrap}.now{color:var(--green)}.target{color:var(--amber)}.guard{color:var(--red)}.info{color:var(--blue)}.ai{color:var(--violet)}
+.decision{display:grid;grid-template-columns:48px 1fr 48px 1.18fr;gap:7px}.decision .lab{display:grid;place-items:center;border-radius:9px;background:#edf1f6;color:var(--muted);font-size:10px;font-weight:900}.candidate,.selected{min-height:35px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#fff;font-size:11.5px}.candidate span{padding:3px 7px;border:1px solid var(--line);border-radius:6px;color:var(--ink2);font-weight:700}.selected{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:800}
+.cols{display:grid;grid-template-columns:1.42fr .58fr;gap:10px;flex:1;min-height:0}.cols.equal{grid-template-columns:1fr 1fr}.panel{border:1px solid var(--line);border-radius:13px;background:#fff;padding:11px 13px;min-height:0}.panel.soft{background:var(--soft)}.panel.cost{background:linear-gradient(145deg,#fff8e9,#fff0d1);border-color:#ecd29d}.panel.darkp{background:var(--navy);border-color:var(--navy);color:#fff}.panel h3{display:flex;align-items:center;gap:7px}.mark{display:inline-grid;place-items:center;width:21px;height:21px;border-radius:6px;background:var(--blue2);color:var(--blue);font-size:9px;font-weight:900}.cost .mark{background:#f2d69f;color:#805007}
+.grid{display:grid;gap:8px}.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+.box{border:1px solid var(--line);border-radius:10px;background:var(--soft);padding:9px 10px}.box.blue{background:var(--blue2);border-color:#cbd8ff}.box.cyan{background:var(--cyan2);border-color:#bde2e5}.box.green{background:var(--green2);border-color:#c4e5d2}.box.amber{background:var(--amber2);border-color:#ecd39f}.box.red{background:var(--red2);border-color:#f0c8c8}.box.violet{background:var(--violet2);border-color:#d9ccf0}.box.navy{background:var(--navy);border-color:var(--navy);color:#fff}.box b{display:block;margin-bottom:3px;font-size:12.2px}.box p{margin:0;font-size:10.9px;line-height:1.4;color:var(--muted)}.box.navy p{color:#b9c9d8}
+ul.list,ol.list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}ul.list li,ol.list li{position:relative;padding-left:15px;font-size:11.7px;line-height:1.42;color:var(--ink2)}ul.list li:before{content:"";position:absolute;left:1px;top:.57em;width:6px;height:6px;border-radius:2px;background:var(--blue)}ol.list{counter-reset:item}ol.list li{counter-increment:item;padding-left:22px}ol.list li:before{content:counter(item);position:absolute;left:0;top:.04em;width:16px;height:16px;border-radius:5px;display:grid;place-items:center;background:var(--navy);color:#fff;font-size:8px;font-weight:900}.dark ul.list li{color:#e4edf4}.dark ul.list li:before{background:#64dedb}
+.callout{border-left:4px solid var(--blue);border-radius:0 9px 9px 0;padding:7px 10px;background:var(--blue2);font-size:11.6px;line-height:1.42;color:#294077}.callout.red{border-color:var(--red);background:var(--red2);color:#792a2a}.callout.amber{border-color:var(--amber);background:var(--amber2);color:#714609}.callout.darkc{border-color:#65deda;background:var(--navy);color:#edf8f9}
+.ref{padding:6px 9px;border:1px dashed var(--line2);border-radius:8px;background:#fbfcfe;color:var(--muted);font-size:9.7px;line-height:1.38;overflow-wrap:anywhere}.ref b{color:var(--ink2)}
+.flow{display:flex;align-items:stretch}.node{flex:1;min-width:0;border:1px solid var(--line2);border-radius:9px;padding:8px;text-align:center;background:#fff}.node b{display:block;font-size:11.5px}.node span{display:block;margin-top:3px;font-size:9.8px;line-height:1.32;color:var(--muted)}.arr{flex:none;width:20px;display:grid;place-items:center;color:#99a7b9;font-weight:900}.node.blue{background:var(--blue2);border-color:#cad8ff}.node.cyan{background:var(--cyan2);border-color:#b8dfe2}.node.green{background:var(--green2);border-color:#bfe2ce}.node.amber{background:var(--amber2);border-color:#e9cd95}.node.red{background:var(--red2);border-color:#edc3c3}.node.violet{background:var(--violet2);border-color:#d8caef}
+table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:9px;overflow:hidden;font-size:9.9px;line-height:1.3}th,td{padding:5px 7px;text-align:left;vertical-align:top;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}th:last-child,td:last-child{border-right:0}tr:last-child td{border-bottom:0}th{background:#edf2f7;color:var(--ink2);font-weight:850}td{background:#fff;color:#4c5b70}
+.foot{position:absolute;left:46px;right:46px;bottom:15px;display:flex;justify-content:space-between;font-size:9.8px;color:var(--faint)}.pno{font-family:var(--mono);font-weight:850;letter-spacing:.08em}.dark .foot{color:#8fa5b7}
+.cover{justify-content:center;padding:0 74px}.cover-mark{display:flex;align-items:center;gap:9px;font-size:11px;letter-spacing:.14em;font-weight:850;color:#a7bbcc}.cover-mark:before{content:"";width:40px;height:4px;border-radius:3px;background:#66dfdc}.cover h1{margin-top:20px;font-size:57px}.cover-lead{margin:15px 0 0;max-width:70ch;font-size:17px;line-height:1.52;color:#d7e4ee}.phasepair{display:grid;grid-template-columns:1fr 42px 1fr;gap:10px;margin-top:22px}.phase{border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:12px 14px;background:rgba(255,255,255,.055)}.phase b{display:block;margin-bottom:5px;color:#70e1dd;font-size:10px;letter-spacing:.1em}.phase p{margin:0;font-size:12.3px;line-height:1.43;color:#e5edf4}.phasearrow{display:grid;place-items:center;color:#69dfdc;font-size:23px}.cover-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:15px}.cover-grid div{border-top:1px solid rgba(255,255,255,.17);padding-top:7px;color:#a9bccb;font-size:10.5px}.cover-grid b{display:block;color:#fff;font-size:11.5px;margin-bottom:2px}
+.map{display:grid;grid-template-columns:.88fr 1.12fr;gap:10px;flex:1}.mapcol{border:1px solid var(--line);border-radius:13px;padding:11px 12px;background:var(--soft)}.servicegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.service{border:1px solid #bddde0;border-radius:9px;padding:8px;background:#fff}.service b{font-size:11.5px}.service p{margin:3px 0 0;font-size:9.8px;line-height:1.32;color:var(--muted)}
+.states{display:flex;align-items:center;gap:4px}.states span{flex:1;border:1px solid var(--line);border-radius:7px;padding:5px 3px;text-align:center;background:#fff;font-size:9.7px;font-weight:800}.states i{font-style:normal;color:#a4b0bf}.states .a{background:var(--violet2);border-color:#dacdf0;color:#593f92}.states .h{background:var(--amber2);border-color:#e9cd94;color:#744706}
+.metricrow{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}.metric{border:1px solid var(--line);border-radius:9px;padding:6px 7px;background:#fff}.metric b{display:block;color:var(--blue);font-size:15px;line-height:1.1}.metric span{font-size:8.9px;line-height:1.2;color:var(--muted)}
+.timeline{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;flex:1}.tl{border:1px solid var(--line);border-radius:10px;padding:8px;background:#fff}.tl strong{display:block;font-size:11px}.tl .weeks{font-size:16px;font-weight:900;color:var(--blue);margin:4px 0}.tl p{margin:0;font-size:9.4px;line-height:1.32;color:var(--muted)}
+#progress{position:fixed;left:0;right:0;bottom:0;height:4px;background:rgba(19,32,51,.09);z-index:40}#progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--blue),#42c5c9);transition:width .2s}
+#hud{position:fixed;right:15px;bottom:12px;z-index:41;display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.92);font-size:11px;color:var(--muted)}#hud b{color:var(--ink)}#hud button{border:0;background:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0 3px}#hint{position:fixed;left:15px;bottom:13px;z-index:41;font-size:10px;color:#7f8d9f}
+#overview{position:fixed;inset:0;z-index:60;display:none;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:15px;align-content:start;padding:25px;overflow:auto;background:rgba(233,238,245,.98)}#overview.on{display:grid}.thumb{position:relative;aspect-ratio:16/9;border:1px solid var(--line2);border-radius:11px;overflow:hidden;background:#fff;cursor:pointer;box-shadow:0 7px 20px rgba(19,32,51,.08)}.thumb:hover{border-color:var(--blue)}.thumb .mini{display:flex!important;position:absolute;left:0;top:0;transform:scale(.2125)!important;transform-origin:top left;box-shadow:none;border-radius:0;pointer-events:none}.thumblabel{position:absolute;left:8px;right:8px;bottom:7px;padding:4px 7px;border-radius:7px;background:rgba(9,22,36,.84);color:#fff;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@page{size:1280px 720px;margin:0}@media print{body{overflow:visible;background:#fff}#stage{position:static;display:block}#progress,#hud,#hint,#overview{display:none!important}.slide{display:flex!important;position:relative;transform:none!important;border:0;border-radius:0;box-shadow:none;margin:0;page-break-after:always;break-after:page}}
+</style>
+</head>
+<body>
+<main id="stage">
+
+<!-- 01 -->
+<section class="slide dark cover" data-title="封面｜这是一份接手手册">
+  <div class="cover-mark">AI-YOUDOOGO · 架构与工程读本</div>
+  <h1>没人通读全部代码<br>凭什么敢跑业务</h1>
+  <p class="cover-lead">不汇报“做了多少”，只解释真实决策：什么风险触发这条规则，代码在哪里封堵，怎样验证它没失效，以及为此承担什么成本。</p>
+  <div class="phasepair">
+    <div class="phase"><b>阶段 A · 验证协同模式</b><p>现在是一个人机协同模式的验证项目，验证“AI 深度参与企业运转同时不失控”能否成立，底座已建成、业务闭环待打通。</p></div>
+    <div class="phasearrow">→</div>
+    <div class="phase"><b>阶段 B · 独立通用能力</b><p>接下来要把通用 AI 能力（模型网关 / 知识 / 专家 / 运行时）从业务里拆出去，因为业务和通用逻辑压在一个部署单元太重。</p></div>
+  </div>
+  <div class="cover-grid"><div><b>开发接手</b>知道改哪里、不能绕哪里</div><div><b>业务运营</b>知道 AI 到哪一步必须停</div><div><b>故障处理</b>知道怎样定位、止血、复现</div><div><b>平台拆分</b>知道什么条件没过就不拆</div></div>
+  <footer class="foot"><span>同一件事的两个阶段：先证明可控，再让能力可复用</span><span class="pno">01 / 21</span></footer>
+</section>
+
+<!-- 02 -->
+<section class="slide" data-title="全景图｜三类事实与四个平台">
+  <header class="head"><div><div class="eyebrow">ONLY “WHAT” PAGE</div><h2>全景图：先分清三类事实，再谈模块</h2></div><div class="no">02</div></header>
+  <div class="body">
+    <div class="map">
+      <div class="mapcol">
+        <h3>ai-youdoogo 业务核心：公司事实只能在这里生效</h3>
+        <div class="grid g3">
+          <div class="box blue"><b>业务事实</b><p>提案、任务、会议、协作；approved / accepted / confirmed 属于产品规则。</p></div>
+          <div class="box violet"><b>组织事实</b><p>8 位公司顾问 + 9 部门 9 位总监助理；CEO = 真人 admin，无 CEO Agent。</p></div>
+          <div class="box amber"><b>治理事实</b><p>用户角色、资源可见性、授权、审计与系统配置。</p></div>
+        </div>
+        <div class="callout" style="margin-top:8px"><strong>不要混淆：</strong>“这个专家属于哪个部门”是业务事实；“这次执行用哪个 Prompt / 模型 / Tool”是 AI 资产；“步骤跑到哪”是运行时事实。</div>
+        <h3 style="margin-top:9px">当前调用主链</h3>
+        <div class="flow"><div class="node"><b>业务用例</b><span>提案 / 任务 / 会议</span></div><div class="arr">→</div><div class="node violet"><b>专家执行</b><span>Prompt + Tool</span></div><div class="arr">→</div><div class="node cyan"><b>知识 / 模型</b><span>检索 + 推理</span></div><div class="arr">→</div><div class="node green"><b>运行留痕</b><span>状态 + 审计</span></div></div>
+      </div>
+      <div class="mapcol" style="background:#f1fafb;border-color:#bfdfe2">
+        <h3>通用 AI 能力：当前同部署，目标按所有权独立</h3>
+        <div class="servicegrid">
+          <div class="service"><b>Model Gateway · 8/10</b><p>模型卡、路由、用量、健康度、failover；禁止拥有业务 Prompt。</p></div>
+          <div class="service"><b>Knowledge · 7/10</b><p>文档、Chunk、索引版本、ACL、Search、来源；禁止拥有专家人格。</p></div>
+          <div class="service"><b>Expert · 6/10</b><p>ExpertRelease、Prompt、Skill、Tool、ExecutionRecord；不写业务库。</p></div>
+          <div class="service"><b>Workflow Runtime · 5/10</b><p>Run、Step、Lease、Retry、HumanWait；不理解任务卡和提案。</p></div>
+        </div>
+        <table style="margin-top:8px"><thead><tr><th>阶段</th><th>含义</th><th>判断标准</th></tr></thead><tbody><tr><td><span class="tag now">当前实现</span></td><td>模块化单体中的逻辑边界</td><td>依赖单向、规则可测、事实单写</td></tr><tr><td><span class="tag target">目标接续</span></td><td>满足门禁后逐个平台远程化</td><td>独立所有权、独立发布、独立失败</td></tr></tbody></table>
+        <div class="ref"><b>事实源：</b><code>docs/20-DDD领域边界与分层架构规范.md</code> · <code>docs/21-通用AI平台拆分架构与落地方案.html</code></div>
+      </div>
+    </div>
+  </div>
+  <footer class="foot"><span>全景图 · 后续每页只讲一个决策</span><span class="pno">02 / 21</span></footer>
+</section>
+
+<!-- 03 -->
+<section class="slide" data-title="贯穿线｜草稿、边界、验证、回退">
+  <header class="head"><div><div class="eyebrow">ONE OPERATING LINE</div><h2>贯穿全篇：AI 出草稿 · 人定边界 · 机器验证 · 留痕可回退</h2></div><div class="no">03</div></header>
+  <div class="body">
+    <div class="grid g4">
+      <div class="box violet"><b>1 · AI 出草稿</b><p>模型输出、预研结论、代码补丁都只是候选；不得直接等同于公司事实。</p></div>
+      <div class="box amber"><b>2 · 人定边界</b><p>人定义可见范围、状态终点、验收标准和高风险确认点。</p></div>
+      <div class="box blue"><b>3 · 机器验证</b><p>领域方法、数据库条件更新、类型、测试与 CI 共同拒绝越界。</p></div>
+      <div class="box green"><b>4 · 留痕可回退</b><p>记录 actor、trace、attempt、sources、model、Outbox；故障可重放或切回。</p></div>
+    </div>
+    <div class="cols equal">
+      <div class="panel">
+        <h3><span class="mark">业务</span>一条线如何落到三个状态机</h3>
+        <div class="states"><span class="a">draft</span><i>→</i><span class="a">researching</span><i>→</i><span class="a">reviewed</span><i>→</i><span class="h">approved / rejected<br>真人</span></div>
+        <div class="states" style="margin-top:6px"><span class="a">created</span><i>→</i><span class="a">dispatched</span><i>→</i><span class="a">executing</span><i>→</i><span class="a">reported<br>AI 上限</span><i>→</i><span class="h">accepted / rejected<br>真人</span></div>
+        <div class="states" style="margin-top:6px"><span>决议</span><i>→</i><span>人 / AI 参考票</span><i>→</i><span class="h">is_confirmed=true</span><i>→</i><span>一次 TaskCard</span></div>
+      </div>
+      <div class="panel darkp">
+        <h3><span class="mark">开发</span>同一条线如何变成人与 AI 的六次交接</h3>
+        <div class="flow"><div class="node amber"><b>1 · 人下任务契约</b><span>目标、范围、验收、禁区</span></div><div class="arr">→</div><div class="node violet"><b>2 · AI 侦察</b><span>现状证据、影响面、未知项</span></div><div class="arr">→</div><div class="node amber"><b>3 · 人定边界</b><span>权限、Writer、迁移、回退</span></div></div>
+        <div class="flow" style="margin-top:6px"><div class="node violet"><b>4 · AI 实现</b><span>代码、类型、测试、迁移</span></div><div class="arr">→</div><div class="node blue"><b>5 · 机器验证</b><span>行为、架构、覆盖率、对账</span></div><div class="arr">→</div><div class="node amber"><b>6 · 人验收</b><span>审关键面；决定合并与发布</span></div></div>
+        <div class="callout darkc" style="margin-top:7px">AI 一旦需要扩大需求、放宽权限、改变事实所有权、操作生产或执行不可逆迁移，就停止并把“选项 + 证据 + 代价”交回真人。</div>
+      </div>
+    </div>
+    <div class="ref"><b>读法：</b>后面每个决策都按“触发场景 → 选择 → 机制 → 验证 → 代价”展开。</div>
+  </div>
+  <footer class="foot"><span>贯穿线</span><span class="pno">03 / 21</span></footer>
+</section>
+
+<!-- 04 -->
+<section class="slide" data-title="决策 01｜AI 权限靠系统封堵">
+  <header class="head"><div><div class="eyebrow">DECISION 01 · EFFECTIVE ACTIONS</div><h2>AI 能干到什么程度：靠提示词约定，还是让越权路径不存在？</h2></div><div class="no">04</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>提示词提醒</span><span>人工事后检查</span></div><div class="lab">选择</div><div class="selected">系统性封堵：能力清单、身份、领域状态、运行时四层同时卡住</div></div>
+    <div class="cols">
+      <div class="panel">
+        <h3><span class="mark">WHY</span>模型可能忽略提示词；代码必须拒绝非法 actor 和非法迁移</h3>
+        <table><thead><tr><th>层</th><th>当前落地</th><th>越权时发生什么</th></tr></thead><tbody>
+          <tr><td>能力层</td><td><code>app/agents/skill_registry.py</code> 只注册协作、交付、取数等能力；approve / accept / confirm 不注册</td><td>ToolDispatcher 找不到 handler，执行被拒绝</td></tr>
+          <tr><td>身份层</td><td><code>app/api/deps.py::require_human</code>；AI 经 <code>run_agent</code> 内部运行，不持 JWT</td><td>生效 HTTP 接口必须先解析真人 Bearer Token</td></tr>
+          <tr><td>领域层</td><td><code>Proposal.record_human_review()</code> 只接受 reviewed；<code>Resolution.confirm()</code> 要求 HUMAN actor</td><td>抛领域错误，不写 approved / confirmed</td></tr>
+          <tr><td>运行时</td><td>非自动 capability 标红线，步骤进入 <code>waiting_human</code></td><td>Worker 不继续，等真人 decision event</td></tr>
+        </tbody></table>
+        <div class="grid g2" style="margin-top:7px"><div class="box red"><b>新增生效动作时</b><p>先建领域方法并要求 USER Principal；再加 HumanUser route；最后写 AI actor 失败测试。不要先把工具注册给 Agent。</p></div><div class="box green"><b>验证证据</b><p><code>tests/test_proposals.py</code> · <code>test_tasks.py</code> · <code>test_meetings.py</code> · <code>test_durable_workflow.py</code></p></div></div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>高风险流程会停住，真人确认成为显式吞吐瓶颈。</li><li>状态、接口、审计和测试代码更多。</li><li>误判红线会让流程“不够自动”，但失败可见且可修；越权则不可接受。</li></ul><div class="callout red" style="margin-top:8px"><strong>红线口径：</strong>AI 只有建议 / 分析 / 辅助执行权；提案终态、任务验收、会议确认只由真人写。</div></aside>
+    </div>
+    <div class="ref"><b>关键源码：</b><code>app/api/deps.py:51</code> · <code>proposal_management/domain/models.py</code> · <code>meeting_management/domain/models.py</code> · <code>work_planning/application/use_cases.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 01 · 生效权</span><span class="pno">04 / 21</span></footer>
+</section>
+
+<!-- 05 -->
+<section class="slide" data-title="决策 02｜默认可见与机密减法隔离">
+  <header class="head"><div><div class="eyebrow">DECISION 02 · VISIBILITY</div><h2>权限默认全开还是全关：当前选择到底怎样计算？</h2></div><div class="no">05</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>默认全关逐份授权</span><span>默认可见机密收紧</span></div><div class="lab">选择</div><div class="selected">登录用户默认可见非机密库；机密按部门祖先 + 显式授权做减法隔离</div></div>
+    <div class="cols">
+      <div class="panel">
+        <h3><span class="mark">RULE</span><code>visible_knowledge_base_ids()</code> 的真实分支</h3>
+        <div class="grid g4">
+          <div class="box green"><b>非机密、非个人库</b><p>所有登录用户可见，不要求同部门。</p></div>
+          <div class="box amber"><b>机密部门库</b><p>仅本部门祖先链范围内可见。</p></div>
+          <div class="box violet"><b>个人库</b><p>只对 owner_agent_id 对应的 AI 可见。</p></div>
+          <div class="box blue"><b>显式授权</b><p>user / agent / department，可过期；与默认范围取并集。</p></div>
+        </div>
+        <table style="margin-top:7px"><thead><tr><th>容易误读的点</th><th>实际规则</th><th>接手动作</th></tr></thead><tbody>
+          <tr><td>AI 与真人范围相同？</td><td>不同。AI 注入只看公司库 + 本部门库 + 本人私库，不看其他部门普通库</td><td>改可见性时同时跑真人与 Agent 两组测试</td></tr>
+          <tr><td>grant 能给审批权？</td><td>不能。grant 只授 read / write / admin 的资源访问，不授业务生效权</td><td>角色判断仍走 <code>require_roles</code> / domain actor</td></tr>
+          <tr><td>无权资源返回 403？</td><td>行级策略可 conceal，统一表现为“资源不存在”，避免泄漏存在性</td><td>列表过滤与详情守卫必须使用同一 policy</td></tr>
+        </tbody></table>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价与前提</h3><ul class="list"><li>漏标机密比漏授权更危险，知识库创建流程必须承担数据分级。</li><li>高信任小团队适用；组织变大或法规收紧时要重新评估默认策略。</li><li>显式授权要检查过期、部门祖先和撤销审计。</li></ul><div class="callout amber" style="margin-top:8px"><strong>检查清单：</strong>新知识类型是否有 scope？是否允许 personal？机密规则对 AI 与真人是否一致？过期授权是否被排除？</div></aside>
+    </div>
+    <div class="ref"><b>源码 / 测试：</b><code>app/models/knowledge.py</code> · <code>wiki_management/infrastructure/visibility.py</code> · <code>access_control/application/use_cases.py</code> · <code>tests/test_access_control_application.py</code> · <code>tests/test_agent_knowledge.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 02 · 可见性</span><span class="pno">05 / 21</span></footer>
+</section>
+
+<!-- 06 -->
+<section class="slide" data-title="决策 03｜PostgreSQL 是长任务真相源">
+  <header class="head"><div><div class="eyebrow">DECISION 03 · DURABLE STATE</div><h2>长任务真相源放哪：为什么不是内存，也不是 Redis？</h2></div><div class="no">06</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>内存队列</span><span>Redis 状态</span><span>PostgreSQL</span></div><div class="lab">选择</div><div class="selected">PostgreSQL 保存 Run / Step / Lease / Event；Outbox 与业务写同事务</div></div>
+    <div class="cols">
+      <div class="panel">
+        <h3><span class="mark">MECH</span>一次可靠推进的完整顺序</h3>
+        <div class="flow"><div class="node blue"><b>1 写业务状态</b><span>Run / Step / Task projection</span></div><div class="arr">→</div><div class="node cyan"><b>2 enqueue Outbox</b><span>同一 DB 事务，dedupe_key 唯一</span></div><div class="arr">→</div><div class="node amber"><b>3 Worker claim</b><span>PostgreSQL SKIP LOCKED + lease</span></div><div class="arr">→</div><div class="node green"><b>4 complete / fail</b><span>owner 条件更新；失败延迟再试</span></div></div>
+        <table style="margin-top:7px"><thead><tr><th>候选</th><th>故障时丢什么</th><th>为什么不做真相源</th></tr></thead><tbody><tr><td>内存</td><td>进程重启后队列、执行位置、等待人状态全部丢失</td><td>无法回答“任务到底做到哪”</td></tr><tr><td>Redis</td><td>可持久化但与业务数据库事务分离</td><td>容易出现业务写成功、事件没入队或反之；更适合缓存 / 协调</td></tr><tr><td><strong>PostgreSQL</strong></td><td>进程可死，状态仍在；过期 lease 可恢复</td><td><strong>选中：</strong>事务、约束、审计和条件更新在一个真相源内</td></tr></tbody></table>
+        <div class="callout" style="margin-top:7px"><span class="tag now">当前实现</span> Outbox 有持久化、租约、重试和恢复，但 handler 仍在同一进程消费；不能称作跨服务 Event Bus。</div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>数据库多出轮询、索引、租约续期和历史清理压力。</li><li>必须监控 pending 数、最老 available_at、失败终态和 lease 过期率。</li><li>物理拆分后仍要补 Relay / Inbox / DLQ 与跨服务重放。</li></ul><div class="callout red" style="margin-top:8px"><strong>禁止：</strong>把 Redis 队列当唯一进度；把外部调用放在未提交事务里长时间占连接；成功写业务后再“尽力发消息”。</div></aside>
+    </div>
+    <div class="ref"><b>源码：</b><code>app/platform/outbox/model.py</code> · <code>repository.py</code> · <code>workflow_runtime/infrastructure/sqlalchemy_repository.py</code> · <code>sqlalchemy_recovery.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 03 · 长任务真相源</span><span class="pno">06 / 21</span></footer>
+</section>
+
+<!-- 07 -->
+<section class="slide" data-title="决策 04｜幂等键、租约与 CAS">
+  <header class="head"><div><div class="eyebrow">DECISION 04 · RETRY</div><h2>重试怎么不重复副作用：具体靠哪三道栅栏？</h2></div><div class="no">07</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>超时就再调一次</span><span>全局锁</span><span>幂等 + lease + CAS</span></div><div class="lab">选择</div><div class="selected">重复投递允许发生，但同一业务效果只允许生效一次</div></div>
+    <div class="cols">
+      <div class="panel">
+        <div class="grid g3">
+          <div class="box blue"><b>幂等键</b><p>Outbox <code>dedupe_key</code> 唯一；冲突时返回既有事件。副作用键建议 <code>execution:step:tool-index</code>。</p></div>
+          <div class="box cyan"><b>租约</b><p><code>lease_owner + lease_until</code>；只有当前 owner 可续租、complete、fail。Worker 死亡后过期可重领。</p></div>
+          <div class="box green"><b>CAS 条件更新</b><p>用 <code>version == expected</code> 和 <code>rowcount == 1</code> 防止旧 Worker 覆盖新状态。</p></div>
+        </div>
+        <table style="margin-top:7px"><thead><tr><th>现场</th><th>系统判定</th><th>处理</th><th>是否消耗 retry</th></tr></thead><tbody>
+          <tr><td>重复点击 / 重复投递</td><td>相同 dedupe / idempotency key</td><td>返回已存在结果</td><td>否</td></tr>
+          <tr><td>另一个 Worker 正在跑</td><td>有效 lease，claim 得到 <code>busy</code></td><td>Outbox <code>defer()</code>；attempts 减回去</td><td><strong>否</strong></td></tr>
+          <tr><td>Worker 崩溃</td><td>lease 过期</td><td>新 Worker reclaim；attempt + 1</td><td>是</td></tr>
+          <tr><td>旧 Worker 晚到回执</td><td>owner / attempt / version 不匹配</td><td>finalize 被判 stale，拒绝写入</td><td>不再覆盖新状态</td></tr>
+          <tr><td>真实外部失败</td><td>异常且当前 owner 有效</td><td>fail → pending 延迟重试或 failed 终态</td><td>是</td></tr>
+        </tbody></table>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>每个副作用都要定义稳定业务键，不能用随机 request_id 冒充。</li><li>lease 秒数太短会重复执行，太长会拖慢恢复；需 heartbeat。</li><li>外部系统若不支持幂等，必须加本地执行记录和结果查询。</li></ul><div class="callout amber" style="margin-top:8px"><strong>接手规则：</strong>看到 retry 先问“这个调用是否幂等”；答不出来就不能自动重试。</div></aside>
+    </div>
+    <div class="ref"><b>源码 / 测试：</b><code>outbox/repository.py::enqueue,defer,fail</code> · <code>workflow_runtime/infrastructure/step_leases.py</code> · <code>step_completion.py</code> · <code>tests/test_durable_workflow.py</code> · <code>test_discussion_archive_outbox.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 04 · 重试与并发</span><span class="pno">07 / 21</span></footer>
+</section>
+
+<!-- 08 -->
+<section class="slide" data-title="决策 05｜一个事实一个写入者">
+  <header class="head"><div><div class="eyebrow">DECISION 05 · SINGLE WRITER</div><h2>一份数据允许几处写：为什么 AI 写代码后这条变成生命线？</h2></div><div class="no">08</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>共享 ORM 谁都能改</span><span>一个事实一个 Context writer</span></div><div class="lab">选择</div><div class="selected">读可以共享投影；持久化写入只属于拥有该事实的 Context</div></div>
+    <div class="cols">
+      <div class="panel">
+        <h3><span class="mark">WHY</span>多写者让业务规则藏在“顺手 UPDATE”里，AI 会把最近路径当正确路径</h3>
+        <table><thead><tr><th>事实</th><th>唯一 Owner</th><th>其他模块怎么用</th><th>禁止</th></tr></thead><tbody>
+          <tr><td>Proposal 状态与转换记录</td><td>proposal_management</td><td>调用公开 operations / 保存 task_id 引用</td><td>route 或 workflow 直接改 proposal ORM</td></tr>
+          <tr><td>TaskCard 状态</td><td>task_management</td><td>命令 + 进度投影</td><td>Runtime 反向写 TaskCard</td></tr>
+          <tr><td>Workflow Run / Step / Lease</td><td>workflow_runtime</td><td>业务消费 progress event</td><td>业务服务直接推进 Step</td></tr>
+          <tr><td>Provider 卡片</td><td>ai_provider_management</td><td>发布 snapshot，同步 runtime cache</td><td>业务用例读取明文 key</td></tr>
+          <tr><td>OutboxEvent</td><td>platform.outbox</td><td>在调用方事务中 enqueue</td><td>各 Context 自造不同 retry 语义</td></tr>
+        </tbody></table>
+        <div class="grid g2" style="margin-top:7px"><div class="box green"><b>机器守卫</b><p><code>test_migrated_orm_models_have_one_persistent_context_writer</code> 扫描 infrastructure 中 add / delete / update / 属性写入，发现重复 writer 即失败。</p></div><div class="box blue"><b>新增字段的正确顺序</b><p>找 Owner → 加领域规则 / command → adapter 持久化 → 公开 entrypoint → 消费方改为调用契约 → 加越界测试。</p></div></div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>跨 Context 改数据要走用例或事件，代码路径更长。</li><li>查询可能维护本地投影并接受最终一致。</li><li>Owner 划错会形成官僚式绕路，因此先定领域词义，再动目录。</li></ul><div class="callout red" style="margin-top:8px"><strong>Code review 一票否决：</strong>HTTP route import ORM；Context A import Context B 的 infrastructure；平台层 import 业务代码。</div></aside>
+    </div>
+    <div class="ref"><b>守卫：</b><code>tests/test_architecture_boundaries.py</code> 中 single writer、Context inward dependency、HTTP route、platform independence 断言。</div>
+  </div>
+  <footer class="foot"><span>决策 05 · 数据所有权</span><span class="pno">08 / 21</span></footer>
+</section>
+
+<!-- 09 -->
+<section class="slide" data-title="决策 06｜混合检索与资料不足">
+  <header class="head"><div><div class="eyebrow">DECISION 06 · KNOWLEDGE QUALITY</div><h2>怎么让模型答得准：不要先换大模型，先修“找资料”这一步</h2></div><div class="no">09</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>单臂向量</span><span>向量 + 关键词 + RRF</span><span>全量交给模型猜</span></div><div class="lab">选择</div><div class="selected">双臂并发召回 → RRF 融合 → 可选 rerank → 引用；无命中不调用模型</div></div>
+    <div class="cols">
+      <div class="panel">
+        <div class="flow"><div class="node blue"><b>向量臂</b><span>pgvector cosine；语义近义</span></div><div class="arr">+</div><div class="node cyan"><b>关键词臂</b><span>pg_trgm；专名 / 型号 / 编码</span></div><div class="arr">→</div><div class="node violet"><b>RRF</b><span>Σ 1/(k+rank)，跨臂去重</span></div><div class="arr">→</div><div class="node amber"><b>可选 rerank</b><span>失败退回 RRF 顺序</span></div><div class="arr">→</div><div class="node green"><b>Answer</b><span>sources + [编号] 引用</span></div></div>
+        <table style="margin-top:7px"><thead><tr><th>开关 / 参数</th><th>默认 / 语义</th><th>故障行为</th></tr></thead><tbody>
+          <tr><td><code>retrieval_hybrid_enabled</code></td><td>开；关时只跑向量臂</td><td>可快速止血回旧行为</td></tr>
+          <tr><td><code>retrieval_candidate_n</code></td><td>每臂候选量，默认 max(top_k×4,20)</td><td>过小漏召回，过大增延迟</td></tr>
+          <tr><td><code>retrieval_rrf_k</code></td><td>默认 60；越小越强调头部</td><td>必须用固定评测集调，不凭感觉</td></tr>
+          <tr><td><code>retrieval_rerank_enabled/pool</code></td><td>默认关 / pool 20</td><td>rerank 异常不阻断，沿用融合序</td></tr>
+          <tr><td>关键词臂异常</td><td>内部捕获并返回 []</td><td>退化为纯向量；主向量臂异常则上抛</td></tr>
+          <tr><td>零命中</td><td>不调用 LLM</td><td>固定答“资料不足，无法回答”</td></tr>
+        </tbody></table>
+        <div class="callout amber" style="margin-top:6px"><strong>必须区分：</strong>通用知识问答零命中会拒答；Agent 知识注入当前在检索故障时允许“无资料继续执行”。两个语义不能写成同一承诺。</div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>需要 pgvector + pg_trgm、参数配置、评测集和零结果监控。</li><li>引用内容要落 <code>AgentTaskRecord.sources</code>，存储与审计成本增加。</li><li>A3 / A5 盒子暴露的单臂短板要进入回归集，不能只做演示样例。</li></ul><div class="callout" style="margin-top:8px"><strong>验收：</strong>双臂共同命中排前；同 chunk 去重；关键词失败仍返回向量；不可见库为空时不触发任何召回。</div></aside>
+    </div>
+    <div class="ref"><b>源码 / 测试：</b><code>knowledge_retrieval/infrastructure/sqlalchemy_retrieval.py</code> · <code>tests/test_retrieval_hybrid.py</code> · <code>tests/test_agent_knowledge.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 06 · 检索质量</span><span class="pno">09 / 21</span></footer>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-title="决策 07｜岗位卡与提示词分层">
+  <header class="head"><div><div class="eyebrow">DECISION 07 · EXPERT CONFIGURATION</div><h2>几十个 AI 岗位怎么管：复制 Agent 代码，还是管理可发布资产？</h2></div><div class="no">10</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>每岗位一段程序</span><span>一条万能 Prompt</span><span>岗位卡 + 分层 Prompt</span></div><div class="lab">选择</div><div class="selected">岗位配置化；红线、岗位、能力、术语按固定顺序组装</div></div>
+    <div class="cols">
+      <div class="panel">
+        <h3><span class="mark">ORDER</span>当前 Prompt 组装顺序，顺序本身就是契约</h3>
+        <div class="flow"><div class="node red"><b>全局红线</b><span><code>agent_global_prompt</code>；读取失败回退内置</span></div><div class="arr">→</div><div class="node violet"><b>岗位模板</b><span>Expert / AgentRole.prompt_template</span></div><div class="arr">→</div><div class="node blue"><b>能力段</b><span>只注入已启用 skill 的用法</span></div><div class="arr">→</div><div class="node cyan"><b>业务术语</b><span>语义字典 term_prompt</span></div></div>
+        <table style="margin-top:7px"><thead><tr><th>字段</th><th>解决的问题</th><th>允许值 / 当前规则</th></tr></thead><tbody>
+          <tr><td><code>tier</code></td><td>组织层级与汇报关系</td><td>exec / director / member</td></tr>
+          <tr><td><code>model_role</code></td><td>模型成本与推理档位</td><td>daily / reasoning；与 tier 正交</td></tr>
+          <tr><td><code>tools</code></td><td>该岗位能看见哪些能力</td><td>只从注册表取；能力还有独立 feature flag</td></tr>
+          <tr><td><code>permission_scope</code></td><td>额外声明</td><td>不替代资源层最终鉴权</td></tr>
+          <tr><td><code>is_seed</code></td><td>保护组织种子</td><td>8 顾问 + 9 部门助理；无 CEO Agent</td></tr>
+        </tbody></table>
+        <div class="grid g2" style="margin-top:6px"><div class="box amber"><b>成本纪律</b><p>member 默认 daily；只有会议深度分析等明确场景才选 reasoning。</p></div><div class="box green"><b>修改步骤</b><p>改配置 → 跑固定评测 → 小范围应用 → 看失败率 / 成本 → 再成为默认；不要直接改全局前缀上线。</p></div></div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>Prompt 和岗位卡变成生产资产，需要权限、版本、评测和回滚。</li><li>全局前缀一处改会影响所有岗位，错误半径更大。</li><li>当前岗位卡可编辑；拆到 Expert Platform 后应发布不可变 ExpertRelease。</li></ul><div class="callout red" style="margin-top:8px"><strong>不要做：</strong>把部门级别直接绑定 reasoning；把 Tool 权限只写在 Prompt；在每个 Agent 文件复制公司红线。</div></aside>
+    </div>
+    <div class="ref"><b>源码 / 测试：</b><code>agent_execution/application/prompts.py</code> · <code>app/agents/runtime_adapters.py</code> · <code>expert_management/domain/models.py</code> · <code>tests/test_audit_config.py</code> · <code>test_agent_roles.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 07 · 专家资产</span><span class="pno">10 / 21</span></footer>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-title="决策 08｜模型卡片与 failover">
+  <header class="head"><div><div class="eyebrow">DECISION 08 · MODEL PROVIDERS</div><h2>模型供应商怎么接：为什么“无卡片就报错”比静默兜底安全？</h2></div><div class="no">11</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>业务代码直接读 .env</span><span>固定单供应商</span><span>模型卡 + 同档候选链</span></div><div class="lab">选择</div><div class="selected">数据库模型卡是真源；主用优先、同档 failover；运行时不回退 .env</div></div>
+    <div class="cols">
+      <div class="panel">
+        <div class="flow"><div class="node"><b>role_key</b><span>default / meeting_expert</span></div><div class="arr">→</div><div class="node violet"><b>tier</b><span>daily / reasoning</span></div><div class="arr">→</div><div class="node blue"><b>active cards</b><span>is_primary 置顶</span></div><div class="arr">→</div><div class="node amber"><b>health rank</b><span>熔断中的卡片沉底</span></div><div class="arr">→</div><div class="node green"><b>FallbackChatModel</b><span>尝试上限 + 总墙钟预算</span></div></div>
+        <table style="margin-top:7px"><thead><tr><th>场景</th><th>当前语义</th><th>为什么</th></tr></thead><tbody>
+          <tr><td>同档首张卡</td><td>自动主用；设新主用时同档互斥</td><td>路由确定且可审计</td></tr>
+          <tr><td>主卡禁用 / 删除</td><td>同档 active sibling 自动升主用</td><td>减少人工恢复步骤</td></tr>
+          <tr><td>同档无卡片</td><td>抛 <code>NoAvailableProviderError</code></td><td>宁可显式不可用，不偷偷读遗留密钥</td></tr>
+          <tr><td>首次部署且库内无卡</td><td>可把 DeepSeek env 显式种成 daily + reasoning 两张卡，且幂等</td><td>这是迁移步骤，不是运行时兜底</td></tr>
+          <tr><td>非流式失败 / 输出校验失败</td><td>在预算内试下一候选</td><td>调用方不感知供应商</td></tr>
+          <tr><td>流式已吐出 token 后失败</td><td>不能切候选，直接上抛</td><td>重新生成会拼接两份不一致内容</td></tr>
+        </tbody></table>
+        <div class="callout" style="margin-top:6px"><strong>业务代码规则：</strong>只传语义角色或 model policy，不写 provider 名，不创建 <code>BaseChatModel</code>，不读取 API Key。</div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>要管理加密、脱敏、连通性测试、健康度、配额和预算。</li><li>供应商输出并不等价，failover 仍需固定评测与格式校验。</li><li>卡片状态同步到进程缓存，变更后必须验证 runtime 已刷新。</li></ul><div class="callout amber" style="margin-top:8px"><strong>排障顺序：</strong>是否有卡 → 是否 active → 是否同档 → API Key 是否设置 → 最近 test 状态 → 熔断状态 → 尝试/时间预算。</div></aside>
+    </div>
+    <div class="ref"><b>源码 / 测试：</b><code>app/llm/roles.py</code> · <code>factory.py</code> · <code>fallback.py</code> · <code>ai_provider_management</code> · <code>tests/test_llm_gateway.py</code> · <code>test_ai_provider.py</code></div>
+  </div>
+  <footer class="foot"><span>决策 08 · 模型网关</span><span class="pno">11 / 21</span></footer>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-title="决策 09｜架构规则必须能失败">
+  <header class="head"><div><div class="eyebrow">DECISION 09 · EXECUTABLE ARCHITECTURE</div><h2>4.6 万行后怎么不越界：评审记忆不够，规则必须进 CI</h2></div><div class="no">12</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>靠文档提醒</span><span>靠资深同事逐 PR 检查</span><span>静态架构测试</span></div><div class="lab">选择</div><div class="selected"><code>tests/test_architecture_boundaries.py</code> 让错误依赖在合并前失败</div></div>
+    <div class="metricrow"><div class="metric"><b>665</b><span>app 文件<br>46,215 行</span></div><div class="metric"><b>114</b><span>frontend/src<br>12,069 行</span></div><div class="metric"><b>106</b><span>tests 文件<br>20,464 行</span></div><div class="metric"><b>683</b><span>非 delivery_contract 测试</span></div><div class="metric"><b>39</b><span>Alembic 迁移</span></div><div class="metric"><b>88%</b><span>coverage fail_under</span></div></div>
+    <div class="cols">
+      <div class="panel">
+        <table><thead><tr><th>测试断言</th><th>挡住的具体问题</th><th>失败后怎么改</th></tr></thead><tbody>
+          <tr><td>application import graph 无环</td><td>包 A→B→A，启动副作用和改动扩散</td><td>抽纯契约 / Port，composition 放 bootstrap</td></tr>
+          <tr><td>Context 依赖向内</td><td>domain 依赖 application / infrastructure；跨 Context import 内部层</td><td>通过对方公开 entrypoint / contract</td></tr>
+          <tr><td>platform 不依赖业务</td><td>技术底座带入 proposal / task 等产品概念</td><td>把业务 adapter 移到 Context infrastructure</td></tr>
+          <tr><td>domain 不依赖框架</td><td>领域规则 import FastAPI / SQLAlchemy / Redis / HTTP</td><td>改为纯值、端口和领域错误</td></tr>
+          <tr><td>HTTP route 不 import ORM / infrastructure</td><td>路由直接查表、写状态，绕过用例</td><td>route 只做鉴权、DTO、调用公开 operation</td></tr>
+          <tr><td>每个 ORM 只有一个 Context writer</td><td>同一事实多处写，规则漂移</td><td>保留一个 Owner，其他改为 command / event / projection</td></tr>
+        </tbody></table>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">LIMIT</span>代价与局限</h3><ul class="list"><li>静态 import 测试看不到所有运行时耦合，仍需行为测试和故障演练。</li><li>规则遗漏不会自动出现；每次真实越界都要补成新断言。</li><li>coverage 88% 只是最低线，不证明状态机、权限和幂等正确。</li><li>架构测试会拒绝短期“顺手直连”，开发速度在局部会变慢。</li></ul><div class="callout red" style="margin-top:7px"><strong>失败处理：</strong>先理解断言保护的所有权，不要把路径加进 allowlist 让 CI 变绿。</div></aside>
+    </div>
+    <div class="ref"><b>执行：</b><code>uv run --frozen pytest -q -m "not delivery_contract"</code>；架构守卫依赖 <code>scripts/import_graph.py</code>。</div>
+  </div>
+  <footer class="foot"><span>决策 09 · 可执行架构</span><span class="pno">12 / 21</span></footer>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-title="决策 10｜人机开发采用六步交接协议">
+  <header class="head"><div><div class="eyebrow">DECISION 10 · HUMAN–AI DEVELOPMENT</div><h2>人和 AI 怎么一起开发：六次有证据的交接，不是一句“帮我写完”</h2></div><div class="no">13</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>AI 自主做完，人兜底</span><span>人逐行遥控 AI</span><span>契约化交接</span></div><div class="lab">选择</div><div class="selected">人掌握意图与生效决定；AI 在受限工作区内侦察、实现、验证和修正</div></div>
+    <div class="cols" style="grid-template-columns:1.48fr .52fr">
+      <div class="panel">
+        <h3><span class="mark">LOOP</span>一次开发任务的交互协议：每一步都交付可检查的东西</h3>
+        <table><thead><tr><th>步</th><th>谁做</th><th>交给下一棒的东西</th><th>停止 / 退回条件</th></tr></thead><tbody>
+          <tr><td><strong>01</strong></td><td>人下发任务契约</td><td>目标、范围内 / 外、验收样例、红线、允许执行的检查</td><td>业务终态或数据所有权没说清：不编码</td></tr>
+          <tr><td><strong>02</strong></td><td>AI 仓库侦察</td><td>现状证据、调用链、唯一 Writer、候选方案、未知项</td><td>事实冲突或必须扩大范围：带选项提问</td></tr>
+          <tr><td><strong>03</strong></td><td>人作边界裁决</td><td>选定方案；确认权限、状态终点、迁移、发布与回退</td><td>权限 / 改数据 / 核心决策 / 真人确认点未批准：停</td></tr>
+          <tr><td><strong>04</strong></td><td>AI 实现</td><td>局部补丁、类型、测试、迁移、文档、回退说明</td><td>不得自行碰生产、密钥、外部消息或放宽守卫</td></tr>
+          <tr><td><strong>05</strong></td><td>机器验证</td><td>测试命令与结果、架构断言、失败复现、数据对账</td><td>失败回到 04；不能删测试或改 allowlist 换绿灯</td></tr>
+          <tr><td><strong>06</strong></td><td>人验收</td><td>审四类关键面；作出接受 / 拒绝、合并、迁移、发布决定</td><td>拒绝时写明哪条验收未过，再回到 04</td></tr>
+        </tbody></table>
+        <div class="callout" style="margin-top:7px"><strong>交接物不是聊天记录：</strong>任务契约 → 影响报告 → 变更集 → 验证报告 → 真人决定；2–6 循环，直到验收成立。</div>
+        <div class="grid g2" style="margin-top:7px">
+          <div class="box amber"><b>真人任务契约 · 教学示例，不是既定规划</b><p><strong>目标：</strong>用户确认某条运营 AI 记录后创建 Proposal draft。<br><strong>验收：</strong>同一 record 重复点击只生成一份；不得创建 approved；旧入口在开关前继续只留痕。<br><strong>禁区：</strong>不直写 Proposal ORM，不操作生产。</p></div>
+          <div class="box violet"><b>AI 第一轮回复 · 先侦察，不先写码</b><p><strong>现状证据：</strong><code>OperationalAgentAnalytics.proposal()</code> 只返回执行留痕，没有写 Proposal。<br><strong>待人裁决：</strong>是否仅 USER 可触发？幂等键是否用 record_id？是否需要灰度开关？<br><strong>确认后：</strong>再交影响文件、实现和测试清单。</p></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3><span class="mark">BOUND</span>边界不是“人写 / AI 写”，而是谁有决定权</h3>
+        <div class="box green"><b>AI 可直接做</b><p>读仓库、列影响面、改本地工作区、补测试、跑非破坏性检查、提出重构和回退方案。</p></div>
+        <div class="box amber" style="margin-top:6px"><b>AI 必须停下问</b><p>需求含义不唯一；要扩范围、删数据、加 Writer、放宽权限、执行不可逆迁移、联系外部或操作生产。</p></div>
+        <div class="box red" style="margin-top:6px"><b>真人始终保留</b><p>业务含义、优先级、验收口径、权限授权、合并 / 发布决定与事故责任；AI 可在明确授权后执行机械命令。</p></div>
+        <div class="callout amber" style="margin-top:7px"><strong>本项目例子：</strong>“运营建议变提案”当前只留痕。人必须先决定是否改成“用户点击后创建 draft”；AI 才能实现幂等创建与审计，但永远不能生成 approved，也不能把目标接续写成当前实现。</div>
+      </div>
+    </div>
+    <div class="ref"><b>人的审查重点：</b>权限、改数据、核心决策、真人确认点约十处必须逐项看；其余实现由类型、测试、架构守卫和局部代码审查降低通读成本。</div>
+  </div>
+  <footer class="foot"><span>决策 10 · 人机开发交接协议</span><span class="pno">13 / 21</span></footer>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-title="决策 11｜定位、止血、复现、重建">
+  <header class="head"><div><div class="eyebrow">DECISION 11 · INCIDENT RESPONSE</div><h2>出事怎么办：不要先读 4.6 万行，沿证据链缩小到一个块</h2></div><div class="no">14</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>找原作者</span><span>翻日志猜原因</span><span>证据链 + 可回退块</span></div><div class="lab">选择</div><div class="selected">定位 → 止血 → 复现 → 单块重建；每一步都有明确数据和动作</div></div>
+    <div class="grid g4">
+      <div class="box blue"><b>1 · 定位</b><p>从 <code>trace_id</code> 找 AgentTaskRecord：model、sources、tools_called、workflow_run_id、step_id、attempt、error。</p></div>
+      <div class="box red"><b>2 · 止血</b><p>禁用问题 Provider / capability / retrieval 开关；暂停新任务；目标接续阶段把 feature route 切回 Local Adapter。</p></div>
+      <div class="box amber"><b>3 · 复现</b><p>把输入、状态、attempt、来源和旧结果固化成失败测试；先看到红，再改代码。</p></div>
+      <div class="box green"><b>4 · 重建</b><p>只重写拥有该事实的 Context / Adapter；保持公开契约和回归测试不变。</p></div>
+    </div>
+    <div class="cols equal">
+      <div class="panel">
+        <h3><span class="mark">TRACE</span>建议排查顺序</h3>
+        <div class="flow"><div class="node"><b>业务 ID</b><span>proposal / task / meeting</span></div><div class="arr">→</div><div class="node blue"><b>trace_id</b><span>本次调用关联键</span></div><div class="arr">→</div><div class="node violet"><b>Agent execution</b><span>model / sources / tool</span></div><div class="arr">→</div><div class="node cyan"><b>Workflow step</b><span>status / attempt / lease</span></div><div class="arr">→</div><div class="node amber"><b>Outbox</b><span>attempts / last_error</span></div></div>
+        <table style="margin-top:7px"><thead><tr><th>症状</th><th>先看</th><th>常见处理</th></tr></thead><tbody><tr><td>重复副作用</td><td>idempotency key、旧 / 新 attempt、stale finalize</td><td>补唯一键 / owner 条件 / 回归测试</td></tr><tr><td>任务永久 running</td><td>lease_until、heartbeat、recovery scan、Outbox 积压</td><td>恢复过期 lease；修续租或 worker</td></tr><tr><td>答案错误</td><td>sources、可见范围、双臂结果、resolved model</td><td>补评测样例；切检索开关 / 模型卡</td></tr></tbody></table>
+      </div>
+      <div class="panel cost"><h3><span class="mark">COST</span>代价</h3><ul class="list"><li>审计、trace、执行记录、开关、回放集和恢复手册要持续维护。</li><li>日志字段必须稳定且脱敏，不能只打印一段自然语言。</li><li>“可重建”要求模块边界真实；共享数据库乱写时无法只换一块。</li></ul><div class="callout darkc" style="margin-top:8px"><strong>可维护性 = 意图可读 + 行为可验证 + 单块可重建。</strong></div></div>
+    </div>
+    <div class="ref"><b>证据字段：</b><code>app/models/agent.py::AgentTaskRecord</code> · <code>app/platform/outbox/model.py</code> · <code>workflow_runtime</code> progress / event records。</div>
+  </div>
+  <footer class="foot"><span>决策 11 · 故障恢复</span><span class="pno">14 / 21</span></footer>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-title="决策 12｜为什么必须拆通用 AI 能力">
+  <header class="head"><div><div class="eyebrow">DECISION 12 · WHY SEPARATE</div><h2>为什么必须拆：不是为了微服务，而是当前所有权已经被部署单元绑住</h2></div><div class="no">15</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>继续扩一个后端</span><span>直接搬四个仓库</span><span>先拆所有权与契约</span></div><div class="lab">选择</div><div class="selected">有条件拆分，综合可行性 7/10；逻辑边界成熟后才物理远程化</div></div>
+    <div class="cols">
+      <div class="panel">
+        <table><thead><tr><th>当前耦合</th><th>实际后果</th><th>拆分后要达到</th></tr></thead><tbody>
+          <tr><td>业务用例与模型 SDK / Provider factory 同进程</td><td>业务发布同时触碰模型基础设施与供应商密钥</td><td>业务只依赖 LlmCompletionPort / JSON-SSE 契约</td></tr>
+          <tr><td>知识索引、对象存储、检索与产品权限在同调用栈</td><td>能力无法被第二个产品复用；只能复制实现</td><td>Knowledge 拥有文档 / 索引，产品只传 tenant 与 visible scopes</td></tr>
+          <tr><td>Prompt、组织岗位、Skill、Tool 混在 AgentRole</td><td>“组织成员”与“可发布专家资产”无法独立变更</td><td>业务保留 OrgExpertMember；平台拥有不可变 ExpertRelease</td></tr>
+          <tr><td>Runtime 契约含 WorkflowPlan、TaskCard、Expert snapshot</td><td>运行时理解业务词，无法成为通用调度底座</td><td>Contract v2 只含 business_key、executor_ref、opaque payload</td></tr>
+          <tr><td>共享 ORM / 数据访问</td><td>目录搬走仍要同时发布，网络再增加故障点</td><td>独立 DB / 账号 / 迁移，禁止跨库直连与共享 ORM</td></tr>
+        </tbody></table>
+        <div class="callout red" style="margin-top:7px"><strong>直接搬文件夹 = 分布式单体：</strong>共享表、同步环、统一发布都还在，只是把函数调用换成网络调用。</div>
+      </div>
+      <aside class="panel cost"><h3><span class="mark">COST</span>拆分真实成本</h3><ul class="list"><li>契约版本、服务身份、网络超时、熔断、投影和最终一致性。</li><li>每个平台需要 Owner、SLO、发布、值班、备份和恢复。</li><li>生成请求不能无限影子双跑，会产生真实 token 成本。</li></ul><div class="callout amber" style="margin-top:8px"><strong>所以选择是“有条件拆”：</strong>容量、身份、数据、事件、运维任一门没过，就保持同仓 / 同 Deployment。</div></aside>
+    </div>
+    <div class="ref"><b>事实源：</b><code>docs/21-通用AI平台拆分架构与落地方案.html</code> · 当前四平台成熟度 LLM 8/10、Knowledge 7/10、Expert 6/10、Runtime 5/10。</div>
+  </div>
+  <footer class="foot"><span>决策 12 · 拆分动机</span><span class="pno">15 / 21</span></footer>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-title="决策 13｜业务核心加四平台">
+  <header class="head"><div><div class="eyebrow">DECISION 13 · TARGET CONTRACTS</div><h2>拆成什么样：每个平台具体拥有、发布、禁止什么？</h2></div><div class="no">16</div></header>
+  <div class="body">
+    <div class="decision"><div class="lab">候选</div><div class="candidate"><span>按目录拆</span><span>按技术组件拆</span><span>按领域所有权拆</span></div><div class="lab">选择</div><div class="selected">ai-youdoogo 业务核心 + 四平台；同步依赖单向无环，长任务用事件交接</div></div>
+    <table><thead><tr><th>边界</th><th>拥有的数据 / 规则</th><th>首版契约</th><th>明确禁止</th></tr></thead><tbody>
+      <tr><td><strong>ai-youdoogo</strong></td><td>用户、组织、提案、任务、会议、协作、业务投影</td><td>调用平台生成客户端；保存 expert_release_id / run_id 等引用</td><td>拥有供应商密钥、向量索引、通用 Runtime 状态</td></tr>
+      <tr><td><strong>Model Gateway</strong><br>8/10</td><td>Provider Credential、Model Card、Routing、Quota、Usage、Health</td><td><code>POST /v1/chat/completions</code> · <code>/embeddings</code> · <code>/rerank</code></td><td>业务 Prompt、专家、文档、任务</td></tr>
+      <tr><td><strong>Knowledge</strong><br>7/10</td><td>KnowledgeBase、Document、Chunk、IndexVersion、Embedding、检索 ACL</td><td><code>POST /v1/search</code> 必传 tenant_key + visible scopes；index ready / failed 事件</td><td>专家人格、业务权限真源、产品实体全文</td></tr>
+      <tr><td><strong>Expert</strong><br>6/10</td><td>ExpertDefinition / Release、Prompt、Skill、Tool、ExecutionRecord</td><td><code>POST /v1/expert-executions</code> · SSE；消费 step.ready，发布 completed / failed</td><td>部门汇报、提案任务真源、直接改业务数据库</td></tr>
+      <tr><td><strong>Workflow Runtime</strong><br>5/10</td><td>DefinitionVersion、Run、StepRun、Lease、Retry、HumanWait、Runtime Event</td><td>StartWorkflowV2：business_key、executor_ref、opaque input、idempotency_key</td><td>TaskCard、Proposal、Prompt、专家配置、业务审批规则</td></tr>
+    </tbody></table>
+    <div class="grid g2">
+      <div class="callout"><strong>同步方向：</strong>Business → Expert / Knowledge / Runtime；Expert → Knowledge / Model；Knowledge → Model。平台不反向 import 业务。</div>
+      <div class="callout amber"><strong>Runtime ↔ Expert：</strong>用 step.ready / completed 事件交接，不建立相互同步调用；否则形成调用环和级联故障。</div>
+    </div>
+    <div class="panel cost" style="padding:7px 10px"><strong style="font-size:11.5px">代价：</strong><span class="small">公开 DTO 与内部模型必须分离；业务 ORM、AsyncSession、LangChain 对象不能穿过边界；每个平台都要独立迁移与恢复责任。</span></div>
+    <div class="ref"><b>原则：</b>按数据、规则、发布责任拆；目录和仓库只是边界成熟后的物理结果。</div>
+  </div>
+  <footer class="foot"><span>决策 13 · 目标边界</span><span class="pno">16 / 21</span></footer>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-title="决策 14｜逻辑先行与绞杀迁移">
+  <header class="head"><div><div class="eyebrow">DECISION 14 · MIGRATION</div><h2>怎么拆才不把风险一次性兑现：两条纪律 + 六步回退路线</h2></div><div class="no">17</div></header>
+  <div class="body">
+    <div class="cols equal">
+      <div class="panel">
+        <h3><span class="mark">纪律 1</span>“拆出去”先指所有权与契约独立</h3>
+        <table><thead><tr><th>成功标准</th><th>可验证含义</th></tr></thead><tbody><tr><td>独立所有权</td><td>数据只有一个写真源；其他服务只持 ID / 投影；无共享 ORM / 账号 / 跨库 Join</td></tr><tr><td>独立发布</td><td>契约兼容时 Provider 可先发；消费者不需要同一窗口升级</td></tr><tr><td>独立失败</td><td>平台超时 / 熔断后业务有明确降级、暂停或 Local 回退路径</td></tr></tbody></table>
+        <div class="callout red" style="margin-top:8px"><strong>不是成功标准：</strong>仓库数量、Deployment 数、把 HTTP 调通。首日四套部署最可能得到分布式单体。</div>
+        <h3 style="margin-top:9px"><span class="mark">纪律 2</span>运行中实例不跨引擎迁移</h3>
+        <p class="sub">旧 Workflow 在 Local Runtime drain 到终态；只有新创建且命中特性路由的流程进入 Remote Runtime。回滚时停止新流量，不把半程流程搬回来。</p>
+      </div>
+      <div class="panel">
+        <h3><span class="mark">PLAYBOOK</span>Port → Local → Remote → 灰度 → 默认远程 → 删除</h3>
+        <table><thead><tr><th>步骤</th><th>完成定义</th><th>失败时回退</th></tr></thead><tbody>
+          <tr><td>1 Port</td><td>业务用例只依赖纯契约；无 ORM / SDK 对象</td><td>小提交回退，不改运行拓扑</td></tr>
+          <tr><td>2 Local Adapter</td><td>包装当前实现；全部旧测试不变</td><td>继续使用旧实现</td></tr>
+          <tr><td>3 Remote Adapter</td><td>契约测试、Internal JWT、timeout / error mapping 完成</td><td>开关保持 Local</td></tr>
+          <tr><td>4 灰度</td><td>按 use_case / knowledge_base / workflow_type / percentage；对账达标</td><td>路由切回 Local，追平远程数据</td></tr>
+          <tr><td>5 默认远程</td><td>完整稳定周期、故障演练、回滚演练通过</td><td>Local 保留明确截止窗口</td></tr>
+          <tr><td>6 删除兼容层</td><td>旧流量 / 实例 / 回放窗口清空，备份可恢复</td><td>删除前保留版本制品；之后才是不可逆</td></tr>
+        </tbody></table>
+        <div class="callout amber" style="margin-top:8px"><strong>代价：</strong>过渡期双 Adapter、特性路由、对账、投影追平和消费者契约都要维护；换来每一步可验证、可观察、可回退。</div>
+      </div>
+    </div>
+    <div class="ref"><b>迁移纪律：</b>能不用双写就不用；优先旧真源 Outbox 增量同步 + 批量回填 + 切换写真源，禁止两个服务同时被认为是真源。</div>
+  </div>
+  <footer class="foot"><span>决策 14 · 迁移策略</span><span class="pno">17 / 21</span></footer>
+</section>
+
+<!-- 18 -->
+<section class="slide dark" data-title="Go / No-Go｜五道门禁">
+  <header class="head"><div><div class="eyebrow">GO / NO-GO</div><h2>物理拆分前五道门：当前缺口、通过标准、不通过怎么办</h2></div><div class="no">18</div></header>
+  <div class="body">
+    <table style="border-color:rgba(255,255,255,.18)"><thead><tr><th>门禁</th><th>当前现实约束</th><th>GO 标准</th><th>NO-GO 动作</th></tr></thead><tbody>
+      <tr><td><strong>容量</strong></td><td>生产 CCE 已到 Pod ceiling；滚动发布 <code>maxSurge:0</code></td><td>目标副本、迁移 Job、故障转移余量和 DB 连接预算经压测成立</td><td>保持逻辑模块或合并为一个 AI Platform Deployment</td></tr>
+      <tr><td><strong>服务身份</strong></td><td>只有面向用户的共享 HS256 JWT；无 issuer / service audience</td><td>非对称短期 Internal JWT：iss、aud、service_id、actor、scope、exp≤5 分钟、轮换</td><td>禁止远程服务接收用户 JWT 或共享 JWT_SECRET</td></tr>
+      <tr><td><strong>数据</strong></td><td>当前同库、共享物理基础设施；对象存储访问仍需收紧</td><td>独立 DB / 用户 / 迁移、备份恢复、数量 / hash / 版本 / 抽样对账演练通过</td><td>只做代码边界，不转移写真源</td></tr>
+      <tr><td><strong>事件</strong></td><td>无 NATS / Kafka 客户端；Outbox 仍由本进程 handler 消费</td><td>选定传输；Outbox Relay、Inbox、DLQ、重复 / 乱序 / 重放 / 积压告警演练通过</td><td>Runtime 与长任务继续本地执行</td></tr>
+      <tr><td><strong>运维</strong></td><td>CI / CCE 模板只认识 backend / frontend 两套镜像</td><td>独立镜像、迁移、Secret、探针、SLO、日志、trace、发布和一键回滚</td><td>不得独立生产发布</td></tr>
+    </tbody></table>
+    <div class="grid g2"><div class="callout darkc"><strong>GO 的顺序：</strong>Phase 0 打底 → LLM → Knowledge → Expert → Runtime。成熟度最低、依赖事件门禁的 Runtime 最后拆。</div><div class="callout" style="border-color:#ffba65;background:rgba(255,186,101,.13);color:#ffe5bf"><strong>NO-GO 不是失败：</strong>同仓、同进程或单 Deployment 仍可拥有清晰边界；过早增加网络、Pod、数据库才是更大风险。</div></div>
+    <div style="margin:auto 0 0;text-align:center"><div class="eyebrow" style="color:#91a8ba">最终回答</div><div style="margin-top:8px;font-size:31px;font-weight:900">没人通读全部代码时，凭什么敢跑业务？</div><div style="margin-top:8px;color:#b8c9d7;font-size:12.5px">因为生效权被系统封堵，事实只有一个写入者，长任务能从数据库恢复，重复执行有栅栏，架构规则会在 CI 失败，事故能沿 trace 缩到一个可重建的块。</div></div>
+  </div>
+  <footer class="foot"><span>Go / No-Go · 不达标就不拆</span><span class="pno">18 / 21</span></footer>
+</section>
+
+<!-- 19 A -->
+<section class="slide" data-title="附录 A｜Phase 0–5 排期、完成定义与回滚">
+  <header class="head"><div><div class="eyebrow">APPENDIX A · ROADMAP</div><h2>Phase 0–5：每阶段交付什么、凭什么退出、怎样回退</h2></div><div class="no" style="background:#edf1f6;color:var(--ink2)">A</div></header>
+  <div class="body">
+    <div class="timeline">
+      <div class="tl"><strong>P0 · 边界底座</strong><div class="weeks">3–4 周</div><p><b>交付：</b>Owner / 数据归属、四 Port、Local Adapter、Internal JWT、容量与 CI 模板。<br><b>退出：</b>业务只依赖 Port；Local 全测试通过。<br><b>回滚：</b>无拓扑变化，小提交回退。</p></div>
+      <div class="tl"><strong>P1 · LLM</strong><div class="weeks">3–5 周</div><p><b>交付：</b>Chat / SSE / Embedding / Rerank、Remote Adapter。<br><b>退出：</b>独立发布；业务不创建 BaseChatModel。<br><b>回滚：</b>路由切 Local，保留短期本地密钥窗口。</p></div>
+      <div class="tl"><strong>P2 · Knowledge</strong><div class="weeks">5–8 周</div><p><b>交付：</b>独立 DB / 索引、对象存储授权、回填与增量。<br><b>退出：</b>文档 / chunk / 版本对账，质量不低于基线。<br><b>回滚：</b>按知识库切旧索引。</p></div>
+      <div class="tl"><strong>P3 · Expert</strong><div class="weeks">6–10 周</div><p><b>交付：</b>OrgExpertMember / ExpertRelease 分离、Capability Provider。<br><b>退出：</b>release 可复现；业务工具最终鉴权。<br><b>回滚：</b>执行路由切本地 Agent。</p></div>
+      <div class="tl"><strong>P4 · Runtime</strong><div class="weeks">8–12 周</div><p><b>交付：</b>Contract v2、Run / Step / Lease / Inbox、事件交接。<br><b>退出：</b>kill worker、重复、乱序、分区、人工等待演练通过。<br><b>回滚：</b>只停新流量，远程在途继续完成。</p></div>
+      <div class="tl"><strong>P5 · 收口</strong><div class="weeks">3–5 周</div><p><b>交付：</b>删兼容层、SLO / 成本 / 灾备、第二产品接入。<br><b>退出：</b>四平台独立恢复，第二产品不复制实现。<br><b>回滚：</b>删除前保留制品和备份。</p></div>
+    </div>
+    <table><thead><tr><th>资源条件</th><th>总周期</th><th>说明</th></tr></thead><tbody><tr><td>4–6 人团队，顺序执行</td><td><strong>约 28–44 周</strong></td><td>Phase 0 + LLM 约 6–9 周；再完成 Knowledge 累计约 11–17 周</td></tr><tr><td>两支并行小队 + 专职平台运维 + 先扩容</td><td><strong>约 20–30 周</strong></td><td>并行不取消契约、容量和故障演练门禁</td></tr></tbody></table>
+    <div class="ref"><b>纪律：</b>排期是满足门禁后的工程估算，不是承诺日期；任一阶段门禁不过，保留 Local 不算失败。</div>
+  </div>
+  <footer class="foot"><span>附录 A · 路线图</span><span class="pno">19 / 21</span></footer>
+</section>
+
+<!-- 20 B -->
+<section class="slide" data-title="附录 B｜关键状态机与非法路径">
+  <header class="head"><div><div class="eyebrow">APPENDIX B · STATE MACHINES</div><h2>关键状态机：合法迁移、唯一 actor、重复转换约束</h2></div><div class="no" style="background:#edf1f6;color:var(--ink2)">B</div></header>
+  <div class="body">
+    <table><thead><tr><th>对象</th><th>合法主线</th><th>AI 上限 / 真人动作</th><th>必须拒绝</th><th>验证位置</th></tr></thead><tbody>
+      <tr><td><strong>Proposal</strong></td><td>draft → researching → reviewed → approved / rejected</td><td>AI 只完成 research 到 reviewed；真人 record_human_review 写终态</td><td>未 reviewed 直接审批；终态再 research；非 approved 转任务；重复转任务</td><td><code>proposal_management/domain/models.py</code><br><code>tests/test_proposals.py</code></td></tr>
+      <tr><td><strong>TaskCard</strong></td><td>created → dispatched → executing → reported → accepted / rejected；rejected 可再 dispatched</td><td>AI scheduler 最多到 reported；真人验收 / 驳回</td><td>跳状态；accepted 后再改；执行中编辑；真人任务交给 AI scheduler</td><td><code>task_management/domain/state_machine.py</code><br><code>tests/test_tasks.py</code></td></tr>
+      <tr><td><strong>Meeting Resolution</strong></td><td>create(is_confirmed=false) → confirm → convert once</td><td>AI 票只参考；PrincipalType.USER 才能 confirm</td><td>AI confirm；未确认转任务；重复转任务</td><td><code>meeting_management/domain/models.py</code><br><code>tests/test_meetings.py</code></td></tr>
+      <tr><td><strong>Workflow Step</strong></td><td>queued → running → succeeded / waiting_human / failed / cancelled</td><td>红线步骤进入 waiting_human；真人 decision 后恢复</td><td>有效 lease 被重领；旧 attempt 完成；终态再次执行</td><td><code>workflow_runtime/infrastructure</code><br><code>tests/test_durable_workflow.py</code></td></tr>
+    </tbody></table>
+    <div class="grid g3">
+      <div class="callout amber"><strong>human_passed：</strong>仅统计人类 approve 票是否多于 reject；不是确认状态。</div>
+      <div class="callout"><strong>运营分析：</strong>建议当前只留痕，不自动创建 Proposal / TaskCard。</div>
+      <div class="callout red"><strong>状态名是契约：</strong>权限、重试、审计和恢复都依赖它，不能只为 UI 随意改。</div>
+    </div>
+    <div class="ref"><b>排障方法：</b>先看当前状态，再查允许迁移表和 actor；不要直接改数据库把对象“推过去”。</div>
+  </div>
+  <footer class="foot"><span>附录 B · 状态机</span><span class="pno">20 / 21</span></footer>
+</section>
+
+<!-- 21 C -->
+<section class="slide" data-title="附录 C｜规模、阈值、菜单与角色权限">
+  <header class="head"><div><div class="eyebrow">APPENDIX C · OPERATING CARD</div><h2>接手速查：规模、目标阈值、菜单和角色边界</h2></div><div class="no" style="background:#edf1f6;color:var(--ink2)">C</div></header>
+  <div class="body">
+    <div class="metricrow" style="grid-template-columns:repeat(5,1fr)"><div class="metric"><b>665 / 46,215</b><span>app 文件 / 行</span></div><div class="metric"><b>114 / 12,069</b><span>frontend/src 文件 / 行</span></div><div class="metric"><b>106 / 20,464</b><span>tests 文件 / 行</span></div><div class="metric"><b>39</b><span>Alembic 迁移</span></div><div class="metric"><b>23 / 4,379</b><span>docs 篇 / 行</span></div></div>
+    <div class="cols equal">
+      <div class="panel">
+        <h3><span class="mark">阈值</span>目标接续的首版运行指标 / 硬门禁</h3>
+        <table><thead><tr><th>项</th><th>阈值 / 必备项</th></tr></thead><tbody>
+          <tr><td>测试</td><td>683 个非 delivery_contract 测试；<code>fail_under = 88</code></td></tr>
+          <tr><td>LLM Gateway</td><td>非供应商错误成功率建议 ≥99.9%；监控首 token、fallback 率、成本</td></tr>
+          <tr><td>Knowledge</td><td>Search p95 建议 ≤1.5s；监控零结果率、Recall@K / NDCG、引用一致性</td></tr>
+          <tr><td>同步链</td><td>用户链路避免超过 3 跳；搜索建议 0.8–1.5s；短事务工具 ≤5s</td></tr>
+          <tr><td>Internal JWT</td><td>iss / aud / service_id / actor / scope / exp≤5 分钟 / 轮换</td></tr>
+          <tr><td>数据切换</td><td>数量、hash、版本、抽样对账；备份恢复与回滚脚本实际演练</td></tr>
+        </tbody></table>
+      </div>
+      <div class="panel">
+        <h3><span class="mark">菜单</span>前端可见不等于后端授权</h3>
+        <table><thead><tr><th>范围</th><th>菜单</th></tr></thead><tbody><tr><td>所有登录用户</td><td>工作桌面、知识库、协作空间、智能体、任务卡、提案、会议会商、运营看板</td></tr><tr><td>仅 admin 菜单</td><td>组织架构、用户与权限、知识库集合、数据接口、业务术语字典、AI 配置、系统配置、系统日志</td></tr></tbody></table>
+        <h3 style="margin-top:8px"><span class="mark">角色</span>后端最终守卫</h3>
+        <table><thead><tr><th>角色</th><th>边界</th></tr></thead><tbody><tr><td>admin</td><td>全局配置、组织 / 用户、资源授权、Provider、系统监督；CEO = 真人 admin</td></tr><tr><td>executive</td><td>管理层业务操作、评审、确认、会商、AI 评测；无系统管理菜单</td></tr><tr><td>member</td><td>日常业务、发起、协作；按资源可见性读取；默认模型档 daily</td></tr><tr><td>AI</td><td>不是登录角色，不持 JWT；只调用能力清单；不能写真人终态</td></tr></tbody></table>
+      </div>
+    </div>
+    <div class="ref"><b>注意：</b>前端路由隐藏只是体验；真正权限由 <code>app/api/deps.py</code>、Access Control policy 和领域 actor 共同决定，任何一层不能单独充当安全边界。</div>
+  </div>
+  <footer class="foot"><span>附录 C · 运行速查</span><span class="pno">21 / 21</span></footer>
+</section>
+
+</main>
+<div id="overview" aria-label="幻灯片缩略图总览"></div>
+<div id="progress"><i></i></div>
+<div id="hint">← → / 空格翻页 · ESC 总览 · F 全屏 · P 打印</div>
+<div id="hud"><button id="prev" title="上一页">‹</button><span><b id="current">1</b> / <span id="total">1</span></span><button id="next" title="下一页">›</button><button id="overview-btn" title="缩略图总览">▦</button></div>
+<script>
+(function(){
+  var slides=Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage=document.getElementById('stage'),overview=document.getElementById('overview');
+  var progress=document.querySelector('#progress i'),current=document.getElementById('current'),index=0;
+  document.getElementById('total').textContent=slides.length;
+  function fit(){var k=Math.min((innerWidth-48)/1280,(innerHeight-62)/720);stage.style.setProperty('--k',Math.max(.25,k));}
+  function show(n){index=Math.max(0,Math.min(slides.length-1,n));slides.forEach(function(s,i){s.classList.toggle('on',i===index)});current.textContent=index+1;progress.style.width=((index+1)/slides.length*100)+'%';if(location.hash!=='#'+(index+1))history.replaceState(null,'','#'+(index+1));}
+  function toggle(){overview.classList.toggle('on')}
+  slides.forEach(function(s,i){var item=document.createElement('div');item.className='thumb';var mini=s.cloneNode(true);mini.classList.remove('on');mini.classList.add('mini');var label=document.createElement('div');label.className='thumblabel';label.textContent=String(i+1).padStart(2,'0')+' · '+(s.dataset.title||'');item.appendChild(mini);item.appendChild(label);item.onclick=function(){overview.classList.remove('on');show(i)};overview.appendChild(item)});
+  document.getElementById('prev').onclick=function(){show(index-1)};document.getElementById('next').onclick=function(){show(index+1)};document.getElementById('overview-btn').onclick=toggle;
+  addEventListener('keydown',function(e){var k=e.key;if(k==='Escape'){e.preventDefault();toggle();return}if(overview.classList.contains('on'))return;if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='Enter'){e.preventDefault();show(index+1)}else if(k==='ArrowLeft'||k==='PageUp'||k==='Backspace'){e.preventDefault();show(index-1)}else if(k==='Home')show(0);else if(k==='End')show(slides.length-1);else if(k==='f'||k==='F'){if(document.fullscreenElement)document.exitFullscreen();else document.documentElement.requestFullscreen()}else if(k==='p'||k==='P')window.print()});
+  stage.addEventListener('click',function(e){if(overview.classList.contains('on'))return;show(e.clientX>innerWidth/2?index+1:index-1)});
+  var x0=null;stage.addEventListener('touchstart',function(e){x0=e.touches[0].clientX},{passive:true});stage.addEventListener('touchend',function(e){if(x0===null)return;var dx=e.changedTouches[0].clientX-x0;if(Math.abs(dx)>45)show(dx<0?index+1:index-1);x0=null},{passive:true});
+  addEventListener('resize',fit);fit();show(parseInt((location.hash||'#1').slice(1),10)-1||0);
+})();
+</script>
+</body>
+</html>

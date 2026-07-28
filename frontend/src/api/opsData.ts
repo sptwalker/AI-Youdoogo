@@ -1,5 +1,5 @@
 /** 运营数据 API（对应后端 app/api/v1/ops_data.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface OpsMetric {
   stat_date: string

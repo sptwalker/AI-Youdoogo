@@ -26,7 +26,7 @@ from app.contexts.foundations.workforce.expert_management.contracts.roster impor
 from app.contexts.foundations.workforce.expert_management.entrypoints.legacy import (
     legacy_view as expert_view,
 )
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.org import (
     EmployeeCreate,

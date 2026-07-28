@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.foundations.execution.agent_execution.application.consult import (
     ConsultExpert,
 )
-from app.contexts.foundations.execution.agent_execution.application.record_queries import (
-    AgentExecutionRecords,
+from app.contexts.foundations.execution.agent_execution.application.ports import (
+    AgentExecutionRecordQueryPort,
 )
 from app.contexts.foundations.execution.agent_execution.application.use_cases import (
     AgentExecutionApplication,
@@ -37,20 +37,28 @@ from app.contexts.foundations.governance.usage_budget.public import (
     budget_exceeded,
     record_usage,
 )
-from app.contexts.foundations.model_gateway.public import (
-    build_local_llm_completion_port,
-)
+from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.models.agent import AgentRole
 
 
-def build_agent_execution_application(session: AsyncSession) -> AgentExecutionApplication:
+def build_agent_execution_application(
+    session: AsyncSession,
+    *,
+    role_record: AgentRole | None = None,
+    release_before_external_call: bool = True,
+) -> AgentExecutionApplication:
     return AgentExecutionApplication(
-        prompt_port=CurrentPromptAssemblyAdapter(session),
+        prompt_port=CurrentPromptAssemblyAdapter(session, role_record),
         knowledge_port=CurrentKnowledgeAugmentationAdapter(session),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
         llm_port=build_local_llm_completion_port(),
-        recorder=SQLAlchemyAgentExecutionRecorder(session, None, record_usage),
+        recorder=SQLAlchemyAgentExecutionRecorder(session, role_record, record_usage),
         clock=SystemExecutionClock(),
-        external_boundary=SQLAlchemyExternalExecutionBoundary(session),
+        external_boundary=(
+            SQLAlchemyExternalExecutionBoundary(session)
+            if release_before_external_call
+            else None
+        ),
     )
 
 
@@ -61,5 +69,7 @@ def build_consult_expert(session: AsyncSession) -> ConsultExpert:
     )
 
 
-def build_agent_execution_records(session: AsyncSession) -> AgentExecutionRecords:
-    return AgentExecutionRecords(SQLAlchemyAgentExecutionRecordQuery(session))
+def build_agent_execution_records(
+    session: AsyncSession,
+) -> AgentExecutionRecordQueryPort:
+    return SQLAlchemyAgentExecutionRecordQuery(session)

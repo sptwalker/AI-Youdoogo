@@ -3,7 +3,6 @@
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.ai_provider import AiProvider
 from app.models.audit_log import AuditLog
-from app.models.base import Base
 from app.models.collab import CollabAuthorization, CollabRequest
 from app.models.deliverable import Deliverable
 from app.models.desktop import DesktopMessage
@@ -27,6 +26,7 @@ from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.td_event_alias import TdEventAlias
 from app.models.workflow import OutboxEvent, ToolExecution, WorkflowEvent, WorkflowRun, WorkflowStep
+from app.platform.database.model import Base
 
 __all__ = [
     "AgentFeedback",

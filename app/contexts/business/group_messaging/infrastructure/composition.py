@@ -8,17 +8,16 @@ from app.contexts.business.group_messaging.application.use_cases import (
 from app.contexts.business.group_messaging.infrastructure.adapters import (
     KnowledgeAttachmentStorageAdapter,
     LegacyAgentReplyAdapter,
-    LegacyPromotionAdapter,
     OrganizationalMemoryArchiveAdapter,
+    PublishedPromotionAdapter,
     RedisRealtimeDeliveryAdapter,
     RedisRealtimeSubscriptionAdapter,
     SQLAlchemyOutboxAdapter,
-    SystemClock,
-    UUIDIdentifier,
 )
 from app.contexts.business.group_messaging.infrastructure.sqlalchemy_uow import (
     SQLAlchemyGroupMessagingUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_group_messaging_application(
@@ -31,7 +30,7 @@ def build_group_messaging_application(
         agent_replies=LegacyAgentReplyAdapter(session),
         attachment_storage=KnowledgeAttachmentStorageAdapter(),
         archive_port=OrganizationalMemoryArchiveAdapter(session),
-        promotion_port=LegacyPromotionAdapter(session),
+        promotion_port=PublishedPromotionAdapter(session),
         outbox_port=SQLAlchemyOutboxAdapter(session),
         clock=SystemClock(),
         identifiers=UUIDIdentifier(),

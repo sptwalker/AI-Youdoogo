@@ -6,13 +6,13 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.bootstrap import observability as legacy_metrics_service
 from app.bootstrap.observability import readiness, render_metrics
 from app.core import shared_state
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.ai_provider import AiProvider
 from app.models.llm_log import LlmCallLog
-from app.services import metrics_service as legacy_metrics_service
 
 
 @pytest.fixture(autouse=True)

@@ -34,6 +34,24 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "youdoo"
+    # 迁移期对象存储能力。secure=False 保持现有本地 MinIO 行为；生产切换 TLS
+    # 时只需改变配置，不改变 gateway 的旧 put/get API。
+    minio_secure: bool = False
+    # 逗号分隔的资源权限 allowlist。空 bucket 列表仅允许 minio_bucket，空 prefix
+    # 列表表示当前 bucket 下保持兼容的全路径访问。
+    minio_allowed_buckets: str = ""
+    minio_allowed_prefixes: str = ""
+    minio_presign_expire_seconds: int = 900
+
+    # 跨服务身份（默认关闭，不影响用户 JWT 或当前部署拓扑）。私钥只从配置读取，
+    # 不在应用内生成，也不在仓库保存。算法固定 RS256，避免算法降级/混淆。
+    internal_jwt_enabled: bool = False
+    internal_jwt_issuer: str = ""
+    internal_jwt_audience: str = ""
+    internal_jwt_service_id: str = ""
+    internal_jwt_private_key: str = ""
+    internal_jwt_public_key: str = ""
+    internal_jwt_ttl_seconds: int = 300
 
     # 大模型密钥（国产为主，DeepSeek 主力）
     deepseek_api_key: str = ""

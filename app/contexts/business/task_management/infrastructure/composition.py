@@ -16,8 +16,8 @@ from app.contexts.business.task_management.infrastructure.adapters import (
 )
 from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyTaskManagementAdapter,
-    SQLAlchemyTaskTransaction,
 )
+from app.platform.database.unit_of_work import SessionUnitOfWork
 
 
 def build_task_management_application(
@@ -28,7 +28,7 @@ def build_task_management_application(
 ) -> TaskManagementApplication:
     return TaskManagementApplication(
         tasks=SQLAlchemyTaskManagementAdapter(session),
-        transaction=SQLAlchemyTaskTransaction(session),
+        transaction=SessionUnitOfWork(session),
         audit=PublishedTaskAuditAdapter(session),
         workflow=workflow or PublishedTaskWorkflowAdapter(session),
         executor=executor or PublishedTaskExecutionAdapter(session),

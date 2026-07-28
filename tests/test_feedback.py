@@ -8,11 +8,9 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.contexts.foundations.governance.ai_quality import public as ai_quality
-from app.contexts.foundations.model_gateway import public as _mg_public
-from app.contexts.shared_kernel import ApplicationError
+from app.contexts.foundations.model_gateway import public as model_gateway
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
-from app.services import feedback_service
 
 
 class _FakeLLM:
@@ -38,55 +36,6 @@ async def ctx() -> AsyncGenerator[tuple[AsyncSession, uuid.UUID, uuid.UUID], Non
         await session.commit()
         yield session, role.id, record.id
     await engine.dispose()
-
-
-async def test_add_feedback(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> None:
-    session, _, record_id = ctx
-    fb = await feedback_service.add_feedback(
-        session, task_record_id=record_id, rater_id=uuid.uuid4(), score=2, comment="缺来源"
-    )
-    assert fb.score == 2
-
-
-async def test_add_feedback_score_range(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> None:
-    session, _, record_id = ctx
-    with pytest.raises(ApplicationError, match="1~5"):
-        await feedback_service.add_feedback(
-            session, task_record_id=record_id, rater_id=uuid.uuid4(), score=9
-        )
-
-
-async def test_add_feedback_missing_record(ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID]) -> None:
-    session, _, _ = ctx
-    with pytest.raises(ApplicationError, match="不存在"):
-        await feedback_service.add_feedback(
-            session, task_record_id=uuid.uuid4(), rater_id=uuid.uuid4(), score=3
-        )
-
-
-async def test_optimize_prompt_from_low_scores(
-    ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session, role_id, record_id = ctx
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
-    await feedback_service.add_feedback(
-        session, task_record_id=record_id, rater_id=uuid.uuid4(), score=2, comment="缺来源标注"
-    )
-    result = await feedback_service.optimize_prompt(session, role_id)
-    assert result["based_on_samples"] == 1
-    assert "改进后的提示词" in str(result["suggested_prompt"])
-    assert result["current_prompt"] == "你是运营AI总监。"
-
-
-async def test_optimize_prompt_no_low_scores(
-    ctx: tuple[AsyncSession, uuid.UUID, uuid.UUID],
-) -> None:
-    session, role_id, record_id = ctx
-    await feedback_service.add_feedback(
-        session, task_record_id=record_id, rater_id=uuid.uuid4(), score=5
-    )  # 高分不入优化样本
-    with pytest.raises(ApplicationError, match="无需优化"):
-        await feedback_service.optimize_prompt(session, role_id)
 
 
 async def test_public_feedback_operations(
@@ -117,7 +66,7 @@ async def test_public_prompt_improvement_operation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, role_id, record_id = ctx
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(model_gateway, "get_llm_for_role", lambda *a, **k: _FakeLLM())
     await ai_quality.record_feedback(
         session,
         ai_quality.RecordFeedbackCommand(

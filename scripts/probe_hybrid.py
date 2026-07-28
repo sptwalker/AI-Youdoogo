@@ -22,6 +22,9 @@ sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows 
 
 from sqlalchemy import select  # noqa: E402
 
+from app.contexts.foundations.governance.system_configuration import (  # noqa: E402
+    public as system_configuration,
+)
 from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (  # noqa: E402
     IndexTextCommand,
 )
@@ -39,9 +42,8 @@ from app.contexts.foundations.knowledge.knowledge_retrieval.public import (  # n
 from app.contexts.foundations.knowledge.wiki_management.public import (  # noqa: E402
     get_default_knowledge_base,
 )
-from app.core.database import async_session_factory  # noqa: E402
 from app.models.system import SysUser  # noqa: E402
-from app.services import config_service  # noqa: E402
+from app.platform.database import async_session_factory  # noqa: E402
 
 # 受控语料：故意造"型号近义、语义相近"的干扰项——向量易混，trgm 能精确区分。
 _CORPUS: list[tuple[str, str]] = [
@@ -72,9 +74,12 @@ async def _run() -> int:
         # 独立脚本覆盖层为空，先载入 sys_config（embedding 端点/密钥可能存这里）
         from app.core import runtime_config
 
-        runtime_config.load(await config_service.all_values(db))
+        configurations = await system_configuration.list_configurations(db)
+        runtime_config.load({item.key: item.value for item in configurations})
 
-        hybrid = await config_service.resolve(db, "retrieval_hybrid_enabled", True)
+        hybrid = await system_configuration.resolve_configuration(
+            db, "retrieval_hybrid_enabled", True
+        )
         print(f"混合检索开关 retrieval_hybrid_enabled = {hybrid}\n")
 
         kb_id = (await get_default_knowledge_base(db)).id

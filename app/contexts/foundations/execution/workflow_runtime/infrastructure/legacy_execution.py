@@ -11,8 +11,8 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.agents.skills as skills
 from app.agents.contracts import AgentRunner, ExecutionContext
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.foundations.execution.agent_execution.contracts.execution import (
     AgentExecutionRequest,
     AgentExecutionResult,
@@ -39,8 +39,8 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     PreparedWorkflowStep,
     StepExecutionDisposition,
 )
-from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_state import (
-    renew_step_lease,
+from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
+    step_leases,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_uow import (
     SQLAlchemyWorkflowUnitOfWorkFactory,
@@ -49,9 +49,9 @@ from app.contexts.foundations.workforce.expert_management.contracts.execution im
     ExpertExecutionSnapshot,
 )
 from app.core.config import get_settings
-from app.core.database import async_session_factory
 from app.models.agent import AgentRole
 from app.models.workflow import OutboxEvent
+from app.platform.database import async_session_factory
 
 
 def step_message(step: object) -> str:
@@ -82,7 +82,7 @@ async def lease_heartbeat(
         except TimeoutError:
             pass
         async with async_session_factory() as heartbeat_db:
-            renewed = await renew_step_lease(
+            renewed = await step_leases.renew_step_lease(
                 heartbeat_db,
                 step_id,
                 worker_id=worker_id,
@@ -182,13 +182,11 @@ class _LegacyCapabilityExecutionAdapter:
             return ExecuteWorkflowStepResult(False, "步骤无可用执行者", error="步骤无可用执行者")
         role = _role_from_snapshot(cast(ExpertExecutionSnapshot, prepared.expert))
         text = agent_result.content or "（无产出）"
-        result = await skills.execute_all(
+        result = await ToolDispatcher().dispatch_text(
             self._session,
             role,
             text,
-            user_id=prepared.creator_id,
-            user_intent=prepared.request_text,
-            execution_context=ExecutionContext(
+            ExecutionContext(
                 workflow_run_id=prepared.claim.workflow_id,
                 workflow_step_id=prepared.claim.step_id,
                 attempt=prepared.claim.attempt,
@@ -201,11 +199,13 @@ class _LegacyCapabilityExecutionAdapter:
                 user_intent=prepared.request_text,
                 agent_runner=self._runner,
             ),
+            user_id=prepared.creator_id,
+            user_intent=prepared.request_text,
         )
         for consulted, consult_record in result.consult_replies:
             answer = consult_record.output_content or consult_record.error_msg or "（无产出）"
             text += f"\n\n---\n【{consulted.name} 答复】\n{answer}"
-        text = skills.fold_notes(text, result)
+        text = result.fold_notes(text)
         return ExecuteWorkflowStepResult(
             succeeded=True,
             content=text,

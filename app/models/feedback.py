@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import ForeignKey, Integer, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 
 class AgentFeedback(CommonMixin, Base):

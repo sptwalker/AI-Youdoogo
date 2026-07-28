@@ -75,11 +75,14 @@ class KnowledgeAnswer:
         }
 
 
-class KnowledgeSearchPort(Protocol):
-    """跨 Context 可远端替换的知识检索端口（会话无关签名）。
-
-    Phase 2（docs/21 §11「先切只读 Search」）由 RemoteKnowledgeAdapter 实现同一签名，
-    届时仅换 ``public.build_local_knowledge_search_port`` 的返回实现即可全量改道。
-    """
+class KnowledgeRetrievalPort(Protocol):
+    """Published Search/Answer boundary suitable for local or remote adapters."""
 
     async def search(self, query: SearchKnowledgeQuery) -> SearchKnowledgeResult: ...
+
+    async def answer(self, query: AnswerKnowledgeQuery) -> KnowledgeAnswer: ...
+
+    async def diagnose(self, query: SearchKnowledgeQuery) -> KnowledgeRetrievalArmDiagnostics: ...
+
+
+KnowledgeSearchPort = KnowledgeRetrievalPort

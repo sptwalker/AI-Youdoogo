@@ -4,9 +4,13 @@ import httpx
 import pytest
 import respx
 
+from app.contexts.foundations.knowledge import embedding_gateway as embedding
+from app.contexts.foundations.knowledge.embedding_gateway import (
+    EmbeddingError,
+    embed_query,
+    embed_texts,
+)
 from app.core.config import get_settings
-from app.knowledge import embedding
-from app.knowledge.embedding import EmbeddingError, embed_query, embed_texts
 from app.models.knowledge import EMBED_DIM
 
 ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"

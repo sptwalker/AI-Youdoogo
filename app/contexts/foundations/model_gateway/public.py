@@ -6,6 +6,9 @@ Phase 1 的唯一切换点：把 ``LocalLlmAdapter`` 换成 ``RemoteLlmAdapter``
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from app.contexts.foundations.governance.usage_budget.public import extract_usage
 from app.contexts.foundations.model_gateway.contracts.completion import LlmCompletionPort
 from app.contexts.foundations.model_gateway.infrastructure.local_adapter import (
@@ -14,6 +17,12 @@ from app.contexts.foundations.model_gateway.infrastructure.local_adapter import 
 from app.llm import get_llm_for_role
 
 
-def build_local_llm_completion_port() -> LlmCompletionPort:
+def build_local_llm_completion_port(
+    *,
+    llm_factory: Callable[..., Any] | None = None,
+) -> LlmCompletionPort:
     """Build the in-process LLM completion port backed by the local gateway."""
-    return LocalLlmAdapter(llm_factory=get_llm_for_role, usage_extractor=extract_usage)
+    return LocalLlmAdapter(
+        llm_factory=llm_factory or get_llm_for_role,
+        usage_extractor=extract_usage,
+    )

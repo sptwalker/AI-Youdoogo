@@ -4,7 +4,7 @@ import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { TOKEN_KEY } from '../api/client'
+import { TOKEN_KEY } from '../api/http'
 import RequireAuth from './RequireAuth'
 
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {

@@ -8,7 +8,10 @@ from app.contexts.business.operational_analytics.contracts import (
     IngestError,
     WorkbookParseFailure,
 )
-from app.services.excel_ingest import ExcelParseError, parse_workbook
+from app.contexts.business.operational_analytics.infrastructure.workbook import (
+    ExcelParseError,
+    parse_workbook,
+)
 
 
 class ExcelWorkbookParser:

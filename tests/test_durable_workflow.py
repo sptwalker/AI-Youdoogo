@@ -11,12 +11,17 @@ import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.bootstrap import workflow_worker
+from app.contexts.business.task_management.domain import state_machine as task_flow
 from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyTaskManagementAdapter,
     task_decision_from_payload,
 )
 from app.contexts.foundations.execution.workflow_runtime.contracts.runtime import (
     WORKFLOW_PROGRESSED_V1,
+)
+from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
+    sqlalchemy_recovery as workflow_recovery,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
     workflow_progress_from_payload,
@@ -39,15 +44,11 @@ from app.models.workflow import (
     WorkflowRun,
     WorkflowStep,
 )
-from app.services import (
-    outbox_service,
-    task_flow,
-    task_service,
-    workflow_recovery,
-    workflow_service,
-    workflow_worker,
-)
-from app.services.orchestration_service import PlanStep, is_red_line
+from app.platform.outbox import repository as outbox_service
+from tests import workflow_testkit as workflow_service
+from tests.workflow_testkit import PlanStep, is_red_line
+
+task_service = workflow_service
 
 
 @pytest.fixture
@@ -128,7 +129,10 @@ async def test_atomic_creation_rolls_back_all_mirrors(
         user, _ = await _seed(db)
         invalid = _steps()
         invalid[1].depends_on = [99]
-        with pytest.raises(KeyError):
+        with pytest.raises(
+            ValueError,
+            match="workflow plan dependency references an unknown step",
+        ):
             await workflow_service.create_workflow(
                 db,
                 request="invalid",

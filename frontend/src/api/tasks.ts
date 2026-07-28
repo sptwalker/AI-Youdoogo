@@ -1,5 +1,5 @@
 /** 任务卡 API（对应后端 app/api/v1/tasks.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface TaskCard {
   id: string

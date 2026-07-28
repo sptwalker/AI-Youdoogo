@@ -14,8 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api import deps
-from app.contexts.foundations.model_gateway import public as _mg_public
-from app.core.database import get_db
+from app.contexts.foundations.model_gateway import public as model_gateway
 from app.main import app
 from app.models import Base
 from app.models.agent import AgentRole
@@ -23,8 +22,9 @@ from app.models.audit_log import AuditLog
 from app.models.system import SysDepartment, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.workflow import OUTBOX_PENDING, STEP_SUCCEEDED, OutboxEvent, WorkflowStep
-from app.services import workflow_service
-from app.services.orchestration_service import PlanStep, is_red_line
+from app.platform.database import get_db
+from tests import workflow_testkit as workflow_service
+from tests.workflow_testkit import PlanStep, is_red_line
 
 
 class _FakeLLM:
@@ -116,7 +116,7 @@ async def task_client(
     async def _current_user() -> SysUser:
         return actor["user"]
 
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
+    monkeypatch.setattr(model_gateway, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[deps.get_current_user] = _current_user
     state: dict[str, Any] = {

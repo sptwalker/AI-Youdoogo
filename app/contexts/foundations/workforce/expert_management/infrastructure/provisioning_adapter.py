@@ -14,7 +14,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.workforce.expert_management.application.contracts import (
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
     CreateExpertCommand,
     SeedExpertCommand,
     UpdateExpertCommand,

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.business.collaboration_requests.application.ports import AuditRequest
+from app.contexts.foundations.governance.audit_trail import public as audit_trail
 from app.models.system import SysDepartment
-from app.services import audit_service
 
 
 class OrganizationReviewScopeAdapter:
@@ -54,27 +53,19 @@ class OrganizationReviewScopeAdapter:
         return supervisor_id == reviewer_id
 
 
-class LegacyAuditAdapter:
+class PublishedAuditAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def record(self, request: AuditRequest) -> None:
-        await audit_service.audit(
+        await audit_trail.append_audit_record(
             self._session,
-            actor_id=request.actor_id,
-            actor_role=request.actor_role,
-            action=request.action,
-            summary=request.summary,
-            target_type=request.target_type,
-            target_id=request.target_id,
+            audit_trail.AppendAuditRecordCommand(
+                actor_id=request.actor_id,
+                actor_role=request.actor_role,
+                action=request.action,
+                summary=request.summary,
+                target_type=request.target_type,
+                target_id=request.target_id,
+            ),
         )
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()

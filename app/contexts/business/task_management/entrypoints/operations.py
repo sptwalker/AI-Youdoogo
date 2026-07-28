@@ -13,15 +13,40 @@ from app.contexts.business.task_management.application.contracts import (
     EditTaskRequest,
     RunTaskRequest,
     TaskPrincipal,
+    TaskView,
     TransitionTaskRequest,
 )
 from app.contexts.business.task_management.infrastructure.composition import (
     build_task_management_application,
 )
+from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
+    SQLAlchemyTaskManagementAdapter,
+)
+from app.contexts.foundations.execution.workflow_runtime import public as workflow_runtime
 
 
 async def create_task(session: AsyncSession, request: CreateTaskRequest) -> dict[str, Any]:
     return (await build_task_management_application(session).create(request)).as_dict()
+
+
+async def create_task_in_transaction(
+    session: AsyncSession,
+    request: CreateTaskRequest,
+) -> TaskView:
+    """Stage a Task in the caller-owned transaction for cross-Context workflows."""
+    return await build_task_management_application(session).stage(request)
+
+
+async def start_workflow(
+    session: AsyncSession,
+    command: workflow_runtime.StartWorkflowCommand,
+) -> workflow_runtime.StartWorkflowResult:
+    """Start Workflow Runtime with Task Management's owned projection adapter."""
+    return await workflow_runtime.start_workflow(
+        session,
+        command,
+        task_projection=SQLAlchemyTaskManagementAdapter(session),
+    )
 
 
 async def edit_task(session: AsyncSession, request: EditTaskRequest) -> dict[str, Any]:

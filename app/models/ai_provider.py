@@ -12,7 +12,7 @@ from sqlalchemy import Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.crypto import EncryptedStr
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 TIER_DAILY = "daily"
 TIER_REASONING = "reasoning"

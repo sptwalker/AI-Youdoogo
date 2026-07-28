@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +30,10 @@ from app.contexts.business.group_messaging.domain.models import (
     MemberDraft,
     Message,
 )
+from app.contexts.business.group_messaging.infrastructure.adapters import (
+    PublishedPromotionAdapter,
+)
+from app.contexts.business.proposal_management import public as proposal_management
 from app.contexts.shared_kernel import InvalidInput, PermissionDenied, RuleViolation
 
 
@@ -231,8 +237,71 @@ class FakeArchive:
 
 
 class FakePromotion:
+    def __init__(self) -> None:
+        self.proposals: dict[uuid.UUID, uuid.UUID] = {}
+        self.calls = 0
+
     async def promote(self, request: PromotionRequest) -> uuid.UUID:
+        self.calls += 1
+        if request.target == "proposal":
+            return self.proposals.setdefault(request.source_message_id, uuid.uuid4())
         return uuid.UUID(int=88)
+
+
+class CommitAwareMessageRepository(FakeRepository):
+    """Keep a message update invisible until its Unit of Work commits."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pending_message: Message | None = None
+
+    async def get_message(self, message_id: uuid.UUID) -> Message | None:
+        message = self.messages.get(message_id)
+        return deepcopy(message) if message is not None else None
+
+    async def save_message(self, message: Message) -> None:
+        self._pending_message = deepcopy(message)
+
+    def commit_pending_message(self) -> None:
+        if self._pending_message is not None:
+            self.messages[self._pending_message.id] = self._pending_message
+        self._pending_message = None
+
+    def discard_pending_message(self) -> None:
+        self._pending_message = None
+
+
+class FailFirstMessagePromotionUnitOfWork:
+    def __init__(
+        self,
+        repository: CommitAwareMessageRepository,
+        transactions: dict[str, int | bool],
+    ) -> None:
+        self.messages = repository
+        self._transactions = transactions
+
+    async def __aenter__(self) -> FailFirstMessagePromotionUnitOfWork:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object | None,
+    ) -> None:
+        if exc_type is not None:
+            await self.rollback()
+
+    async def commit(self) -> None:
+        self._transactions["commits"] = int(self._transactions["commits"]) + 1
+        if self._transactions["fail_next_commit"]:
+            self._transactions["fail_next_commit"] = False
+            raise RuntimeError("message commit failed")
+        self.messages.commit_pending_message()
+
+    async def rollback(self) -> None:
+        self.messages.discard_pending_message()
+        self._transactions["rollbacks"] = int(self._transactions["rollbacks"]) + 1
 
 
 class FakeOutbox:
@@ -433,3 +502,77 @@ async def test_attachment_limit_and_path_rules_are_owned_by_application() -> Non
             name="value",
             user_id=uuid.UUID(int=22),
         )
+
+
+async def test_promotion_retry_after_message_commit_failure_reuses_proposal() -> None:
+    message_id = uuid.uuid4()
+    creator_id = uuid.uuid4()
+    repository = CommitAwareMessageRepository()
+    repository.messages[message_id] = Message(
+        id=message_id,
+        channel_id=uuid.uuid4(),
+        speaker_type="human",
+        speaker_id=creator_id,
+        speaker_name="发言人",
+        content="建议启动会员体系",
+        create_time=FixedClock().now(),
+    )
+    transactions: dict[str, int | bool] = {
+        "commits": 0,
+        "rollbacks": 0,
+        "fail_next_commit": True,
+    }
+    promotion = FakePromotion()
+    application = GroupMessagingApplication(
+        uow_factory=lambda: FailFirstMessagePromotionUnitOfWork(repository, transactions),
+        realtime_delivery=FakeRealtime(),
+        realtime_subscription=FakeSubscription(),
+        agent_replies=FakeAgentReplies(),
+        attachment_storage=FakeStorage(),
+        archive_port=FakeArchive(),
+        promotion_port=promotion,
+        outbox_port=FakeOutbox(),
+        clock=FixedClock(),
+        identifiers=SequenceIdentifiers([]),
+    )
+
+    with pytest.raises(RuntimeError, match="message commit failed"):
+        await application.promote_message(message_id, target="proposal", creator_id=creator_id)
+
+    result = await application.promote_message(
+        message_id,
+        target="proposal",
+        creator_id=creator_id,
+    )
+
+    assert promotion.calls == 2
+    assert len(promotion.proposals) == 1
+    assert repository.messages[message_id].ref_id == uuid.UUID(result["ref_id"])
+
+
+async def test_proposal_promotion_forwards_source_message_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_message_id = uuid.uuid4()
+    expected_proposal_id = uuid.uuid4()
+    captured: dict[str, object] = {}
+
+    async def create_proposal(*args: object, **kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(id=expected_proposal_id)
+
+    monkeypatch.setattr(proposal_management, "create_proposal", create_proposal)
+    adapter = PublishedPromotionAdapter(object())
+
+    proposal_id = await adapter.promote(
+        PromotionRequest(
+            target="proposal",
+            title="讨论结论",
+            content="讨论内容",
+            creator_id=uuid.uuid4(),
+            source_message_id=source_message_id,
+        )
+    )
+
+    assert proposal_id == expected_proposal_id
+    assert captured["source_message_id"] == source_message_id

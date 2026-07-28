@@ -1,5 +1,5 @@
 /** 业务术语字典 API（统一语义层，对应后端 app/api/v1/semantic.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface SemanticTerm {
   id: string

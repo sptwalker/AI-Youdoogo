@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,10 +22,14 @@ from app.contexts.foundations.execution.capability_catalog.contracts.definition 
 from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
     CAPABILITY_DEFINITIONS,
 )
+from app.contexts.foundations.governance.system_configuration import (
+    public as system_configuration,
+)
 from app.models.agent import AgentRole
-from app.services import config_service
 
 logger = logging.getLogger(__name__)
+
+ConfigurationResolver = Callable[[AsyncSession, str, Any], Awaitable[Any]]
 
 
 @dataclass(frozen=True)
@@ -111,8 +116,13 @@ def enabled_skills(role: AgentRole) -> list[Skill]:
     return [REGISTRY[key] for key in tools if key in REGISTRY]
 
 
-async def flag_on(db: AsyncSession, skill: Skill) -> bool:
-    flag = await config_service.resolve(db, skill.flag_key, True)
+async def flag_on(
+    db: AsyncSession,
+    skill: Skill,
+    resolver: ConfigurationResolver | None = None,
+) -> bool:
+    resolve = resolver or system_configuration.resolve_configuration
+    flag = await resolve(db, skill.flag_key, True)
     return str(flag).lower() not in ("false", "0")
 
 
@@ -147,12 +157,16 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
     return ""
 
 
-async def prompt_sections(db: AsyncSession, role: AgentRole) -> str:
+async def prompt_sections(
+    db: AsyncSession,
+    role: AgentRole,
+    resolver: ConfigurationResolver | None = None,
+) -> str:
     """Build enabled prompt sections while isolating individual skill failures."""
     parts: list[str] = []
     for skill in enabled_skills(role):
         try:
-            if await flag_on(db, skill):
+            if await flag_on(db, skill, resolver):
                 parts.append(await _section(db, skill))
         except Exception:  # noqa: BLE001 - one prompt failure must not block the agent
             logger.warning("技能提示词段注入失败 skill=%s", skill.key, exc_info=True)

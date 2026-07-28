@@ -6,14 +6,12 @@ import time
 
 import httpx
 
-from app.contexts.foundations.model_gateway.contracts.completion import (
-    LlmCompletionRequest,
-)
+from app.contexts.foundations.knowledge.embedding_gateway import _api_key, embed_query
+from app.contexts.foundations.model_gateway.contracts.completion import LlmCompletionRequest
 from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
 from app.core import runtime_config
 from app.core.config import get_settings
 from app.integrations.feishu.client import FeishuClient
-from app.knowledge.embedding import _api_key, embed_query
 
 from ..contracts import ConnectivityProbeResult
 
@@ -71,7 +69,8 @@ class FeishuConnectivityProbe:
             )
         started_at = time.monotonic()
         try:
-            await FeishuClient().get_tenant_access_token()
+            async with FeishuClient() as client:
+                await client.get_tenant_access_token()
             return ConnectivityProbeResult(
                 "feishu", "ok", _elapsed(started_at), "鉴权通过"
             )

@@ -1,5 +1,5 @@
 /** 鉴权与用户管理 API（对应后端 app/api/v1/auth.py 与 users.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface TokenData {
   access_token: string

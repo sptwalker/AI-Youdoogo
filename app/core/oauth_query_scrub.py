@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.services.feishu_login import CALLBACK_PATH
+from app.contexts.foundations.identity.browser_login import CALLBACK_PATH
 
 
 class OAuthCallbackQueryScrubMiddleware:

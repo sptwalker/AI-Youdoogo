@@ -11,12 +11,19 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.bootstrap import workflow_events, workflow_worker
+from app.contexts.business.group_messaging.application.contracts import (
+    DISBAND_ARCHIVE_EVENT,
+    archive_file_id,
+)
+from app.contexts.business.group_messaging.entrypoints import operations as discussion_service
 from app.models import Base
 from app.models.discussion import ChannelMember, DiscussionChannel, DiscussionMessage
 from app.models.knowledge import KnowledgeBase, KnowledgeFile, KnowledgeVector
 from app.models.system import SysUser
 from app.models.workflow import OUTBOX_DONE, OUTBOX_FAILED, OUTBOX_PENDING, OutboxEvent
-from app.services import discussion_service, outbox_service, workflow_worker
+from app.platform import outbox
+from app.platform.outbox import repository as outbox_service
 
 
 @pytest.fixture
@@ -62,7 +69,7 @@ async def test_disband_and_archive_event_commit_atomically(
         async def _fail_enqueue(*args: object, **kwargs: object) -> OutboxEvent:
             raise RuntimeError("outbox unavailable")
 
-        monkeypatch.setattr(outbox_service, "enqueue", _fail_enqueue)
+        monkeypatch.setattr(outbox, "enqueue", _fail_enqueue)
         with pytest.raises(RuntimeError, match="outbox unavailable"):
             await discussion_service.disband_channel(db, channel_id)
 
@@ -90,7 +97,7 @@ async def test_worker_processes_persisted_archive_after_new_session(
         event = (
             await setup.execute(
                 select(OutboxEvent).where(
-                    OutboxEvent.event_type == discussion_service.DISBAND_ARCHIVE_EVENT
+                    OutboxEvent.event_type == DISBAND_ARCHIVE_EVENT
                 )
             )
         ).scalar_one()
@@ -101,7 +108,7 @@ async def test_worker_processes_persisted_archive_after_new_session(
     async def _fake_archive(_db: AsyncSession, channel_id: uuid.UUID) -> None:
         archived.append(channel_id)
 
-    monkeypatch.setattr(discussion_service, "archive_disbanded_channel", _fake_archive)
+    monkeypatch.setattr(workflow_events, "archive_disbanded_channel", _fake_archive)
     async with maker() as restarted_worker:
         assert await workflow_worker.process_one(restarted_worker, worker_id="restarted")
         current = await restarted_worker.get(OutboxEvent, event_id)
@@ -146,14 +153,14 @@ async def test_archive_failure_retries_without_reverting_disband(
             if calls == 1:
                 raise RuntimeError("temporary archive failure")
 
-        monkeypatch.setattr(discussion_service, "archive_disbanded_channel", _flaky_archive)
+        monkeypatch.setattr(workflow_events, "archive_disbanded_channel", _flaky_archive)
         with pytest.raises(RuntimeError, match="temporary archive failure"):
             await workflow_worker.process_one(db, worker_id="retry-worker")
 
         event = (
             await db.execute(
                 select(OutboxEvent).where(
-                    OutboxEvent.event_type == discussion_service.DISBAND_ARCHIVE_EVENT
+                    OutboxEvent.event_type == DISBAND_ARCHIVE_EVENT
                 )
             )
         ).scalar_one()
@@ -179,7 +186,7 @@ async def test_terminal_archive_failure_is_observable_in_outbox(
         event = (
             await db.execute(
                 select(OutboxEvent).where(
-                    OutboxEvent.event_type == discussion_service.DISBAND_ARCHIVE_EVENT
+                    OutboxEvent.event_type == DISBAND_ARCHIVE_EVENT
                 )
             )
         ).scalar_one()
@@ -189,7 +196,7 @@ async def test_terminal_archive_failure_is_observable_in_outbox(
         async def _fail_archive(_db: AsyncSession, _channel_id: uuid.UUID) -> None:
             raise RuntimeError("permanent archive failure")
 
-        monkeypatch.setattr(discussion_service, "archive_disbanded_channel", _fail_archive)
+        monkeypatch.setattr(workflow_events, "archive_disbanded_channel", _fail_archive)
         with pytest.raises(RuntimeError, match="permanent archive failure"):
             await workflow_worker.process_one(db, worker_id="terminal-worker")
 
@@ -203,13 +210,15 @@ async def test_terminal_archive_failure_is_observable_in_outbox(
 async def test_archive_replay_reuses_deterministic_knowledge_file(
     maker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
+        sqlalchemy_index as ingest_module,
+    )
     from app.contexts.foundations.knowledge.organizational_memory import (
         public as organizational_memory,
     )
     from app.contexts.foundations.knowledge.organizational_memory.contracts import (
         MemoryDraft,
     )
-    from app.knowledge import ingest as ingest_module
 
     async with maker() as db:
         user = SysUser(username="archive-owner", password_hash="x", role_code="admin")
@@ -258,6 +267,6 @@ async def test_archive_replay_reuses_deterministic_knowledge_file(
             await db.execute(select(func.count()).select_from(KnowledgeVector))
         ).scalar_one()
         assert len(files) == 1
-        assert files[0].id == discussion_service._archive_file_id(channel.id)
+        assert files[0].id == archive_file_id(channel.id)
         assert files[0].status == "indexed"
         assert vector_count == 1

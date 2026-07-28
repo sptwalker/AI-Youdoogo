@@ -10,7 +10,7 @@ import uuid
 from sqlalchemy import ForeignKey, Index, Integer, SmallInteger, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 # 组织节点类型
 COMPANY = "company"

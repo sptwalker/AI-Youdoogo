@@ -16,7 +16,9 @@ sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows 
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
-from app.agents import ops  # noqa: E402
+from app.contexts.business.operational_analytics.entrypoints import (  # noqa: E402
+    agent_operations as ops,
+)
 from app.core.config import get_settings  # noqa: E402
 from app.models import Base  # noqa: E402
 from app.models.agent import AgentRole  # noqa: E402
@@ -46,7 +48,8 @@ async def _run() -> int:
     async with factory() as db:
         db.add(
             AgentRole(
-                name=ops.OPS_DIRECTOR_NAME,
+                name="平台运营部总监助理",
+                code=ops.OPS_DIRECTOR_CODE,
                 prompt_template=(
                     "你是创想悦动平台运营部的AI运营总监。只依据数据分析，禁止臆造。"
                     "日报固定包含【核心指标概览】【异常与关注点】【运营建议】三部分。"
@@ -58,8 +61,12 @@ async def _run() -> int:
         import uuid as _uuid
 
         operator = _uuid.uuid4()
-        record = await ops.generate_daily_report(
-            db, stat_date="2026-07-11", rows=_ROWS, operator_id=operator
+        record = await ops.create_daily_report(
+            db,
+            stat_date="2026-07-11",
+            rows=_ROWS,
+            operator_id=operator,
+            notify=False,
         )
         log = (await db.execute(select(LlmCallLog))).scalar_one_or_none()
 
