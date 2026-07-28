@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "youdoo"
+    minio_secure: bool = False  # 生产置 True 走 TLS；本地/compose MinIO 明文默认 False
 
     # 大模型密钥（国产为主，DeepSeek 主力）
     deepseek_api_key: str = ""

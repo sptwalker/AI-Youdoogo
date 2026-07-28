@@ -15,6 +15,7 @@ from app.bootstrap.wiring import register_routes
 from app.core.config import Settings, get_settings
 from app.core.logging import setup_logging
 from app.core.oauth_query_scrub import OAuthCallbackQueryScrubMiddleware
+from app.core.request_context import TraceIdMiddleware
 from app.platform.database import async_session_factory, engine
 from app.platform.http_runtime import ok, register_exception_handlers
 
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.add_middleware(OAuthCallbackQueryScrubMiddleware)
+    application.add_middleware(TraceIdMiddleware)  # 最后加=最外层，trace_id 先于一切就位
     register_exception_handlers(application)
     register_application_error_handlers(application)
     register_routes(application)
