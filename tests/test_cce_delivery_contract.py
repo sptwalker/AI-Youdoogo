@@ -133,7 +133,7 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
         "apt-get update",
         "apt-get install --yes --no-install-recommends git",
         "rm -rf /var/lib/apt/lists/*",
-        "python -m pip install --no-cache-dir uv==0.11.7",
+        "python -m pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple --retries 5 --timeout 60 uv==0.11.7",
     ]
     assert backend_verify["script"] == ["bash scripts/ci/verify-backend-localfs.sh"]
     backend_gate_commands = (
