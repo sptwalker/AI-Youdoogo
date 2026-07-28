@@ -10,6 +10,7 @@ if [ ! -d "$CI_PROJECT_DIR" ]; then
 fi
 
 workdir="/tmp/youdoogo-verify-${CI_JOB_ID:-local}"
+local_uv_cache="/tmp/youdoogo-uv-cache-${CI_JOB_ID:-local}"
 source_uv_cache="${UV_CACHE_DIR:-$CI_PROJECT_DIR/.cache/uv}"
 
 if [[ "$source_uv_cache" == '$CI_PROJECT_DIR/'* ]]; then
@@ -21,7 +22,7 @@ elif [[ "$source_uv_cache" != /* ]]; then
 fi
 
 cleanup() {
-    rm -rf -- "$workdir"
+    rm -rf -- "$workdir" "$local_uv_cache"
 }
 trap cleanup EXIT
 
@@ -43,7 +44,6 @@ fi
 
 cd "$workdir"
 
-local_uv_cache="$workdir/.cache/uv"
 export UV_CACHE_DIR="$local_uv_cache"
 mkdir -p -- "$UV_CACHE_DIR"
 

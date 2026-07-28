@@ -133,7 +133,11 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
         "apt-get update",
         "apt-get install --yes --no-install-recommends git",
         "rm -rf /var/lib/apt/lists/*",
-        "python -m pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple --retries 5 --timeout 60 uv==0.11.7",
+        (
+            "python -m pip install --no-cache-dir "
+            "--index-url https://pypi.tuna.tsinghua.edu.cn/simple "
+            "--retries 5 --timeout 60 uv==0.11.7"
+        ),
     ]
     assert backend_verify["script"] == ["bash scripts/ci/verify-backend-localfs.sh"]
     backend_gate_commands = (
@@ -156,13 +160,14 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert ': "${CI_PROJECT_DIR:?CI_PROJECT_DIR is required}"' in backend_helper
     assert ': "${CI_COMMIT_SHA:?CI_COMMIT_SHA is required}"' in backend_helper
     assert 'workdir="/tmp/youdoogo-verify-${CI_JOB_ID:-local}"' in backend_helper
+    assert 'local_uv_cache="/tmp/youdoogo-uv-cache-${CI_JOB_ID:-local}"' in backend_helper
     assert 'source_uv_cache="${UV_CACHE_DIR:-$CI_PROJECT_DIR/.cache/uv}"' in backend_helper
-    assert 'local_uv_cache="$workdir/.cache/uv"' in backend_helper
     assert 'export UV_CACHE_DIR="$local_uv_cache"' in backend_helper
     assert "trap cleanup EXIT" in backend_helper
     assert "command -v git >/dev/null" in backend_helper
     assert "command -v tar >/dev/null" in backend_helper
-    assert 'rm -rf -- "$workdir"' in backend_helper
+    assert 'rm -rf -- "$workdir" "$local_uv_cache"' in backend_helper
+    assert 'local_uv_cache="$workdir/' not in backend_helper
     assert 'git -C "$CI_PROJECT_DIR" cat-file -e "$CI_COMMIT_SHA:.env"' in backend_helper
     assert 'cd "$CI_PROJECT_DIR"' in backend_helper
     assert (
