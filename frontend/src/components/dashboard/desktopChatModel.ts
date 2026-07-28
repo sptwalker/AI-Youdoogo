@@ -4,7 +4,7 @@ export const DESKTOP_STREAMING_MESSAGE_PREFIX = '__streaming__-'
 const LEGACY_STREAMING_MESSAGE_ID = '__streaming__'
 const MAX_REPLY_PREVIEW_CHARS = 120
 
-export function upsertDesktopMessage(items: DesktopMessage[], persisted: DesktopMessage): DesktopMessage[] {
+function upsertDesktopMessage(items: DesktopMessage[], persisted: DesktopMessage): DesktopMessage[] {
   const persistedIndex = items.findIndex((item) => item.id === persisted.id)
   if (persistedIndex < 0) return [...items, persisted]
   return items.map((item, index) => (index === persistedIndex ? persisted : item))

@@ -7,7 +7,6 @@ import {
   testDataSource,
   updateDataSource,
   type DataSource,
-  type DataSourceTestResult,
 } from '../../api/dataSources'
 import { flattenDepts, getTree, type OrgNode } from '../../api/org'
 import {
@@ -17,7 +16,7 @@ import {
 } from '../../api/opsData'
 
 export { DS_TYPES, flattenDepts }
-export type { AgentRole, DataSource, DataSourceTestResult, OpsEventGroup, OrgNode }
+export type { DataSource, OpsEventGroup }
 
 export interface DataSourcesApi {
   listAgents(): Promise<AgentRole[]>

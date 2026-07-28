@@ -18,7 +18,7 @@ export interface DiscussionRequestOptions {
   silent?: boolean
 }
 
-export interface Channel {
+interface Channel {
   id: string
   name: string
   department_id: string | null
@@ -101,14 +101,6 @@ export function removeMember(channelId: string, memberType: string, memberId: st
 /** 解散讨论群（仅群主）。 */
 export function disbandChannel(channelId: string): Promise<null> {
   return request({ method: 'DELETE', url: `/channels/${channelId}` })
-}
-
-export function listChannels(departmentId?: string): Promise<Channel[]> {
-  return request({
-    method: 'GET',
-    url: '/channels',
-    params: departmentId ? { department_id: departmentId } : undefined,
-  })
 }
 
 export function createChannel(payload: {

@@ -18,6 +18,11 @@ TEMPLATES = {
 DNS_LABEL = re.compile(r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")
 DNS_SUBDOMAIN = re.compile(r"^[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?$")
 IMAGE = re.compile(r"^[A-Za-z0-9._:/-]+$")
+ELB_ID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+CERTIFICATE_IDS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*(?:,[A-Za-z0-9][A-Za-z0-9._:-]*)*$")
 
 
 def required(name: str) -> str:
@@ -45,6 +50,10 @@ def inputs() -> dict[str, str]:
     runtime_secret = required("RUNTIME_SECRET_NAME")
     runtime_configmap = required("RUNTIME_CONFIGMAP_NAME")
     ingress_class = required("INGRESS_CLASS_NAME")
+    public_host = required("PUBLIC_HOST")
+    cce_elb_id = required("CCE_ELB_ID")
+    cce_listener_master_ingress = required("CCE_LISTENER_MASTER_INGRESS")
+    cce_tls_certificate_ids = required("CCE_TLS_CERTIFICATE_IDS")
     image_tag = required("IMAGE_TAG")
     backend_image = required("BACKEND_IMAGE")
     frontend_image = required("FRONTEND_IMAGE")
@@ -59,6 +68,17 @@ def inputs() -> dict[str, str]:
     ):
         validate_name(name, value)
 
+    validate_name("PUBLIC_HOST", public_host)
+    if not ELB_ID.fullmatch(cce_elb_id):
+        raise SystemExit("ERROR: CCE_ELB_ID must be a UUID")
+    listener_parts = cce_listener_master_ingress.split("/")
+    if len(listener_parts) != 2:
+        raise SystemExit("ERROR: CCE_LISTENER_MASTER_INGRESS must be namespace/name")
+    validate_name("CCE_LISTENER_MASTER_INGRESS namespace", listener_parts[0], subdomain=False)
+    validate_name("CCE_LISTENER_MASTER_INGRESS name", listener_parts[1])
+    if not CERTIFICATE_IDS.fullmatch(cce_tls_certificate_ids):
+        raise SystemExit("ERROR: CCE_TLS_CERTIFICATE_IDS is invalid")
+
     for name, value in (("BACKEND_IMAGE", backend_image), ("FRONTEND_IMAGE", frontend_image)):
         if not IMAGE.fullmatch(value) or not value.endswith(f":{image_tag}"):
             raise SystemExit(f"ERROR: {name} must be a safe immutable image tagged {image_tag}")
@@ -69,6 +89,10 @@ def inputs() -> dict[str, str]:
         "__RUNTIME_SECRET_NAME__": runtime_secret,
         "__RUNTIME_CONFIGMAP_NAME__": runtime_configmap,
         "__INGRESS_CLASS_NAME__": ingress_class,
+        "__PUBLIC_HOST__": public_host,
+        "__CCE_ELB_ID__": cce_elb_id,
+        "__CCE_LISTENER_MASTER_INGRESS__": cce_listener_master_ingress,
+        "__CCE_TLS_CERTIFICATE_IDS__": cce_tls_certificate_ids,
         "__IMAGE_TAG__": image_tag,
         "__BACKEND_IMAGE__": backend_image,
         "__FRONTEND_IMAGE__": frontend_image,

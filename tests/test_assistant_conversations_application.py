@@ -79,13 +79,6 @@ class _Repository:
             None,
         )
 
-    async def list_pinned(self, owner_user_id: uuid.UUID) -> list[ConversationMessage]:
-        return [
-            row
-            for row in self._store.messages
-            if row.owner_user_id == owner_user_id and row.is_pinned
-        ]
-
     async def add(self, message: ConversationMessage) -> None:
         self._store.messages.append(message)
 

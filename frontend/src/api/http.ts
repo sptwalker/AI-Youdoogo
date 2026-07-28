@@ -16,7 +16,7 @@ export function loginRedirectPath(location: BrowserLocation, expired = false): s
   return `/login?${params.toString()}`
 }
 
-export function getToken(): string | null {
+function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY)
 }
 
@@ -60,7 +60,7 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiEnvelope<T> {
+interface ApiEnvelope<T> {
   code: number
   msg: string
   data: T
@@ -138,12 +138,12 @@ export interface SseSubscription {
   restart: () => void
 }
 
-export interface StreamTurnStartPayload {
+interface StreamTurnStartPayload {
   speaker_agent_id: string | null
   speaker_name: string
 }
 
-export interface StreamDeltaPayload {
+interface StreamDeltaPayload {
   text: string
 }
 

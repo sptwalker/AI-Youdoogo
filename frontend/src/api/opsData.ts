@@ -46,7 +46,7 @@ export function testReadOpsData(statDate: string): Promise<TestReadResult> {
 }
 
 // ── 运营事件命名（事件码 → 中文显示别名）──────────────────────
-export interface OpsEvent {
+interface OpsEvent {
   event_code: string
   count: number
   display_name: string

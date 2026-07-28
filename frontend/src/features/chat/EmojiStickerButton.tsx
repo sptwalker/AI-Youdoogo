@@ -161,5 +161,3 @@ export function EmojiStickerButton({
     </Popover>
   )
 }
-
-export default EmojiStickerButton

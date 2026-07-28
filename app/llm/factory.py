@@ -91,11 +91,6 @@ def clear_card_providers() -> None:
         _CUSTOM_PROVIDERS.pop(pid, None)
 
 
-def get_custom_provider(provider_id: str) -> dict[str, str] | None:
-    """查询自定义 provider 信息。"""
-    return _CUSTOM_PROVIDERS.get(provider_id.lower().strip())
-
-
 # ── 卡片状态：禁用集合 + 各档位（tier）主用/候选顺序（真源 ai_provider 表）──────────
 # 由 ai_provider_service.sync_to_factory 在启动 + 每次卡片增删改后推送到此进程内缓存，
 # 供 roles.get_llm_for_role 按档位取「主用 + 同档 active」候选。

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-base_url="https://ai.youdoogo.com/"
-health_url="https://ai.youdoogo.com/api/v1/health"
+: "${PUBLIC_HOST:?PUBLIC_HOST is required}"
+base_url="https://${PUBLIC_HOST}/"
+health_url="${base_url}api/v1/health"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 

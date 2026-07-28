@@ -74,24 +74,6 @@ export function updateRoleTools(roleId: string, tools: string[]) {
   return request({ method: 'PATCH', url: `/agents/roles/${roleId}`, data: { tools } })
 }
 
-export interface ChatTurn {
-  role: 'user' | 'ai'
-  content: string
-}
-
-/** 与某 AI 顾问实时对话（知识库加持、留痕）。 */
-export function consultAgent(
-  roleId: string,
-  message: string,
-  history: ChatTurn[],
-): Promise<{ reply: string; status: string }> {
-  return request({
-    method: 'POST',
-    url: `/agents/roles/${roleId}/consult`,
-    data: { message, history },
-  })
-}
-
 export function addFeedback(recordId: string, score: number, comment?: string) {
   return request({
     method: 'POST',

@@ -1,6 +1,6 @@
 # YOUDOOGO CCE first-release preflight
 
-This repository contains no production values and the pipeline never creates Kubernetes
+This repository contains no production secrets and the pipeline never creates Kubernetes
 Secrets or ConfigMaps. The protected `dev` branch is the only delivery ref because GitLab
 currently has no approved `main`; merge-request pipelines verify only. A platform owner must
 complete every item below before the first delivery pipeline can pass.
@@ -21,11 +21,9 @@ use them. Do not enter examples, placeholders, test credentials, or guessed obje
 | `FEISHU_APP_SECRET` | masked + protected group credential | Secret for that Feishu application, used by the CI notification job only. |
 
 The SWR username is formed only in CI as `SWR_REGION@SWR_AK`. The notification uses the Feishu
-application API with `receive_id_type=chat_id`. Its destination is the shared, fixed organization
-chat already used by sibling delivery pipelines; that nonsecret target is a code constant, not an
-`ai` group variable. There is no repository webhook or project-specific target configuration.
-These group credentials are not copied into the backend Deployment and do not enable application
-login.
+application API with `receive_id_type=chat_id`; its non-secret destination is a reviewed repository
+pipeline default. There is no repository webhook or extra group variable. These group credentials
+are not copied into the backend Deployment and do not enable application login.
 
 ### Platform-approved nonsecret configuration
 
@@ -77,8 +75,10 @@ it.
 
 The project Ingress carries the user-managed ELB class, ELB ID, listener ports, listener-master
 Ingress, and TLS certificate-ID annotations verified from working independent-host CCE Ingresses
-on the same production controller. This binds `ai.youdoogo.com` to the existing HTTPS listener;
-without it CCE leaves the host unregistered and the ELB returns its own 404.
+on the same production controller. The environment-specific host, listener metadata, and notification
+destination are reviewed repository pipeline defaults, so operators do not configure additional
+variables. The existing HTTPS listener is bound to `PUBLIC_HOST`; without it CCE leaves the host
+unregistered and the ELB returns its own 404.
 
 These annotations are operational metadata, not application configuration. If ownership of the
 shared ELB or listener changes, obtain the replacement values from the listener owner, update the
@@ -112,9 +112,9 @@ certificate material.
 - `INGRESS_CLASS_NAME` is the existing `cce` controller path backed by that ELB. The controller has
   no cluster `IngressClass` object, so CI validates the rendered Ingress class and shared ELB
   annotations instead of requiring a nonexistent object.
-- No other Ingress in the cluster owns `ai.youdoogo.com`. A pre-existing
+- No other Ingress in the cluster owns the configured `PUBLIC_HOST`. A pre-existing
   `KUBE_NAMESPACE/youdoogo` Ingress is accepted only when its class matches the approved input.
-- Public DNS ownership remains with the platform team: `ai.youdoogo.com` must resolve only to the
+- Public DNS ownership remains with the platform team: `PUBLIC_HOST` must resolve only to the
   intended ELB. The current ELB 404 is not delivery success; the pipeline must complete and both
   HTTPS smoke probes must pass.
 - The kubeconfig can get/list the referenced objects and cluster Ingress inventory, perform
@@ -132,7 +132,7 @@ images for HIGH and CRITICAL vulnerabilities before deployment. A commit-scoped 
 `backoffLimit: 0` and a ten-minute deadline. An existing failed/incomplete Job is never deleted or
 retried by CI; a platform/application owner must diagnose it and explicitly decide how to recover.
 
-The project-owned Ingress contains the single host `ai.youdoogo.com` and sends `/` traffic to the
+The project-owned Ingress contains the single configured `PUBLIC_HOST` and sends `/` traffic to the
 frontend. Frontend Nginx serves the SPA and proxies `/api/` to the private backend Service. No
 `nexus` ConfigMap, `nginx-extra-locations`, path key, or shared Nexus route is read or changed.
 

@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PUBLIC_HOST="ai.youdoogo.com"
 INGRESS_NAME="youdoogo"
 BACKEND_DEPLOYMENT="youdoogo-backend"
 FRONTEND_DEPLOYMENT="youdoogo-frontend"
 
 required=(
   KUBE_NAMESPACE KUBE_IMAGE_PULL_SECRET RUNTIME_SECRET_NAME RUNTIME_CONFIGMAP_NAME
-  INGRESS_CLASS_NAME IMAGE_TAG BACKEND_IMAGE FRONTEND_IMAGE
+  INGRESS_CLASS_NAME PUBLIC_HOST IMAGE_TAG BACKEND_IMAGE FRONTEND_IMAGE
 )
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then

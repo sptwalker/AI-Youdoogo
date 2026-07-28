@@ -152,17 +152,6 @@ class StepExecutionDisposition:
         return cls("defer", retry_at=retry_at, reason=reason)
 
 
-@dataclass(frozen=True, slots=True)
-class ResumeWorkflowCommand:
-    workflow_id: uuid.UUID
-    workflow_step_id: uuid.UUID
-    task_id: uuid.UUID
-    decision: str
-    principal_id: uuid.UUID
-    expected_step_version: int
-    decision_event_id: uuid.UUID
-
-
 WORKFLOW_PROGRESSED_V1 = "workflow.progressed.v1"
 
 

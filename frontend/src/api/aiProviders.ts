@@ -2,7 +2,7 @@
 import { request } from './http'
 
 export type Tier = 'daily' | 'reasoning'
-export type TestStatus = 'ok' | 'fail' | 'untested' | 'disabled'
+type TestStatus = 'ok' | 'fail' | 'untested' | 'disabled'
 
 export interface AiProvider {
   id: string

@@ -16,7 +16,6 @@ from app.contexts.foundations.identity.infrastructure.browser_login import (
 )
 from app.contexts.foundations.identity.infrastructure.oauth_config import (
     CALLBACK_PATH,
-    PRODUCTION_REDIRECT_URL,
     InvalidOAuthCallback,
     InvalidOAuthState,
     InvalidReturnTo,
@@ -41,7 +40,6 @@ __all__ = [
     "OAuthStart",
     "OAuthStateData",
     "OAuthUnavailable",
-    "PRODUCTION_REDIRECT_URL",
     "RedisOAuthStore",
     "STATE_TTL_SECONDS",
     "digest",
