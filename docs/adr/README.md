@@ -1,8 +1,8 @@
 # Architecture Decision Records — Seam Index
 
 AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context 依赖收进 session-free 端口与不透明契约。
-本索引是 ADR 0001–0008 的**单一封存视图**——每个 seam 的 Port / 唯一切换点 / 守卫测试 / Phase-1+ Remote
-目标一屏可扫，防边界在后续开发中被无意绕过或遗忘。
+本索引是 ADR 0001–0009 的**单一封存视图**——每个 seam 的 Port / 唯一切换点 / 守卫测试 / Phase-1+ Remote
+目标一屏可扫，防边界在后续开发中被无意绕过或遗忘。ADR 0009 为跨服务契约治理策略（非 seam）。
 
 ---
 
@@ -39,6 +39,9 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
   通过 `model_gateway.public.build_local_llm_completion_port()` 工厂切换，配合 §14 灰度路由（1%→10%→50%→100%）
   与快速回退。
 
+**策略已由 [[0009](0009-contract-governance-policy.md)] 采纳为已决策**（Envelope 字段 / SemVer 兼容 / 事件
+`<name>.vN` 判别符 / 消费者契约测试入 CI），实现明确归 Phase 1 首个 Remote adapter；CDC 契约测试流水线归 D 组 D1。
+
 <!-- ponytail: 端口各仅一实现、无远端传输，此刻加版本字段=过早脚手架（YAGNI），故只记策略不落字段。 -->
 
 ---
@@ -53,3 +56,4 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
 - 0006: 知识写侧端口收编
 - 0007: 运行时契约剔除跨 Context 产品类型
 - 0008: 专家聚合逻辑拆分（单表）
+- 0009: 跨服务契约治理策略（Envelope / SemVer / CDC，实现归 Phase 1）
