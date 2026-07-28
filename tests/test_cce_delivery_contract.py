@@ -445,7 +445,7 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
     assert "access_log off;" in callback
     assert "proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};" in callback
     assert "proxy_set_header X-Forwarded-Proto $upstream_forwarded_proto;" in callback
-    client = (ROOT / "frontend/src/api/client.ts").read_text(encoding="utf-8")
+    client = (ROOT / "frontend/src/api/http.ts").read_text(encoding="utf-8")
     assert "baseURL: '/api/v1'" in client
 
 
