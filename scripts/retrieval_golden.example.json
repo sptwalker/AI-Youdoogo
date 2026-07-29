@@ -1,0 +1,17 @@
+[
+  {
+    "query": "盒子A5 的售价和分辨率",
+    "top_k": 5,
+    "relevant_names": ["盒子A5规格"]
+  },
+  {
+    "query": "智能盒子怎么退货",
+    "top_k": 5,
+    "relevant_names": ["退货政策"]
+  },
+  {
+    "query": "固件怎么升级",
+    "top_k": 5,
+    "relevant_names": ["固件升级"]
+  }
+]

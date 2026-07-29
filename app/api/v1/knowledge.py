@@ -36,9 +36,12 @@ from app.contexts.foundations.knowledge.knowledge_indexing.public import (
 )
 from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
     AnswerKnowledgeQuery,
+    SearchKnowledgeQuery,
+    SearchKnowledgeResult,
 )
 from app.contexts.foundations.knowledge.knowledge_retrieval.public import (
     answer_knowledge,
+    diagnose_retrieval_arms,
 )
 from app.contexts.foundations.knowledge.wiki_management.public import (
     get_default_knowledge_base,
@@ -50,6 +53,7 @@ from app.platform.http_runtime import ok
 from app.schemas.knowledge import (
     AskRequest,
     AskResponse,
+    DiagnoseRequest,
     FeishuIngestRequest,
     FileOut,
     TextIngestRequest,
@@ -209,3 +213,59 @@ async def ask(body: AskRequest, db: DB, user: CurrentUser) -> dict:
         for citation in result.citations
     ]
     return ok(AskResponse(answer=result.answer, sources=sources).model_dump(mode="json"))
+
+
+def _arm_hits(arm: SearchKnowledgeResult) -> list[dict[str, Any]]:
+    """把一臂命中拍平成可 JSON 化的行（供分臂对比展示）。"""
+    return [
+        {
+            "file_id": str(hit.document_id),
+            "file_name": hit.document_name,
+            "chunk_index": hit.chunk_index,
+            "score_distance": hit.score_distance,
+            "snippet": hit.content,
+        }
+        for hit in arm.hits
+    ]
+
+
+@router.post("/diagnose")
+async def diagnose(body: DiagnoseRequest, db: DB, manager: Manager) -> dict:
+    """检索分臂诊断：对比 vector/keyword/fused 三臂命中，用于调检索质量（仅管理者）。
+
+    与 /ask 同范围隔离：按请求者可见知识库过滤；admin 全库=跨部门检索，落审计（决策⑥）。
+    """
+    principal = Principal(
+        principal_type=PrincipalType.USER,
+        principal_id=manager.id,
+        role_code=manager.role_code,
+        department_id=manager.department_id,
+        is_active=manager.is_active,
+    )
+    ids = await visible_knowledge_ids(db, principal=principal)
+    if manager.role_code == "admin":
+        await append_audit_record(
+            db,
+            AppendAuditRecordCommand(
+                actor_id=manager.id,
+                actor_role=manager.role_code,
+                action="knowledge.cross_dept_search",
+                summary=f"跨部门检索诊断：{body.query[:60]}",
+            ),
+        )
+    result = await diagnose_retrieval_arms(
+        db,
+        SearchKnowledgeQuery(
+            query=body.query,
+            top_k=body.top_k,
+            visible_knowledge_base_ids=tuple(ids),
+        ),
+    )
+    return ok(
+        {
+            "query": body.query,
+            "vector": _arm_hits(result.vector),
+            "keyword": _arm_hits(result.keyword),
+            "fused": _arm_hits(result.fused),
+        }
+    )

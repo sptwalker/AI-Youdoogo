@@ -53,6 +53,13 @@ class AskResponse(BaseModel):
     sources: list[dict[str, Any]]
 
 
+class DiagnoseRequest(BaseModel):
+    """检索分臂诊断：对比 vector/keyword/fused 三臂命中，用于调检索质量。"""
+
+    query: str = Field(min_length=1, max_length=1000)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
 class KnowledgeBaseCreate(BaseModel):
     """新建知识库。department scope 需 department_id；personal scope 需 owner_agent_id。"""
 

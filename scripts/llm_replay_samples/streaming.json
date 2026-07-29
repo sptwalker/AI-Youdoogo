@@ -1,0 +1,15 @@
+{
+  "kind": "streaming",
+  "request": {
+    "model_role": "daily",
+    "system_prompt": "你是创想悦动的运营助手，回答简洁准确。",
+    "user_message": "盒子A5 支持哪些分辨率？",
+    "temperature": 0.3
+  },
+  "chunks": [
+    { "delta": "盒子A5", "accumulated_content": "盒子A5", "model": "deepseek-chat", "usage": { "prompt_tokens": 40, "completion_tokens": 1, "total_tokens": 41 } },
+    { "delta": "支持 1080P", "accumulated_content": "盒子A5支持 1080P", "model": "deepseek-chat", "usage": { "prompt_tokens": 40, "completion_tokens": 4, "total_tokens": 44 } },
+    { "delta": " 与 4K", "accumulated_content": "盒子A5支持 1080P 与 4K", "model": "deepseek-chat", "usage": { "prompt_tokens": 40, "completion_tokens": 7, "total_tokens": 47 } },
+    { "delta": " 输出。", "accumulated_content": "盒子A5支持 1080P 与 4K 输出。", "model": "deepseek-chat", "usage": { "prompt_tokens": 40, "completion_tokens": 9, "total_tokens": 49 } }
+  ]
+}
