@@ -33,7 +33,7 @@ from app.contexts.foundations.model_gateway.contracts.completion import (
     LlmCompletionPort,
     LlmCompletionRequest,
 )
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 from app.models.knowledge import KnowledgeFile, KnowledgeVector
 
 logger = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ async def answer(
         return {"answer": "资料不足，无法回答（知识库中未检索到相关内容）。", "sources": []}
 
     context = "\n\n".join(f"[{i + 1}] {h.chunk_text}" for i, h in enumerate(hits))
-    port = port or build_local_llm_completion_port()
+    port = port or build_llm_completion_port()
     t0 = time.monotonic()
     resp = await port.invoke(
         LlmCompletionRequest(

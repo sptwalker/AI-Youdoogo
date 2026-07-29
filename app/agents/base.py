@@ -45,7 +45,7 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.system_cl
     SystemExecutionClock,
 )
 from app.contexts.foundations.model_gateway.public import (
-    build_local_llm_completion_port,
+    build_llm_completion_port,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertSnapshotQuery,
@@ -114,7 +114,7 @@ def _application(db: AsyncSession, role: AgentRole) -> AgentExecutionApplication
         prompt_port=LegacyPromptAssemblyAdapter(db, role, _DEFAULT_GLOBAL_PROMPT),
         knowledge_port=LegacyKnowledgeAugmentationAdapter(db, role),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
-        llm_port=build_local_llm_completion_port(),
+        llm_port=build_llm_completion_port(),
         recorder=SQLAlchemyAgentExecutionRecorder(db, role, record_usage),
         clock=SystemExecutionClock(),
     )

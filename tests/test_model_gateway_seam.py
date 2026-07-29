@@ -70,10 +70,10 @@ async def test_answer_routes_through_injected_completion_port(
 async def test_connectivity_probe_routes_through_completion_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """探测成功仅需端口不抛异常；确认它经 build_local_llm_completion_port 拿端口。"""
+    """探测成功仅需端口不抛异常；确认它经 build_llm_completion_port 拿端口。"""
     port = _FakePort()
     monkeypatch.setattr(
-        connectivity_adapters, "build_local_llm_completion_port", lambda: port
+        connectivity_adapters, "build_llm_completion_port", lambda: port
     )
 
     result = await connectivity_adapters.LLMConnectivityProbe().probe()

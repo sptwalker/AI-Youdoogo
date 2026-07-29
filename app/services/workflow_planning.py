@@ -21,7 +21,7 @@ from app.contexts.foundations.execution.work_planning.contracts.planning import 
 from app.contexts.foundations.execution.work_planning.infrastructure.langchain_planner import (
     CompletionPlanningModelAdapter,
 )
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 from app.models.task import TaskCard
 from app.services import task_service
 
@@ -71,7 +71,7 @@ async def plan(
         return None
     try:
         result = await PlanWorkApplication(
-            CompletionPlanningModelAdapter(build_local_llm_completion_port())
+            CompletionPlanningModelAdapter(build_llm_completion_port())
         ).execute(
             PlanWorkRequest(
                 WorkIntent(request=request.strip(), creator_id=uuid.UUID(int=0))

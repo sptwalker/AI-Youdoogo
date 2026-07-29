@@ -26,13 +26,25 @@ Phase 1 的目标是给模型调用加 `RemoteLlmAdapter`，让完成请求可�
    + `LlmCompletionPort`(Protocol)。**由 `agent_execution` 平移而来**，旧位置改**别名再导出**（保持对象同一性，
    `LlmExecutionRequest is LlmCompletionRequest`），使 `agent_execution` 现有代码/测试零改动。
 3. 本地实现 `LocalLlmAdapter`（`model_gateway/infrastructure/local_adapter.py`）把 langchain 消息类型隔离在文件内；
-   Phase 1 的 `RemoteLlmAdapter` 将实现同一 `LlmCompletionPort`。
-4. `model_gateway/public.py` 暴露 `build_local_llm_completion_port() -> LlmCompletionPort`——**这是 Phase 1
-   换 `RemoteLlmAdapter` 的唯一切换点**。消费方一律经 `public` 工厂拿端口，绝不直连 `model_gateway.infrastructure`。
+   Phase 1 的 `RemoteLlmAdapter`（`infrastructure/remote_adapter.py`）已落地，实现同一 `LlmCompletionPort`。
+4. `model_gateway/public.py` 暴露 `build_llm_completion_port() -> LlmCompletionPort` 选择器——**这是 Phase 1
+   切 `RemoteLlmAdapter` 的唯一切换点**（`llm_completion_mode=remote` 且配了 `llm_gateway_url` → 远程，否则本地，
+   默认本地）。消费方一律经 `public` 工厂拿端口，绝不直连 `model_gateway.infrastructure`。
 5. **跨层规则复用**：`contracts` 与 `public` 均不在 `internal_layers`，故其他 Context 引用
    `model_gateway.contracts` / `model_gateway.public` 合法；而 infra→infra 跨 Context 非法，天然约束消费路径。
 
 采用 **branch-by-abstraction（先抽象，再绞杀）**：Local 与后续 Remote 适配器共存于同一端口，`public` 处二选一。
+
+## Phase 1 进展（客户端半边已落地）
+
+- `RemoteLlmAdapter` 讲网关的 JSON/SSE 契约（docs/21 §7.1），带 §8.1 Envelope 头（C1 内部令牌 Authorization、
+  C3 trace_id → X-Request-ID、X-Tenant-Key/X-Caller-Service/X-Schema-Version）；信任边界上非 2xx / 结构非法 /
+  SSE 非法 JSON 一律抛 `GatewayError`，不静默返回空串；日志不打印 Authorization/body（§7.1 红线）。
+- 韧性最小可用：超时取 `llm_request_timeout`，连接错误/5xx 有界重试 `llm_gateway_max_retries`。
+  熔断/bulkhead/百分比灰度 `# ponytail:` 延后到有在线流量的网关服务就绪时。
+- **离线验证非空壳**：`tests/test_remote_llm_adapter.py`（httpx.MockTransport）+ D1 契约 remote case
+  （`tests/test_llm_completion_contract.py`），证明远程实现满足同一消费者契约。真实 HTTP 双跑 / 灰度切换
+  待网关服务本体（独立仓库，docs/21 步骤 6）就绪；本适配器即该服务必须匹配的客户端契约。
 
 ## 收编范围（Phase 0 本模块）
 

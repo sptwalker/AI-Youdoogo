@@ -11,9 +11,11 @@ pytest 参数化即流水线，无需自造 runner。今天注册两个走真实
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
 
@@ -22,6 +24,7 @@ from app.contexts.foundations.model_gateway.contracts.completion import (
     LlmCompletionRequest,
 )
 from app.contexts.foundations.model_gateway.infrastructure.local_adapter import LocalLlmAdapter
+from app.contexts.foundations.model_gateway.infrastructure.remote_adapter import RemoteLlmAdapter
 from scripts.llm_replay import KIND_STREAMING, ReplayLlmAdapter, load_samples, stream_is_consistent
 
 
@@ -80,10 +83,35 @@ def _replay_case() -> tuple[LlmCompletionPort, LlmCompletionRequest, LlmCompleti
     return ReplayLlmAdapter(samples), non_streaming.request, streaming.request
 
 
+def _remote_case() -> tuple[LlmCompletionPort, LlmCompletionRequest, LlmCompletionRequest]:
+    """RemoteLlmAdapter + MockTransport 回放自洽 chat/SSE：证明远程实现满足同一契约。"""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content).get("stream"):
+            body = (
+                'data: {"delta": "远", "accumulated_content": "远"}\n\n'
+                'data: {"delta": "程", "accumulated_content": "远程"}\n\n'
+                "data: [DONE]\n\n"
+            )
+            return httpx.Response(200, content=body.encode("utf-8"))
+        return httpx.Response(
+            200, json={"content": "远程产出", "model": "m", "usage": {"total_tokens": 3}}
+        )
+
+    adapter = RemoteLlmAdapter(
+        base_url="http://gateway.test",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+        token_minter=lambda: "stub-token",
+    )
+    request = LlmCompletionRequest(model_role="daily", system_prompt="s", user_message="u")
+    return adapter, request, request
+
+
 _Case = tuple[LlmCompletionPort, LlmCompletionRequest, LlmCompletionRequest]
 CASES: dict[str, Callable[[], _Case]] = {
     "local": _local_case,
     "replay": _replay_case,
+    "remote": _remote_case,
 }
 
 

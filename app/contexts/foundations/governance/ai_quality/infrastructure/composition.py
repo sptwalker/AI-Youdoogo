@@ -26,7 +26,7 @@ from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_ad
     SQLAlchemyEvaluationSubject,
 )
 from app.contexts.foundations.governance.usage_budget.public import record_usage
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 
 
 class AIQualityOperations:
@@ -40,7 +40,7 @@ class AIQualityOperations:
             LegacyAgentEvaluationExecutor(session, run_agent),
             CompletionEvaluationJudge(
                 session,
-                port=build_local_llm_completion_port(),
+                port=build_llm_completion_port(),
                 usage_recorder=record_usage,
             ),
         )
@@ -55,7 +55,7 @@ class AIQualityOperations:
             SQLAlchemyEvaluationSubject(session),
             CompletionPromptSuggestion(
                 session,
-                port=build_local_llm_completion_port(),
+                port=build_llm_completion_port(),
                 usage_recorder=record_usage,
             ),
         )

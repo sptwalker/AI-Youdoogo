@@ -21,7 +21,7 @@ from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_ad
     SQLAlchemyEvaluationSubject,
     get_feedback_record,
 )
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 from app.llm.usage import record_usage
 from app.models.feedback import AgentFeedback
 
@@ -67,7 +67,7 @@ async def optimize_prompt(
         SQLAlchemyEvaluationSubject(db),
         CompletionPromptSuggestion(
             db,
-            port=build_local_llm_completion_port(),
+            port=build_llm_completion_port(),
             usage_recorder=record_usage,
         ),
     ).execute(

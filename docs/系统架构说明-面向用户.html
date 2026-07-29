@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>创想悦动 AI 决策大脑 · 系统架构说明（给用户看的版本）</title>
+<style>
+  :root{
+    --ink:#172033; --muted:#5b6b86; --line:#e3e8f2; --bg:#f6f8fc;
+    --brand:#3157d5; --brand-soft:#e9efff; --teal:#087f8c; --teal-soft:#e2f5f6;
+    --good:#1f9d5b; --good-soft:#e6f7ee; --warn:#c47f13; --warn-soft:#fdf3e0;
+    --card:#ffffff; --shadow:0 6px 22px rgba(36,52,95,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.75;font-size:16px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px 90px}
+  header.hero{background:linear-gradient(135deg,#15213c,#26375f);color:#fff;padding:60px 0 48px;margin-bottom:36px}
+  header.hero .wrap{padding-bottom:0}
+  .kicker{color:#9ee7e8;font-weight:800;letter-spacing:.12em;font-size:13px;text-transform:uppercase}
+  header.hero h1{font-size:34px;margin:12px 0 10px;font-weight:850;line-height:1.3}
+  header.hero p{color:#c9d5f0;font-size:17px;max-width:760px;margin:0}
+  .hero-meta{margin-top:26px;display:flex;flex-wrap:wrap;gap:12px}
+  .hero-meta span{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);
+    padding:7px 14px;border-radius:999px;font-size:13px;color:#dce5ff}
+  h2{font-size:26px;margin:52px 0 6px;font-weight:820;scroll-margin-top:20px}
+  h2 .n{color:var(--brand);font-weight:850;margin-right:10px}
+  h3{font-size:20px;margin:30px 0 8px;font-weight:750}
+  .lead{color:var(--muted);font-size:17px;margin:6px 0 18px}
+  p{margin:12px 0}
+  .section-tag{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--brand);background:var(--brand-soft);
+    padding:4px 11px;border-radius:6px;margin-top:40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:22px 24px;box-shadow:var(--shadow);margin:16px 0}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:820px){.grid-2,.grid-3{grid-template-columns:1fr}}
+  .callout{border-radius:14px;padding:16px 20px;margin:18px 0;border:1px solid}
+  .callout.red{background:#fdecec;border-color:#f2b8b8}
+  .callout.good{background:var(--good-soft);border-color:#a7e0c0}
+  .callout.warn{background:var(--warn-soft);border-color:#eccf9a}
+  .callout.info{background:var(--brand-soft);border-color:#b9c9f4}
+  .callout b{font-weight:800}
+  .tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;margin-right:6px}
+  .tag.done{background:var(--good-soft);color:var(--good)}
+  .tag.next{background:var(--warn-soft);color:var(--warn)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:15px;background:#fff;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f4fc;font-weight:750;color:#2c3a58}
+  tr:last-child td{border-bottom:none}
+  .diagram{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;
+    margin:20px 0;box-shadow:var(--shadow);overflow-x:auto}
+  .diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .legend{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-top:12px;
+    font-size:13px;color:var(--muted)}
+  .legend i{display:inline-block;width:22px;height:0;border-top:3px solid var(--brand);
+    vertical-align:middle;margin-right:6px}
+  .legend i.async{border-top:3px dashed var(--teal)}
+  .step{display:flex;gap:16px;margin:14px 0;align-items:flex-start}
+  .step .num{flex:0 0 34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
+  .step .body{flex:1}
+  .step .body b{display:block;margin-bottom:2px}
+  .muted{color:var(--muted)}
+  .small{font-size:14px}
+  code{background:#eef2fb;padding:1px 7px;border-radius:5px;font-size:14px;
+    font-family:"SF Mono",Consolas,monospace;color:#33447a}
+  .toc{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 24px;
+    margin:8px 0 10px;box-shadow:var(--shadow)}
+  .toc a{color:var(--brand);text-decoration:none;font-weight:600}
+  .toc ol{margin:8px 0 0;padding-left:22px;columns:2;column-gap:34px}
+  @media(max-width:640px){.toc ol{columns:1}}
+  .toc li{margin:5px 0;break-inside:avoid}
+  .analogy{border-left:4px solid var(--teal);background:var(--teal-soft);padding:12px 18px;
+    border-radius:0 10px 10px 0;margin:14px 0}
+  .analogy b{color:var(--teal)}
+  footer{color:var(--muted);font-size:14px;text-align:center;margin-top:60px;
+    padding-top:24px;border-top:1px solid var(--line)}
+  .pill-row{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+  .pill{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 13px;font-size:14px}
+  .pill b{color:var(--brand)}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">系统架构说明 · 面向用户</div>
+    <h1>创想悦动 AI 决策大脑<br>它现在长什么样、能做什么、为什么这样设计</h1>
+    <p>这是一份写给「使用者与决策者」而不是工程师的说明。不需要懂代码，你也能在十分钟内看懂：
+       这套系统由哪些部分组成、每一块负责什么、最近这段时间我们把它改造成了什么样子，以及这些改造对你意味着什么。</p>
+    <div class="hero-meta">
+      <span>📅 更新于 2026-07</span>
+      <span>🧩 A / B / C / D 四组底盘工作已完成</span>
+      <span>✅ 811 项自动化测试全绿</span>
+      <span>🔒 AI 只建议、真人才拍板</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="toc">
+    <b>目录</b>
+    <ol>
+      <li><a href="#what">一、这套系统到底是什么</a></li>
+      <li><a href="#redline">二、最重要的一条红线</a></li>
+      <li><a href="#map">三、系统全景图：五个大块</a></li>
+      <li><a href="#why">四、为什么要做「平台拆分」这件事</a></li>
+      <li><a href="#groups">五、最近的四组改造（A/B/C/D）通俗版</a></li>
+      <li><a href="#groupA">· A 组：把「接口」先定下来</a></li>
+      <li><a href="#groupB">· B 组：给关键能力装「插座」</a></li>
+      <li><a href="#groupC">· C 组：打好工程地基</a></li>
+      <li><a href="#groupD">· D 组：搬家前的体检与保险</a></li>
+      <li><a href="#value">六、这些改造给你带来什么</a></li>
+      <li><a href="#next">七、接下来会发生什么</a></li>
+    </ol>
+  </div>
+
+  <!-- ============ 一 ============ -->
+  <span class="section-tag" id="what">Overview</span>
+  <h2><span class="n">一</span>这套系统到底是什么</h2>
+  <p class="lead">一句话：一个「会帮你分析、会替你跑腿、但绝不替你做主」的 AI 企业管理助手。</p>
+  <p>创想悦动 AI 决策大脑，是一套面向公司内部的智能办公与经营决策辅助系统。它把多个「AI 员工」（智能体）
+     组织起来协同工作：有的负责回答问题、有的负责查数据、有的负责起草方案、有的负责多步骤跑一整套流程。
+     它们背后连着公司的知识库、组织架构、任务、会议、提案等真实业务数据，能基于这些数据给出有依据的建议。</p>
+
+  <div class="analogy">
+    <b>打个比方：</b>把它想象成一支随叫随到的「AI 参谋团」。你问，它查、它算、它写草稿、它列风险——
+    但最终签字盖章的永远是你本人。参谋再能干，决定权也不在参谋手里。
+  </div>
+
+  <!-- ============ 二 ============ -->
+  <span class="section-tag" id="redline">The Red Line</span>
+  <h2><span class="n">二</span>最重要的一条红线</h2>
+  <div class="callout red">
+    <b>AI 只有「建议权、分析权、辅助执行权」；凡是涉及业务调整、资金、项目、人事的决议，必须由真人确认后才生效。</b>
+    <p style="margin:8px 0 0">这不是一句口号，而是刻进系统设计里的规则：AI 的每一个输出都可以被人<b>编辑、驳回、终止</b>；
+       所有关键动作都留有审计记录；任何数据修改、权限变更、核心决策都要经过人工复核。系统宁可多问你一句，也不会自作主张。</p>
+  </div>
+
+  <!-- ============ 三 ============ -->
+  <span class="section-tag" id="map">The Big Picture</span>
+  <h2><span class="n">三</span>系统全景图：五个大块</h2>
+  <p class="lead">整套系统可以拆成一个「业务大脑」加四个「通用能力平台」。你（用户）只跟业务大脑打交道，它再去调用底下的能力。</p>
+
+  <div class="diagram" aria-label="系统全景架构图">
+    <svg viewBox="0 0 1040 620" role="img" aria-label="用户访问业务核心，业务核心调度四个通用能力平台，长任务通过事件总线协作">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#3157d5"/></marker>
+        <marker id="art" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#087f8c"/></marker>
+        <filter id="sh" x="-10%" y="-10%" width="120%" height="135%">
+          <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#24345f" flood-opacity=".14"/></filter>
+      </defs>
+
+      <!-- user -->
+      <rect x="360" y="20" rx="14" width="320" height="60" fill="#15213c"/>
+      <text x="520" y="46" fill="#9ee7e8" font-size="12" font-weight="800" text-anchor="middle">你 / 员工 / 管理者</text>
+      <text x="520" y="68" fill="#fff" font-size="17" font-weight="750" text-anchor="middle">网页 / 手机 / 飞书</text>
+      <line x1="520" y1="80" x2="520" y2="118" stroke="#3157d5" stroke-width="3" marker-end="url(#ar)"/>
+
+      <!-- product core -->
+      <rect x="230" y="120" rx="16" width="580" height="96" fill="#e9efff" stroke="#90a7ef" filter="url(#sh)"/>
+      <text x="260" y="149" fill="#3157d5" font-size="12" font-weight="800">业务大脑 · 你唯一直接接触的部分</text>
+      <text x="260" y="178" fill="#172033" font-size="22" font-weight="820">创想悦动 AI-Youdoogo</text>
+      <text x="260" y="201" fill="#536079" font-size="13.5">提案 · 任务 · 会议 · 组织 · 协作群聊 · 工作台 · 权限把关 · 界面聚合</text>
+
+      <!-- four platforms -->
+      <g font-size="12" font-weight="800" fill="#3157d5">
+        <rect x="40" y="280" rx="14" width="220" height="104" fill="#fff" stroke="#b8c4d8" filter="url(#sh)"/>
+        <text x="62" y="309">能力平台 ①</text>
+        <text x="62" y="334" fill="#172033" font-size="17" font-weight="800">专家平台</text>
+        <text x="62" y="360" fill="#647085" font-size="12.5" font-weight="500">AI 员工 · 提示词 · 技能 · 工具</text>
+
+        <rect x="280" y="280" rx="14" width="220" height="104" fill="#fff" stroke="#b8c4d8" filter="url(#sh)"/>
+        <text x="302" y="309">能力平台 ②</text>
+        <text x="302" y="334" fill="#172033" font-size="17" font-weight="800">知识服务</text>
+        <text x="302" y="360" fill="#647085" font-size="12.5" font-weight="500">文档入库 · 检索 · 权限过滤</text>
+
+        <rect x="520" y="280" rx="14" width="220" height="104" fill="#fff" stroke="#b8c4d8" filter="url(#sh)"/>
+        <text x="542" y="309">能力平台 ③</text>
+        <text x="542" y="334" fill="#172033" font-size="17" font-weight="800">工作流运行时</text>
+        <text x="542" y="360" fill="#647085" font-size="12.5" font-weight="500">多步任务 · 重试 · 真人停点</text>
+
+        <rect x="760" y="280" rx="14" width="240" height="104" fill="#fff" stroke="#b8c4d8" filter="url(#sh)"/>
+        <text x="782" y="309">能力平台 ④</text>
+        <text x="782" y="334" fill="#172033" font-size="17" font-weight="800">大模型网关</text>
+        <text x="782" y="360" fill="#647085" font-size="12.5" font-weight="500">对话 · 向量 · 多家模型调度</text>
+      </g>
+
+      <!-- sync arrows core->platforms -->
+      <path d="M420 216 C330 250, 220 250, 155 280" fill="none" stroke="#3157d5" stroke-width="2.6" marker-end="url(#ar)"/>
+      <path d="M500 216 C440 250, 420 255, 400 280" fill="none" stroke="#3157d5" stroke-width="2.6" marker-end="url(#ar)"/>
+      <path d="M560 216 C600 250, 615 255, 632 280" fill="none" stroke="#3157d5" stroke-width="2.6" marker-end="url(#ar)"/>
+      <path d="M150 384 C120 420, 780 250, 878 280" fill="none" stroke="#3157d5" stroke-width="2" marker-end="url(#ar)" opacity=".55"/>
+
+      <!-- event bus -->
+      <rect x="40" y="450" rx="14" width="960" height="92" fill="#e2f5f6" stroke="#76cbd0"/>
+      <text x="66" y="480" fill="#087f8c" font-size="12.5" font-weight="850">事件总线 · 负责「长任务」和「不能丢的动作」在各平台之间可靠传递</text>
+      <text x="66" y="507" fill="#335d63" font-size="13">一步任务就绪 · 一次执行完成 · 一次能力调用请求 · 一批知识索引就绪</text>
+      <text x="66" y="529" fill="#5e777b" font-size="11.5">初期用数据库「发件箱」中转；将来规模大了再换更专业的消息中间件</text>
+      <line x1="155" y1="384" x2="155" y2="450" stroke="#087f8c" stroke-width="2.6" stroke-dasharray="6 5" marker-end="url(#art)"/>
+      <line x1="632" y1="384" x2="632" y2="450" stroke="#087f8c" stroke-width="2.6" stroke-dasharray="6 5" marker-end="url(#art)"/>
+      <line x1="878" y1="384" x2="878" y2="450" stroke="#087f8c" stroke-width="2.6" stroke-dasharray="6 5" marker-end="url(#art)"/>
+    </svg>
+    <div class="legend">
+      <span><i></i>同步调用（问一句、马上要答案）</span>
+      <span><i class="async"></i>异步事件（交给它慢慢办，办完通知）</span>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>🧠 业务大脑（AI-Youdoogo）</h3>
+      <p class="small muted" style="margin-top:0">你唯一直接打交道的部分。它管提案、任务、会议、组织架构、协作群聊、工作台，
+      负责把复杂的底层能力包装成好用的界面，并在每一步替你把住权限关。</p>
+    </div>
+    <div class="card">
+      <h3>👥 专家平台</h3>
+      <p class="small muted" style="margin-top:0">存放各种「AI 员工」的设定：它是谁、擅长什么、用什么提示词、能用哪些技能和工具。
+      需要哪位「专家」出场，由这里调度。</p>
+    </div>
+    <div class="card">
+      <h3>📚 知识服务</h3>
+      <p class="small muted" style="margin-top:0">公司知识库的大管家：把文档切分入库、建立索引、按关键词和语义帮你找到最相关的内容，
+      并严格按「谁能看什么」过滤，绝不越权。</p>
+    </div>
+    <div class="card">
+      <h3>⚙️ 工作流运行时</h3>
+      <p class="small muted" style="margin-top:0">负责「一整套多步骤任务」的可靠执行：中途失败会自动重试，重要环节会停下来<b>等真人确认</b>，
+      断电重启也不会丢进度、不会重复做。</p>
+    </div>
+    <div class="card">
+      <h3>🔌 大模型网关</h3>
+      <p class="small muted" style="margin-top:0">所有 AI 对话、文本向量化都从这里统一进出。它对接多家大模型，
+      主用的挂了能自动切到备用，密钥集中保管、不暴露。</p>
+    </div>
+    <div class="card">
+      <h3>📮 事件总线</h3>
+      <p class="small muted" style="margin-top:0">各平台之间「不能丢的消息」的可靠邮差。发出去的每一件都记账，
+      投递失败会进「死信箱」等人处理，可以重放，绝不悄悄丢件。</p>
+    </div>
+  </div>
+
+  <!-- ============ 四 ============ -->
+  <span class="section-tag" id="why">Why Split</span>
+  <h2><span class="n">四</span>为什么要做「平台拆分」这件事</h2>
+  <p class="lead">目前这五大块还都住在「同一套房子」里。我们正在为将来把四个能力平台「分户搬出去、各自独立运营」做准备。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>现在的样子：模块化的一整套</h3>
+      <p class="small">五大块逻辑上已经分得很清楚，但物理上仍在同一个程序里运行。好处是简单、部署快；
+      代价是——任何一块要单独扩容、单独升级、单独排障都不方便，一处卡顿可能拖累全局。</p>
+    </div>
+    <div class="card">
+      <h3>将来的样子：能力平台各自独立</h3>
+      <p class="small">大模型网关、知识服务、专家平台、工作流运行时，未来可以成为独立服务，
+      按各自的负载单独扩缩、单独升级、单独计费，被别的产品复用。业务大脑保持精简。</p>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <b>关键做法：先立接口，再慢慢搬（先抽象，后绞杀）。</b>
+    我们不搞「推倒重来」，而是先在每个能力前面装一个标准「插座」（接口），业务代码只认插座、不认插座后面是谁。
+    这样将来把「本地实现」换成「远程服务」，业务代码<b>一行都不用改</b>，还能随时一键切回来。风险最低，用户几乎无感。
+  </div>
+
+  <!-- ============ 五 ============ -->
+  <span class="section-tag" id="groups">Recent Work</span>
+  <h2><span class="n">五</span>最近的四组改造（A / B / C / D）通俗版</h2>
+  <p class="lead">这段时间的工作，围绕「为分户搬家做好准备」展开，分成四组。下面用大白话解释每一组在干什么、为什么重要。</p>
+
+  <div class="diagram" aria-label="四组工作关系图">
+    <svg viewBox="0 0 1000 250" role="img" aria-label="A组定接口，B组装插座，C组打地基，D组做体检与保险，共同支撑搬家">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#5b6b86"/></marker></defs>
+      <g font-family="inherit">
+        <rect x="30" y="60" rx="14" width="200" height="120" fill="#e9efff" stroke="#90a7ef"/>
+        <text x="130" y="92" text-anchor="middle" fill="#3157d5" font-size="15" font-weight="820">A 组</text>
+        <text x="130" y="118" text-anchor="middle" fill="#172033" font-size="14" font-weight="700">定接口</text>
+        <text x="130" y="142" text-anchor="middle" fill="#5b6b86" font-size="11.5">把「怎么对接」</text>
+        <text x="130" y="159" text-anchor="middle" fill="#5b6b86" font-size="11.5">白纸黑字定死</text>
+
+        <rect x="270" y="60" rx="14" width="200" height="120" fill="#e2f5f6" stroke="#76cbd0"/>
+        <text x="370" y="92" text-anchor="middle" fill="#087f8c" font-size="15" font-weight="820">B 组</text>
+        <text x="370" y="118" text-anchor="middle" fill="#172033" font-size="14" font-weight="700">装插座</text>
+        <text x="370" y="142" text-anchor="middle" fill="#5b6b86" font-size="11.5">给关键能力</text>
+        <text x="370" y="159" text-anchor="middle" fill="#5b6b86" font-size="11.5">加标准接口</text>
+
+        <rect x="530" y="60" rx="14" width="200" height="120" fill="#fdf3e0" stroke="#eccf9a"/>
+        <text x="630" y="92" text-anchor="middle" fill="#c47f13" font-size="15" font-weight="820">C 组</text>
+        <text x="630" y="118" text-anchor="middle" fill="#172033" font-size="14" font-weight="700">打地基</text>
+        <text x="630" y="142" text-anchor="middle" fill="#5b6b86" font-size="11.5">安全 · 可靠</text>
+        <text x="630" y="159" text-anchor="middle" fill="#5b6b86" font-size="11.5">可观测</text>
+
+        <rect x="790" y="60" rx="14" width="200" height="120" fill="#e6f7ee" stroke="#a7e0c0"/>
+        <text x="890" y="92" text-anchor="middle" fill="#1f9d5b" font-size="15" font-weight="820">D 组</text>
+        <text x="890" y="118" text-anchor="middle" fill="#172033" font-size="14" font-weight="700">体检 + 保险</text>
+        <text x="890" y="142" text-anchor="middle" fill="#5b6b86" font-size="11.5">搬家前对账</text>
+        <text x="890" y="159" text-anchor="middle" fill="#5b6b86" font-size="11.5">出错能回滚</text>
+
+        <line x1="230" y1="120" x2="268" y2="120" stroke="#5b6b86" stroke-width="2" marker-end="url(#a2)"/>
+        <line x1="470" y1="120" x2="528" y2="120" stroke="#5b6b86" stroke-width="2" marker-end="url(#a2)"/>
+        <line x1="730" y1="120" x2="788" y2="120" stroke="#5b6b86" stroke-width="2" marker-end="url(#a2)"/>
+        <text x="510" y="225" text-anchor="middle" fill="#5b6b86" font-size="13">四组环环相扣，共同为「未来把能力平台独立搬出去」铺路</text>
+      </g>
+    </svg>
+  </div>
+
+  <!-- A -->
+  <h3 id="groupA">A 组 · 把「接口」先定下来 <span class="tag done">已完成</span></h3>
+  <div class="analogy">
+    <b>类比：</b>盖楼之前先定「国标插座尺寸」。以后不管来自哪个厂家的电器（本地的、远程的），
+    只要符合这个尺寸就能插上用。A 组做的就是把这些「国标」白纸黑字写清楚、并归档保存。
+  </div>
+  <p>我们为每一个关键对接点建立了「架构决策记录」（ADR），像合同条款一样固定下来：这个能力叫什么、
+     统一从哪个「插座」进出、有哪些测试守着它不被绕过、将来远程版长什么样。还加了一个自动检查，防止编号错乱、防止有人偷偷绕开接口。</p>
+  <div class="callout good">
+    <b>成果：</b>共 9 份架构决策记录（ADR 0001–0009），覆盖大模型、知识检索、专家读写、工作流事件等所有核心接缝；
+    并出台了「跨服务契约治理策略」，规定接口怎么升级、怎么保证老版本不被突然掐断。<b>这些是整个搬家计划的「宪法」。</b>
+  </div>
+
+  <!-- B -->
+  <h3 id="groupB">B 组 · 给关键能力装「插座」 <span class="tag done">已完成</span></h3>
+  <div class="analogy">
+    <b>类比：</b>A 组定了插座标准，B 组就真的把插座装到墙上。装好之后，业务代码「用电」时只碰插座，
+    不再直接焊死在某个具体电器上。
+  </div>
+  <p>我们把系统里几处「焊死的连接」改成了标准插座：</p>
+  <table>
+    <thead><tr><th>装了哪个插座</th><th>解决了什么问题（大白话）</th></tr></thead>
+    <tbody>
+      <tr><td><b>大模型统一入口</b></td><td>以前 AI 对话散落在各处、各自直连模型。现在全部走一个统一入口，将来换模型、加备用、记账都只改一处。</td></tr>
+      <tr><td><b>知识检索 / 知识入库接口</b></td><td>「找资料」和「存资料」都收拢到标准接口，并顺手接上了「用量记账」，为将来独立的知识服务铺好路。</td></tr>
+      <tr><td><b>专家「查」与「改」两个接口</b></td><td>读取专家设定、修改专家设定各走各的接口，业务层不再直接碰数据库，边界更干净。</td></tr>
+      <tr><td><b>工作流契约「去产品化」</b></td><td>把通用运行时里夹带的业务字段清理干净，让它变成一个「什么业务都能跑」的纯通用引擎。</td></tr>
+      <tr><td><b>专家聚合逻辑拆分</b></td><td>把「组织里的 AI 成员」和「AI 的执行定义」在逻辑上拆成两块，各自独立校验，为将来物理拆表做准备。</td></tr>
+    </tbody>
+  </table>
+  <div class="callout good">
+    <b>成果：</b>五个关键能力都有了本地「插座」（Local Adapter）和守卫测试。核心业务代码<b>不再直接依赖具体的 AI 库、数据库连接或跨领域数据表</b>——
+    这正是「随时能把本地换成远程」的前提。
+  </div>
+
+  <!-- C -->
+  <h3 id="groupC">C 组 · 打好工程地基（安全 / 可靠 / 看得见） <span class="tag done">已完成</span></h3>
+  <div class="analogy">
+    <b>类比：</b>搬进新小区之前，先把门禁、消防、监控装好。C 组做的就是这些「看不见但出事就致命」的基础设施。
+  </div>
+  <div class="grid-3">
+    <div class="card">
+      <h3>🔐 服务门禁（C1）</h3>
+      <p class="small muted" style="margin-top:0">未来平台之间互相调用，不能再借用「用户的登录凭证」。我们建了一套<b>服务专用的短期通行证</b>（Internal JWT）：
+      每张证只对指定对象有效、很快过期、密钥可轮换。相当于给每个平台发了「员工工牌」，而不是让它们拿访客卡到处走。</p>
+    </div>
+    <div class="card">
+      <h3>📮 死信箱与重放（C2）</h3>
+      <p class="small muted" style="margin-top:0">重要消息如果反复投递失败，会自动进「死信箱」而不是凭空消失。管理员可以<b>查看死信、一键重放</b>，
+      系统还会实时统计各类消息的积压量，出问题第一时间看得见。<b>绝不悄悄丢件。</b></p>
+    </div>
+    <div class="card">
+      <h3>🔍 全程追踪与存储加固（C3）</h3>
+      <p class="small muted" style="margin-top:0">给每一个请求发一个<b>唯一追踪号</b>，一次操作跨了几个环节都能串起来查，排障不再靠猜。
+      同时给文件存储加了安全传输开关，凭证和链路更稳。</p>
+    </div>
+  </div>
+  <div class="callout warn">
+    <b>刻意留到下一阶段的：</b>「超时/重试/熔断的远程默认值」和「按比例灰度切流」这两项，要等到真的有第一个远程服务上线（Phase 1）才有意义，
+    现在做等于造一个没人用的空壳。我们选择<b>不提前造壳</b>——需要时再补，既省成本也不留隐患。
+  </div>
+
+  <!-- D -->
+  <h3 id="groupD">D 组 · 搬家前的「体检」和「保险」 <span class="tag done">已完成</span></h3>
+  <div class="analogy">
+    <b>类比：</b>搬家前，你会先清点家当（别搬丢了）、拍照留证（对比新旧一致）、买份保险（万一出事能索赔）。
+    D 组做的就是这三件事的「数字版」。
+  </div>
+  <div class="step"><div class="num">1</div><div class="body"><b>消费者契约测试流水线（D1）</b>
+    一份「使用方在乎的规矩」，自动跑遍某能力的每一种实现（本地版、回放版……）。将来远程版上线，只要往清单里加一条，就自动被同一套规矩卡住，不合格不放行。</div></div>
+  <div class="step"><div class="num">2</div><div class="body"><b>关键链路「现状固化」测试（D2）</b>
+    把现在这套本地实现的实际行为一字不差地「拍照存证」。将来远程版必须复现同样的行为，一旦跑偏立刻被测试发现。</div></div>
+  <div class="step"><div class="num">3</div><div class="body"><b>知识检索「黄金评测集」（D3）</b>
+    准备一批标准问答样本，作为衡量「检索质量」的尺子。检索逻辑一改动，用这把尺子一量就知道是变好还是变差。</div></div>
+  <div class="step"><div class="num">4</div><div class="body"><b>大模型对话「回放样本」（D4）</b>
+    录下真实的 AI 对话（流式和非流式各一套），做成离线样本。不连真模型、不花钱、不看网络脸色，就能反复验证「新旧一致」。</div></div>
+  <div class="step"><div class="num">5</div><div class="body"><b>数据家当大盘点（D5）</b>
+    一个脚本清点专家、提示词、技能、工具、工作流各有多少、归谁管、彼此怎么依赖。这就是搬家前的「装箱清单」——搬完对一遍，数量对不上立刻发现。</div></div>
+  <div class="step"><div class="num">6</div><div class="body"><b>对账指纹 + 回滚方案（D6）</b>
+    给每条数据算一个「内容指纹」，搬家前后一比，指纹一致就说明内容没搬错、没搬丢。同时写好回滚预案：万一远程版出问题，<b>一个开关就能秒切回本地</b>，数据不丢、任务不重复。</div></div>
+  <div class="callout good">
+    <b>成果：</b>D 组六项全部交付，配套 <b>811 项自动化测试全绿</b>。搬家的「体检报告」和「保险单」都齐了——
+    这意味着未来真正拆分时，我们有办法证明「搬前搬后完全一致」，也有办法在出问题时<b>安全撤退</b>。
+  </div>
+
+  <!-- ============ 六 ============ -->
+  <span class="section-tag" id="value">What It Means For You</span>
+  <h2><span class="n">六</span>这些改造给你带来什么</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>✅ 更稳</h3>
+      <p class="small muted" style="margin-top:0">重要消息不再丢、失败能重放、每个请求可追踪、多步任务断电重启不丢进度。
+      系统越来越经得起折腾。</p>
+    </div>
+    <div class="card">
+      <h3>🔐 更安全</h3>
+      <p class="small muted" style="margin-top:0">平台间用专用工牌互访、密钥集中保管不外泄、知识检索严格按权限过滤。
+      AI 只建议、真人才拍板的红线始终不变。</p>
+    </div>
+    <div class="card">
+      <h3>🚀 更能长大</h3>
+      <p class="small muted" style="margin-top:0">接口和地基都备好了，将来哪个能力成了瓶颈，就能把它单独搬出去扩容，
+      不用推倒重来，你几乎感觉不到切换。</p>
+    </div>
+    <div class="card">
+      <h3>🛡️ 更可控</h3>
+      <p class="small muted" style="margin-top:0">升级有对账、出错能回滚、每一步有测试守着。改动越大，
+      我们越有把握「不把好东西改坏」。</p>
+    </div>
+  </div>
+
+  <!-- ============ 七 ============ -->
+  <span class="section-tag" id="next">What's Next</span>
+  <h2><span class="n">七</span>接下来会发生什么</h2>
+  <p class="lead">底盘（A/B/C/D）已经打好，接下来是把能力平台一个一个真正「搬出去」。每一步都设了「可切换、可回退」的门禁。</p>
+  <div class="pill-row">
+    <span class="pill"><b>Phase 1</b> · 先搬「大模型网关」——第一个真正的远程能力上线</span>
+    <span class="pill"><b>Phase 2</b> · 再搬「知识服务」——文档索引独立运营</span>
+    <span class="pill"><b>Phase 3</b> · 拆「专家平台」——专家数据物理分表</span>
+    <span class="pill"><b>Phase 4</b> · 拆「工作流运行时」——通用引擎独立</span>
+    <span class="pill"><b>Phase 5</b> · 收口与平台化运营</span>
+  </div>
+  <div class="callout info">
+    <b>你可以放心的是：</b>每一次搬迁都遵循同一套纪律——本地和远程两版并存、按比例灰度切换、随时能一键切回、搬前搬后对账一致。
+    我们宁可慢一点、稳一点，也不会拿正在用的系统冒险。
+  </div>
+
+  <footer>
+    创想悦动 AI 决策大脑 · 系统架构说明（面向用户版）· 更新于 2026-07<br>
+    <span class="small">配套技术文档见 docs/21（平台拆分方案）、docs/22（对账与回滚设计）、docs/adr（架构决策记录）</span>
+  </footer>
+
+</div>
+</body>
+</html>

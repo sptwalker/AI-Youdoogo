@@ -29,7 +29,7 @@ from app.contexts.foundations.governance.ai_quality.infrastructure.sqlalchemy_ad
     SQLAlchemyAIQualityUnitOfWork,
     SQLAlchemyEvaluationSubject,
 )
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 from app.llm.usage import record_usage
 from app.models.agent import AgentRole, AgentTaskRecord
 
@@ -50,7 +50,7 @@ async def _judge(
 ) -> int:
     return await CompletionEvaluationJudge(
         db,
-        port=build_local_llm_completion_port(),
+        port=build_llm_completion_port(),
         usage_recorder=record_usage,
     ).score(rubric, output, user_id)
 

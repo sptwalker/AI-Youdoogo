@@ -9,7 +9,7 @@ import httpx
 from app.contexts.foundations.model_gateway.contracts.completion import (
     LlmCompletionRequest,
 )
-from app.contexts.foundations.model_gateway.public import build_local_llm_completion_port
+from app.contexts.foundations.model_gateway.public import build_llm_completion_port
 from app.core import runtime_config
 from app.core.config import get_settings
 from app.integrations.feishu.client import FeishuClient
@@ -26,7 +26,7 @@ class LLMConnectivityProbe:
     async def probe(self) -> ConnectivityProbeResult:
         started_at = time.monotonic()
         try:
-            await build_local_llm_completion_port().invoke(
+            await build_llm_completion_port().invoke(
                 LlmCompletionRequest(
                     model_role="default",
                     system_prompt="",

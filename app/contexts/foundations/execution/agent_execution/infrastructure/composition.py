@@ -38,7 +38,7 @@ from app.contexts.foundations.governance.usage_budget.public import (
     record_usage,
 )
 from app.contexts.foundations.model_gateway.public import (
-    build_local_llm_completion_port,
+    build_llm_completion_port,
 )
 
 
@@ -47,7 +47,7 @@ def build_agent_execution_application(session: AsyncSession) -> AgentExecutionAp
         prompt_port=CurrentPromptAssemblyAdapter(session),
         knowledge_port=CurrentKnowledgeAugmentationAdapter(session),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
-        llm_port=build_local_llm_completion_port(),
+        llm_port=build_llm_completion_port(),
         recorder=SQLAlchemyAgentExecutionRecorder(session, None, record_usage),
         clock=SystemExecutionClock(),
         external_boundary=SQLAlchemyExternalExecutionBoundary(session),

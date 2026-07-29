@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     llm_failover_max_attempts: int = 3  # failover 最多尝试候选数（0=不限）
     llm_total_timeout: float = 120.0  # 整条 failover 链总墙钟预算（秒，0=不限）
 
+    # LLM Gateway 远程切换（Phase 1 / docs/21）：Branch-by-Abstraction 整体开关。
+    # mode=remote 且 url 非空 → RemoteLlmAdapter；否则回退 Local（默认 local，无服务时安全）。
+    llm_completion_mode: str = "local"  # local | remote
+    llm_gateway_url: str = ""  # 网关根地址（形如 http://ai-model-gateway:8080）；空=未部署
+    llm_gateway_max_retries: int = 2  # 连接错误/5xx 有界重试次数（超时复用 llm_request_timeout）
+
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
     workflow_worker_poll_seconds: float = 1.0
@@ -117,6 +123,15 @@ class Settings(BaseSettings):
                 raise ValueError("INTERNAL_JWT_PRIVATE_KEY 不是合法 PEM 私钥") from exc
             if not isinstance(key, ec.EllipticCurvePrivateKey):
                 raise ValueError("INTERNAL_JWT_PRIVATE_KEY 必须是 EC（ES256）私钥，而非 RSA/其它")
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_llm_gateway(self) -> "Settings":
+        """切远程模式必须配网关地址：启动即失败，而非运行时首个 LLM 调用才 500。"""
+        if self.llm_completion_mode not in ("local", "remote"):
+            raise ValueError("LLM_COMPLETION_MODE 必须是 local 或 remote")
+        if self.llm_completion_mode == "remote" and not self.llm_gateway_url:
+            raise ValueError("LLM_COMPLETION_MODE=remote 时必须配置 LLM_GATEWAY_URL")
         return self
 
 

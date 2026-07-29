@@ -10,7 +10,7 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
 
 | ADR | Seam / Port | 唯一切换点（工厂） | 守卫测试 | Phase & Remote 目标 |
 |-----|-------------|-------------------|---------|---------------------|
-| [0001](0001-llm-completion-port.md) | `LlmCompletionPort` | `model_gateway.public.build_local_llm_completion_port()` | `test_architecture_boundaries.py::test_llm_completion_flows_through_model_gateway_seam` | Phase 1: `RemoteLlmAdapter` |
+| [0001](0001-llm-completion-port.md) | `LlmCompletionPort` | `model_gateway.public.build_llm_completion_port()`（local/remote 选择器） | `test_architecture_boundaries.py::test_llm_completion_flows_through_model_gateway_seam` | Phase 1: `RemoteLlmAdapter`（客户端半边已落地，离线验证） |
 | [0002](0002-knowledge-search-port-and-usage-budget.md) | `KnowledgeSearchPort` + usage budget public | `knowledge_retrieval.public.build_local_knowledge_search_port(session)` + `usage_budget.public` | `test_architecture_boundaries.py` (seam scan) | Phase 2: `RemoteKnowledgeAdapter` |
 | [0003](0003-expert-directory-port.md) | `ExpertDirectoryPort` (read) | `expert_management.public.build_local_expert_directory_port(session)` | `test_architecture_boundaries.py::test_expert_directory_flows_through_port_seam` | Phase 1: `RemoteExpertDirectoryAdapter` |
 | [0004](0004-expert-provisioning-port.md) | `ExpertProvisioningPort` (write) | `expert_management.public.build_local_expert_provisioning_port(session)` | `test_architecture_boundaries.py::test_expert_provisioning_flows_through_port_seam` | Phase 1: `RemoteExpertProvisioningAdapter` |
@@ -36,7 +36,7 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
 - **docs/21 §8.2「发布与兼容策略」**（L1381）：同一主版本只做向后兼容的字段追加；删除、改名、语义变化必须升主版本
   （SemVer 规则，应用于发布的 OpenAPI/AsyncAPI）。
 - **docs/21 §11 Phase 1**（L1545）：首个远端 adapter 是 `RemoteLlmAdapter`，`Local / Remote 使用相同应用 Port`，
-  通过 `model_gateway.public.build_local_llm_completion_port()` 工厂切换，配合 §14 灰度路由（1%→10%→50%→100%）
+  通过 `model_gateway.public.build_llm_completion_port()` 选择器切换，配合 §14 灰度路由（1%→10%→50%→100%）
   与快速回退。
 
 **策略已由 [[0009](0009-contract-governance-policy.md)] 采纳为已决策**（Envelope 字段 / SemVer 兼容 / 事件
