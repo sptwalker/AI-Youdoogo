@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     llm_completion_mode: str = "local"  # local | remote
     llm_gateway_url: str = ""  # 网关根地址（形如 http://ai-model-gateway:8080）；空=未部署
     llm_gateway_max_retries: int = 2  # 连接错误/5xx 有界重试次数（超时复用 llm_request_timeout）
+    llm_gateway_canary_percent: int = 0  # remote 灰度百分比 0–100（docs/21 步骤5）：
+    # 0=全 local（默认，生产安全）；100=全 remote（等价整体开关）；0<p<100=按调用抽样 canary。
 
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
@@ -132,6 +134,8 @@ class Settings(BaseSettings):
             raise ValueError("LLM_COMPLETION_MODE 必须是 local 或 remote")
         if self.llm_completion_mode == "remote" and not self.llm_gateway_url:
             raise ValueError("LLM_COMPLETION_MODE=remote 时必须配置 LLM_GATEWAY_URL")
+        if not 0 <= self.llm_gateway_canary_percent <= 100:
+            raise ValueError("LLM_GATEWAY_CANARY_PERCENT 必须在 0–100 之间")
         return self
 
 
