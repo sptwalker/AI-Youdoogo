@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     llm_gateway_canary_percent: int = 0  # remote 灰度百分比 0–100（docs/21 步骤5）：
     # 0=全 local（默认，生产安全）；100=全 remote（等价整体开关）；0<p<100=按调用抽样 canary。
 
+    # Knowledge Service 远程切换（Phase 2 / docs/21 §11「先切只读 Search」）：同 Branch-by-Abstraction。
+    # mode=remote 且 url 非空 → RemoteKnowledgeSearchAdapter；否则回退 Local（默认 local，无服务时安全）。
+    knowledge_search_mode: str = "local"  # local | remote
+    knowledge_gateway_url: str = ""  # 知识服务根地址（形如 http://ai-knowledge-service:8080）；空=未部署
+    knowledge_gateway_timeout: float = 30.0  # 单次检索请求超时（秒）
+    knowledge_gateway_max_retries: int = 2  # 连接错误/5xx 有界重试（Search 幂等只读，可安全重试）
+    knowledge_gateway_canary_percent: int = 0  # remote 灰度百分比 0–100（同 LLM canary 语义）
+
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
     workflow_worker_poll_seconds: float = 1.0
@@ -136,6 +144,17 @@ class Settings(BaseSettings):
             raise ValueError("LLM_COMPLETION_MODE=remote 时必须配置 LLM_GATEWAY_URL")
         if not 0 <= self.llm_gateway_canary_percent <= 100:
             raise ValueError("LLM_GATEWAY_CANARY_PERCENT 必须在 0–100 之间")
+        return self
+
+    @model_validator(mode="after")
+    def _enforce_knowledge_gateway(self) -> "Settings":
+        """切远程知识检索必须配服务地址：启动即失败，而非运行时首个检索才 500（同 LLM 网关）。"""
+        if self.knowledge_search_mode not in ("local", "remote"):
+            raise ValueError("KNOWLEDGE_SEARCH_MODE 必须是 local 或 remote")
+        if self.knowledge_search_mode == "remote" and not self.knowledge_gateway_url:
+            raise ValueError("KNOWLEDGE_SEARCH_MODE=remote 时必须配置 KNOWLEDGE_GATEWAY_URL")
+        if not 0 <= self.knowledge_gateway_canary_percent <= 100:
+            raise ValueError("KNOWLEDGE_GATEWAY_CANARY_PERCENT 必须在 0–100 之间")
         return self
 
 
