@@ -68,13 +68,16 @@ class Settings(BaseSettings):
     llm_gateway_canary_percent: int = 0  # remote 灰度百分比 0–100（docs/21 步骤5）：
     # 0=全 local（默认，生产安全）；100=全 remote（等价整体开关）；0<p<100=按调用抽样 canary。
 
-    # Knowledge Service 远程切换（Phase 2 / docs/21 §11「先切只读 Search」）：同 Branch-by-Abstraction。
-    # mode=remote 且 url 非空 → RemoteKnowledgeSearchAdapter；否则回退 Local（默认 local，无服务时安全）。
+    # Knowledge Service 远程切换（Phase 2 / docs/21 §11「先切只读 Search」）：Branch by Abstraction
+    # mode=remote 且 url 非空 → RemoteKnowledgeSearchAdapter；否则回退 Local（默认 local，安全）。
     knowledge_search_mode: str = "local"  # local | remote
-    knowledge_gateway_url: str = ""  # 知识服务根地址（形如 http://ai-knowledge-service:8080）；空=未部署
+    knowledge_gateway_url: str = ""  # 知识服务根地址（http://ai-knowledge-service:8080）；空=未部署
     knowledge_gateway_timeout: float = 30.0  # 单次检索请求超时（秒）
     knowledge_gateway_max_retries: int = 2  # 连接错误/5xx 有界重试（Search 幂等只读，可安全重试）
     knowledge_gateway_canary_percent: int = 0  # remote 灰度百分比 0–100（同 LLM canary 语义）
+    # 写侧（索引）开关：复用同一 knowledge_gateway_url。写是副作用，不能按调用随机
+    # 抽样（会分裂写真源，违 docs/21 禁双写红线）——只做硬 local|remote 切换，无 canary。
+    knowledge_index_mode: str = "local"  # local | remote
 
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
@@ -155,6 +158,10 @@ class Settings(BaseSettings):
             raise ValueError("KNOWLEDGE_SEARCH_MODE=remote 时必须配置 KNOWLEDGE_GATEWAY_URL")
         if not 0 <= self.knowledge_gateway_canary_percent <= 100:
             raise ValueError("KNOWLEDGE_GATEWAY_CANARY_PERCENT 必须在 0–100 之间")
+        if self.knowledge_index_mode not in ("local", "remote"):
+            raise ValueError("KNOWLEDGE_INDEX_MODE 必须是 local 或 remote")
+        if self.knowledge_index_mode == "remote" and not self.knowledge_gateway_url:
+            raise ValueError("KNOWLEDGE_INDEX_MODE=remote 时必须配置 KNOWLEDGE_GATEWAY_URL")
         return self
 
 
