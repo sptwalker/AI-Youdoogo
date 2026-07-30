@@ -27,6 +27,7 @@ from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.td_event_alias import TdEventAlias
 from app.models.workflow import OutboxEvent, ToolExecution, WorkflowEvent, WorkflowRun, WorkflowStep
+from app.platform.eventing.inbox_model import InboxEvent
 
 __all__ = [
     "AgentFeedback",
@@ -44,6 +45,7 @@ __all__ = [
     "DiscussionChannel",
     "DiscussionMessage",
     "EvalCase",
+    "InboxEvent",
     "KnowledgeBase",
     "KnowledgeFile",
     "KnowledgeVector",

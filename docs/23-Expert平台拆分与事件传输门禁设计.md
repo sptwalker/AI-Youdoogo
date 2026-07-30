@@ -1,0 +1,118 @@
+# 23 · Expert 平台拆分与事件传输门禁设计（Phase 3）
+
+> 依据 docs/21《通用AI平台拆分架构与落地方案》。Phase 1（LLM Gateway）、Phase 2（Knowledge
+> Service）已交付并离线验收。本文定义 **Phase 3 = 拆出 Expert Platform（6–10 周）** 的完整方案，
+> 并给出其**硬前置门禁**——可靠事件传输 Go/No-Go——的设计与验收口径（DoD）。
+
+## 1. 为什么事件传输是 Phase 3 的硬前置
+
+docs/21 三处把"可靠事件传输通过"钉为拆分的前置条件：
+
+- **Immediate Backlog C（工程底座）**："实现 Outbox Relay / Inbox 标准模板、DLQ 和重放工具。"
+- **风险表**："误把本地 Outbox 当成跨服务消息总线（中/高）——Relay / Inbox / DLQ / 重放故障演练
+  通过后再拆 Runtime。触发后：长任务保持本地，停止启用远程事件消费者。"
+- **架构决策**："消息中间件延迟到 Phase 3 决策——先以 EventPublisherPort + PostgreSQL Outbox
+  Relay / HTTP Inbox 验证。"
+
+Phase 3 的 Capability Provider 里，**长耗时 / 审批型工具**必须以异步事件跨服务交接（Expert 平台发
+`step.ready` / 业务系统回 `completed|failed`）。这条链路不可靠（丢/重/乱序/卡死），业务投影就会错乱且
+不可重建。因此：**事件传输门禁不过 → Expert 长任务留在本地 Agent Runner，不启用远程事件消费者。**
+
+## 2. 关键前提：可靠性机制已就位，本轮只补两个薄适配
+
+现有 `app/platform/outbox/` 已是完整事务性 outbox（非新建）：
+
+| 能力 | 现有实现 | 复用为门禁的哪一环 |
+|---|---|---|
+| 生产侧幂等 | `enqueue`（`dedupe_key` 唯一约束） | 同一业务事件不重复入队 |
+| 租约领取 | `claim_next`（PG `SKIP LOCKED`） | 多 worker 抢占不重复投递 |
+| 退避重试 | `fail`（未达 max_attempts 回 PENDING 延后） | 瞬时故障自愈 |
+| 死信 | `fail`（达上限置 FAILED）+ `list_failed` | DLQ 队列与积压指标 |
+| 重放 | `replay`（仅 FAILED→PENDING） | 修根因后重投，不重放在途 |
+| 积压指标 | `backlog_counts` | 门禁 backlog 观测 |
+| 路由扩展缝 | `register_event_handler(event_type, handler)` | 挂 relay，不改现有路由 |
+| 死信运维端点 | `GET /api/v1/outbox/dead-letters` + `/{id}/replay` | 人工重放入口 |
+| 服务身份令牌 | `mint_internal_token` / `verify_internal_token`（ES256） | 跨服务鉴权（签/验分离） |
+
+**跨服务传输真正缺的只有两件 + 一次演练**：① 出站 HTTP 投递（把 outbox 事件 POST 给对端 inbox）；
+② 入站幂等 Inbox（对端收下、去重、落库、ack）；③ 端到端 Go/No-Go 演练。重试 / 租约 / 退避 / DLQ /
+重放 / 生产侧去重全部免费继承。
+
+## 3. 事件传输门禁 PoC（本轮交付）
+
+新平台模块 `app/platform/eventing/`。**默认关闭**（`event_relay_enabled=False`）→ 现网 worker 行为零改变。
+
+### 3.1 诚实的范围界定
+
+- **回环（loopback）验证**：Relay 出站 HTTP 打到**本服务自己的** `/internal/events`。理由：Phase 3
+  真正的远端消费者（Expert Platform）尚不存在；两个现存服务仓（gateway/knowledge）是请求/响应型、
+  非事件消费者。回环能在**离线、无新服务**下端到端证明「签发→POST→验签→幂等落库→DLQ→重放」这条
+  传输模板——正是门禁要证的东西。真实远端消费者是 Phase 3 主体，`# ponytail:` 标注升级路径。
+- **门禁只证可靠传输**：Inbox 落库 + 去重 + ack + 一个平凡 demo 消费者（received→processed）。
+  **不**在本轮接真实入站投影（乱序重排语义 / 业务投影是 Phase 3/4 Runtime 的活）。
+- **不迁数据、不建远端服务、不改现网默认行为**。
+
+### 3.2 组件
+
+1. **`inbox_model.py`** — `InboxEvent(CommonMixin, Base)`：`event_id`(Uuid, **unique** = 入站幂等去重键)、
+   `event_type`、`aggregate_type`、`aggregate_id`、`payload`、`source_service`、`status`
+   (`received`/`processed`)。`create_time` 即到达时刻（复用 CommonMixin，不另建 received_at）。
+2. **`inbox.py`** — `EventEnvelope`（Pydantic 线协议）；`receive_event(db, envelope, *, source)`：
+   INSERT-or-ignore（`event_id` 冲突 = 已收，幂等返回 `False`，不重复处理）；`process_pending`
+   平凡 demo 消费者（received→processed，证"逻辑事件只处理一次"）。
+3. **`relay.py`** — `HttpInboxRelay`（`ExternalEventHandler`）：`OutboxEvent` → envelope →
+   `mint_internal_token`（audience=对端、scope=`events:receive`）→ httpx POST `{peer}/internal/events`；
+   非 2xx / 超时 → `raise` → 现有 outbox 退避重试 / DLQ 接管。**日志不回显 token / body 明文**（§7.1 红线）。
+4. **`entrypoints/http.py`** — `POST /internal/events`：`HTTPBearer` + `verify_internal_token`
+   （audience=本服务、强制 scope `events:receive`）→ `receive_event` → 202；验签失败 401、缺 scope 403。
+5. **`composition.py`** + wiring — 开关 on 时 `register_event_handler("expert.step.ready", HttpInboxRelay(...))`
+   （PoC 占位事件类型，证扩展缝可用）；router 装配进 `app/bootstrap`。fail-fast：开关 on 但缺 peer/私钥 → 启动报错。
+
+### 3.3 配置（`app/core/config.py`）
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `event_relay_enabled` | `False` | 总开关；关=现网零改变 |
+| `event_inbox_peer_url` | `""` | 对端 inbox 根地址；回环填自身 |
+| `event_relay_event_types` | `()` | 允许中继的事件类型 allowlist |
+
+### 3.4 Go/No-Go 门禁 DoD（演练全绿才放行 Phase 3 远程事件消费者）
+
+`tests/test_event_transport_gate.py`（sqlite in-memory + ASGITransport 回环，仿 `test_outbox_dlq.py`）：
+
+- [ ] **投递恰一条**：enqueue → relay 投递 → Inbox 落库恰 1 条。
+- [ ] **入站幂等**：重复投递同 `event_id` → Inbox 去重、无二次处理。
+- [ ] **鉴权**：无/错令牌 → 401；令牌缺 `events:receive` scope → 403。
+- [ ] **DLQ**：Inbox 强制 5xx → outbox 重试耗尽 → FAILED；`list_failed` 见死信。
+- [ ] **重放**：`replay()` → 重新领取投递 → Inbox 跨重放仍单条逻辑处理（不双写）。
+- [ ] 无永久卡死；日志无令牌 / body 明文；relay 默认关不影响现网。
+
+**未过 → Expert 长任务保持本地，不启用远程事件消费者（docs/21 红线）。**
+
+## 4. Phase 3 完整方案（本轮只落文档，代码待门禁通过后逐模块增量）
+
+> 顺序即依赖顺序。每步"单模块增量 + 消费者驱动契约 + Branch-by-Abstraction"，与 Phase 1/2 同法。
+
+1. **事件传输门禁**（本 PoC）— 硬前置，先过 Go/No-Go。
+2. **ExpertProfile 物理拆分 / 发布面**：业务 `OrgExpertMember`（组织成员关系）+ 平台
+   `ExpertDefinition` / `ExpertRelease`（不可变发布）；业务表存 `expert_release_id` 映射。ADR 0008 已
+   拆逻辑聚合（domain 两子聚合 + 组合根），本阶段做**物理表 + 发布流程**面。
+3. **资产版本化**：Prompt / 模型策略 / Skill / Tool Descriptor → 可版本化资产（草稿 → 评测 → 发布）。
+   为当前每个专家生成不可变 Release，业务表保存 `expert_release_id`。
+4. **Expert Execute / SSE**：内部调 Knowledge Search（Phase 2）+ LLM Gateway（Phase 1）；
+   交互式专家为第一场景，后台步骤执行为第二场景灰度。**Expert 只调 Search，不调 Answer**（防 Knowledge↔Expert 环）。
+5. **Capability Provider 协议**：先迁**只读 + 短事务同步工具**；**长耗时 / 审批型工具必须走本门禁的
+   事件交接**。业务副作用与最终授权仍归资源服务（Tool 定义与 Handler 分离）。
+6. **回滚**：执行路由切回本地 Agent Runner；业务保留专家执行快照兼容字段；平台发布资产可导出为本地快照。
+
+### 验收（Phase 3 整体，docs/21 §Phase 3）
+
+同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务
+最终鉴权，命令具备幂等和确定状态查询。
+
+## 5. 红线核对
+
+- 默认关不改现网；`knowledge`/`gateway`/未来 Expert 仅持**验证公钥**，私钥只在 AI-Youdoogo。
+- 无双写（事件是单向交接，非双写真源）。
+- AI 决策仍真人确认（业务 / 资金 / 项目 / 人事决议须真人生效）。
+- 密钥不硬编码；日志不打 Authorization / body 明文。

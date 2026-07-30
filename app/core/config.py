@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # 抽样（会分裂写真源，违 docs/21 禁双写红线）——只做硬 local|remote 切换，无 canary。
     knowledge_index_mode: str = "local"  # local | remote
 
+    # 事件传输门禁（Phase 3 硬前置 / docs/21 §Immediate Backlog C + docs/23）：出站 HTTP Relay
+    # 把 outbox 事件投递给对端 Inbox。默认关 → 现网 worker 行为零改变；开关 on → 装配 HttpInboxRelay
+    # 并 register_event_handler；缺 peer/私钥则启动即失败（fail-fast，见 _enforce_event_relay）。
+    event_relay_enabled: bool = False  # 总开关
+    event_inbox_peer_url: str = ""  # 对端 inbox 根地址（回环验证填自身，如 http://localhost:8000）
+    event_relay_event_types: tuple[str, ...] = ()  # 允许中继的事件类型 allowlist（空=不中继任何）
+
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
     workflow_worker_poll_seconds: float = 1.0
@@ -162,6 +169,22 @@ class Settings(BaseSettings):
             raise ValueError("KNOWLEDGE_INDEX_MODE 必须是 local 或 remote")
         if self.knowledge_index_mode == "remote" and not self.knowledge_gateway_url:
             raise ValueError("KNOWLEDGE_INDEX_MODE=remote 时必须配置 KNOWLEDGE_GATEWAY_URL")
+        return self
+
+
+    @model_validator(mode="after")
+    def _enforce_event_relay(self) -> "Settings":
+        """开事件中继必须配对端地址 + 私钥：启动即失败，而非运行时首个事件投递才 500。
+
+        中继需签发服务令牌（走 internal_jwt_private_key），故开关 on 时私钥也必填。
+        """
+        if self.event_relay_enabled:
+            if not self.event_inbox_peer_url:
+                raise ValueError("EVENT_RELAY_ENABLED=true 时必须配置 EVENT_INBOX_PEER_URL")
+            if not self.internal_jwt_private_key:
+                raise ValueError(
+                    "EVENT_RELAY_ENABLED=true 时必须配置 INTERNAL_JWT_PRIVATE_KEY（中继需签发令牌）"
+                )
         return self
 
 

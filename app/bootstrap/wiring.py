@@ -25,6 +25,7 @@ from app.api.v1.users import router as users_router
 from app.contexts.business.proposal_management.entrypoints import (
     register_proposal_error_handlers,
 )
+from app.platform.eventing.entrypoints import router as eventing_router
 
 
 def register_routes(app: FastAPI) -> None:
@@ -53,4 +54,6 @@ def register_routes(app: FastAPI) -> None:
         eval_router,
     ):
         app.include_router(router, prefix=prefix)
+    # 服务间事件入站端点：不挂 /api/v1（内部服务身份鉴权，非面向用户的公开 API）。
+    app.include_router(eventing_router)
     register_proposal_error_handlers(app)

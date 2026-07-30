@@ -39,6 +39,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     worker_task = workflow_worker.start_background_worker()
     if worker_task is not None:
         logger.info("durable workflow outbox worker 已启动")
+
+    from app.platform.eventing.composition import register_relay
+
+    if register_relay():
+        logger.info("event relay 已启用（事件传输门禁 / docs/23）")
     try:
         yield
     finally:
