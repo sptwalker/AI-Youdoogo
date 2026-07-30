@@ -8,6 +8,9 @@ from __future__ import annotations
 import pytest
 
 from app.contexts.foundations.model_gateway import public
+from app.contexts.foundations.model_gateway.infrastructure.fallback_adapter import (
+    FallbackCompletionPort,
+)
 from app.contexts.foundations.model_gateway.infrastructure.local_adapter import (
     LocalLlmAdapter,
 )
@@ -56,10 +59,14 @@ def test_local_when_canary_zero(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_remote_when_canary_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 命中远程 → 路线 A 包一层 remote→local 兜底（非裸 Remote），primary 为 Remote
     monkeypatch.setattr(public, "get_settings", lambda: _settings(
         llm_completion_mode="remote", llm_gateway_url="http://gw:8080",
         llm_gateway_canary_percent=100))
-    assert isinstance(public.build_llm_completion_port(), RemoteLlmAdapter)
+    port = public.build_llm_completion_port()
+    assert isinstance(port, FallbackCompletionPort)
+    assert isinstance(port._primary, RemoteLlmAdapter)
+    assert isinstance(port._fallback, LocalLlmAdapter)
 
 
 def test_canary_percent_out_of_range_rejected() -> None:

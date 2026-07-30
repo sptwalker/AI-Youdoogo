@@ -10,6 +10,9 @@ import secrets
 
 from app.contexts.foundations.governance.usage_budget.public import extract_usage
 from app.contexts.foundations.model_gateway.contracts.completion import LlmCompletionPort
+from app.contexts.foundations.model_gateway.infrastructure.fallback_adapter import (
+    FallbackCompletionPort,
+)
 from app.contexts.foundations.model_gateway.infrastructure.local_adapter import (
     LocalLlmAdapter,
 )
@@ -48,6 +51,9 @@ def build_llm_completion_port() -> LlmCompletionPort:
 
     默认 local（percent=0 或 mode=local，无服务时安全）；0<percent<100 为灰度期，
     单次调用按概率落到 Remote 或 Local；percent=100 等价整体切换。回滚=percent 归 0。
+
+    路线 A：命中远程时不裸返 Remote，而是包一层 remote→local 兜底（本地为永久安全网），
+    远程失败静默落本地，把 canary 风险压到 ~0；本地端口永不删。
     ponytail: 按 use_case / knowledge_base 维度的定向灰度待有在线流量证据时再加。
     """
     settings = get_settings()
@@ -56,6 +62,9 @@ def build_llm_completion_port() -> LlmCompletionPort:
         and settings.llm_gateway_url
         and _route_remote(settings.llm_gateway_canary_percent)
     ):
-        return build_remote_llm_completion_port()
+        return FallbackCompletionPort(
+            primary=build_remote_llm_completion_port(),
+            fallback=build_local_llm_completion_port(),
+        )
     return build_local_llm_completion_port()
 
