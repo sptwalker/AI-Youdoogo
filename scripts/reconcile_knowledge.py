@@ -113,7 +113,9 @@ async def _hashes_from_dsn(dsn: str, *, limit: int) -> dict[str, str]:
                     await db.execute(
                         select(KnowledgeFile)
                         .where(KnowledgeFile.is_delete.is_(False))
-                        .order_by(KnowledgeFile.create_time.desc())
+                        # 稳定 join 键：两端同序取同一批。create_time 两端天然不同（docs/22 §2.2），
+                        # 用它排序会各取不同 500 条 → 超 --limit 即假失配（远端漏/多索引）。
+                        .order_by(KnowledgeFile.id)
                         .limit(limit)
                     )
                 ).scalars()
