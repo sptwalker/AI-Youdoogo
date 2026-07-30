@@ -1537,7 +1537,8 @@ WorkflowStepDefinition
 
           <article class="phase">
             <h3>Phase 1 · 拆出 LLM Gateway</h3>
-            <div class="phase-meta"><span class="tag">3–5 周</span><span class="tag green">第一优先</span></div>
+            <div class="phase-meta"><span class="tag">3–5 周</span><span class="tag green">✅ 已交付并离线验收（2026-07）</span></div>
+            <p><b>落地状态：</b>独立仓库 <code>ai-model-gateway</code>（本地）行走骨架已跑通——Chat/Streaming parity + Embedding/Rerank，Internal JWT ES256 验签、消费者驱动契约与 AI-Youdoogo <code>RemoteLlmAdapter</code> 逐字对齐；生产切换仍受 <code>llm_completion_mode</code> 开关控制、默认 local（灰度/上线待后续增量）。</p>
             <b>要做什么</b>
             <ol>
               <li>用现有 provider factory 和模型卡逻辑搭建网关内部 Adapter。</li>
@@ -1556,7 +1557,8 @@ WorkflowStepDefinition
 
           <article class="phase">
             <h3>Phase 2 · 拆出 Knowledge Service</h3>
-            <div class="phase-meta"><span class="tag">5–8 周</span><span class="tag green">第二优先</span></div>
+            <div class="phase-meta"><span class="tag">5–8 周</span><span class="tag green">✅ 已交付并离线验收（2026-07）</span></div>
+            <p><b>落地状态：</b>独立仓库 <code>ai-knowledge-service</code>（本地）已实现 Search + Index 两侧半边（RRF 混检、pgvector + pg_trgm、Internal JWT 验签），与 AI-Youdoogo <code>RemoteKnowledge*Adapter</code> 契约逐字对齐；golden 融合排序门 + 写侧迁移对账脚本（<code>scripts/reconcile_knowledge.py</code>，docs/22）就位。<code>knowledge_index_mode</code> 为硬 local|remote（无双写红线），Search 默认 local、可 canary；上线切换待后续增量。</p>
             <b>要做什么</b>
             <ol>
               <li>复用现有 indexing / retrieval 契约，补 tenant_key、可选 project_ref、visible scopes、trace 和命令幂等。</li>
@@ -1564,7 +1566,7 @@ WorkflowStepDefinition
               <li>继续共享 MinIO 集群但改用独立 bucket / prefix 凭证或预签名 URL；修复 secure 配置并演练对象读取。</li>
               <li>批量回填文档元数据与索引，通过旧系统 Outbox Relay 同步新增 / 删除；原始对象可不重复复制。</li>
               <li>用固定评测集比较旧 / 新检索：Recall@K、NDCG、零结果率、延迟与引用一致性。</li>
-              <li>先切只读 Search，再切新文档写入；按 knowledge_base 分批迁移。<b>（读写两侧本地端口接缝均已就位：Search 见 ADR 0002·A1、Index 见 ADR 0006；此处仅剩远端 adapter 本体切换。）</b></li>
+              <li>先切只读 Search，再切新文档写入；按 knowledge_base 分批迁移。<b>（读写两侧本地端口接缝均已就位：Search 见 ADR 0002·A1、Index 见 ADR 0006；远端 adapter 本体与服务端半边已落地并离线互验，仅剩生产灰度切换。）</b></li>
               <li>保留通用 AnswerKnowledge；Expert Platform 只调用 Search，防止 Knowledge ↔ Expert 形成循环依赖。</li>
             </ol>
             <b>验收</b>
@@ -1684,7 +1686,7 @@ WorkflowStepDefinition
               <li>新增 LlmCompletionPort，禁止应用层依赖 BaseChatModel。</li>
               <li>让 Expert public API 不再接收 AsyncSession。<b>（读写两侧均已完成：读侧 ExpertDirectoryPort 见 ADR 0003，写侧 ExpertProvisioningPort 见 ADR 0004）</b></li>
               <li>把 OrgExpertMember 与 ExpertExecutionDefinition 分开。<b>（逻辑聚合边界已拆：domain 拆两子聚合 + 组合根、各自自校验变更面，见 ADR 0008；DB 仍单表、独立事务与物理拆表随 Phase 3。）</b></li>
-              <li>定义 KnowledgeSearchPort / KnowledgeIndexPort。<b>（读写两侧接缝均已收编：读侧 KnowledgeSearchPort 见 ADR 0002·A1，写侧 KnowledgeIndexPort 见 ADR 0006；index 远端 adapter 本体仍属 Phase 2。）</b></li>
+              <li>定义 KnowledgeSearchPort / KnowledgeIndexPort。<b>（读写两侧接缝均已收编：读侧 KnowledgeSearchPort 见 ADR 0002·A1，写侧 KnowledgeIndexPort 见 ADR 0006；index 远端 adapter 本体已随 Phase 2 落地。）</b></li>
               <li>起草 Runtime Contract v2，去除产品字段。<strong>（已完成：运行时进度事件 WorkflowProgressedV1 产品字段已 opaque 化为 business_key + payload，见 ADR 0005；WorkflowPlan/ExpertExecutionSnapshot 类型解耦已由 ADR 0007 结清——契约仅剩 stdlib import，StartWorkflowCommand 拍平自持、expert 契约 opaque，消费端 cast 收窄。）</strong></li>
               <li>为四个 Port 提供 Local Adapter。</li>
             </ul>
