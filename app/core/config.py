@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_JWT_SECRET = "local-only-jwt-secret-change-in-production"
@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     internal_jwt_private_key: str = ""
     internal_jwt_public_key: str = ""
     internal_jwt_ttl_seconds: int = 300
+
+    # Lodge resource-server（默认关闭；独立于现有 HS256 用户登录）。仅验证 Lodge
+    # 发给 youdoogo 的浏览器 target token，绝不将该 token 转发给下游服务。
+    lodge_identity_enabled: bool = False
+    lodge_issuer: str = ""
+    lodge_jwks_url: str = ""
+    lodge_audience: str = "youdoogo"
+    lodge_status_url: str = ""
+    lodge_status_service_token: SecretStr = SecretStr("")
+    lodge_http_timeout_seconds: float = 3.0
+    lodge_jwks_cache_ttl_seconds: int = 300
+    lodge_status_cache_ttl_seconds: int = 60
+    lodge_response_max_bytes: int = 65_536
 
     # 大模型密钥（国产为主，DeepSeek 主力）
     deepseek_api_key: str = ""
@@ -105,6 +118,18 @@ class Settings(BaseSettings):
                 "生产环境 JWT_SECRET 必须覆盖默认值且长度≥32；"
                 '可用 python -c "import secrets;print(secrets.token_urlsafe(48))" 生成'
             )
+        if self.lodge_identity_enabled:
+            required = {
+                "LODGE_ISSUER": self.lodge_issuer,
+                "LODGE_JWKS_URL": self.lodge_jwks_url,
+                "LODGE_STATUS_URL": self.lodge_status_url,
+                "LODGE_STATUS_SERVICE_TOKEN": self.lodge_status_service_token.get_secret_value(),
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing:
+                raise ValueError(f"Lodge enabled but missing: {', '.join(missing)}")
+            if self.lodge_audience != "youdoogo":
+                raise ValueError("LODGE_AUDIENCE must be exactly youdoogo")
         return self
 
 
