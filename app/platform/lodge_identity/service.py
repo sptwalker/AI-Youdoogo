@@ -15,7 +15,42 @@ from app.platform.lodge_identity.errors import LodgeIdentityConfigurationError, 
 from app.platform.lodge_identity.jwks import LodgeJwksClient
 from app.platform.lodge_identity.status import LodgeStatusClient
 
-_REQUIRED_CLAIMS = ("sub", "sid", "org_id", "identity_ver", "jti", "iat", "nbf", "exp")
+_REQUIRED_CLAIMS = (
+    "contract_ver",
+    "token_use",
+    "token_profile",
+    "iss",
+    "aud",
+    "sub",
+    "sid",
+    "org_id",
+    "identity_ver",
+    "jti",
+    "iat",
+    "nbf",
+    "exp",
+    "entitlements",
+    "scope",
+)
+_MAX_TOKEN_TTL_SECONDS = 900
+_SCOPE_CEILINGS = {
+    "viewer": frozenset({"decision:read"}),
+    "editor": frozenset(
+        {"decision:read", "decision:proposal:draft", "decision:proposal:submit"}
+    ),
+    "system_admin": frozenset(
+        {
+            "decision:read",
+            "decision:proposal:draft",
+            "decision:proposal:submit",
+            "decision:config:read",
+            "decision:config:write",
+        }
+    ),
+}
+_FORBIDDEN_SCOPES = frozenset(
+    {"decision:proposal:approve", "decision:proposal:reject", "decision:proposal:publish"}
+)
 
 
 class LodgeIdentityService:
@@ -33,6 +68,7 @@ class LodgeIdentityService:
         timeout_seconds: float = 3.0,
         jwks_cache_ttl_seconds: int = 300,
         status_cache_ttl_seconds: int = 60,
+        status_cache_max_entries: int = 10_000,
         max_response_bytes: int = 65_536,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -56,6 +92,7 @@ class LodgeIdentityService:
             http_client=http_client,
             timeout_seconds=timeout_seconds,
             cache_ttl_seconds=status_cache_ttl_seconds,
+            cache_max_entries=status_cache_max_entries,
             max_response_bytes=max_response_bytes,
         )
 
@@ -82,6 +119,12 @@ class LodgeIdentityService:
             raise LodgeTokenRejected("Lodge token is not yet valid") from exc
         except jwt.InvalidAudienceError as exc:
             raise LodgeTokenRejected("Lodge token audience is invalid") from exc
+        except jwt.MissingRequiredClaimError as exc:
+            if exc.claim == "contract_ver":
+                raise LodgeTokenRejected("Lodge token contract_ver is required") from exc
+            raise LodgeTokenRejected(
+                "Lodge token signature or required claims are malformed"
+            ) from exc
         except jwt.InvalidTokenError as exc:
             raise LodgeTokenRejected(
                 "Lodge token signature or required claims are malformed"
@@ -99,6 +142,8 @@ class LodgeIdentityService:
             raise LodgeTokenRejected("Lodge token expired")
         if not_before > now_timestamp:
             raise LodgeTokenRejected("Lodge token is not yet valid")
+        if expires_at - issued_at > _MAX_TOKEN_TTL_SECONDS:
+            raise LodgeTokenRejected("Lodge token TTL exceeds the contract maximum")
         principal = self._principal(payload)
         await self._status.require_active(principal)
         return principal
@@ -127,6 +172,7 @@ class LodgeIdentityService:
         if payload.get("contract_ver") != "lodge_identity_v2":
             raise LodgeTokenRejected("Lodge token contract_ver must be lodge_identity_v2")
         try:
+            self._validate_entitlements_and_scopes(payload)
             identity_version = _int(payload, "identity_ver")
             if identity_version <= 0:
                 raise TypeError("identity_ver")
@@ -141,6 +187,31 @@ class LodgeIdentityService:
             )
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise LodgeTokenRejected("Lodge token required claims are malformed") from exc
+
+    def _validate_entitlements_and_scopes(self, payload: dict[str, Any]) -> None:
+        entitlements = payload["entitlements"]
+        if not isinstance(entitlements, dict):
+            raise TypeError("entitlements")
+        entitlement = entitlements["youdoogo"]
+        if not isinstance(entitlement, dict) or entitlement.get("allowed") is not True:
+            raise TypeError("entitlements.youdoogo")
+        system_role = _text(entitlement, "system_role")
+        _text(entitlement, "source")
+        ceiling = _SCOPE_CEILINGS.get(system_role)
+        if ceiling is None:
+            raise TypeError("system_role")
+        self._validate_scopes(entitlement["scopes"], ceiling)
+        self._validate_scopes(payload["scope"], ceiling)
+
+    @staticmethod
+    def _validate_scopes(value: Any, ceiling: frozenset[str]) -> None:
+        if not isinstance(value, list) or any(
+            not isinstance(scope, str) or not scope for scope in value
+        ):
+            raise TypeError("scope")
+        scopes = frozenset(value)
+        if not scopes <= ceiling or not scopes.isdisjoint(_FORBIDDEN_SCOPES):
+            raise TypeError("scope")
 
 
 def _text(payload: dict[str, Any], field: str) -> str:
@@ -175,5 +246,6 @@ def service_from_settings(
         timeout_seconds=settings.lodge_http_timeout_seconds,
         jwks_cache_ttl_seconds=settings.lodge_jwks_cache_ttl_seconds,
         status_cache_ttl_seconds=settings.lodge_status_cache_ttl_seconds,
+        status_cache_max_entries=settings.lodge_status_cache_max_entries,
         max_response_bytes=settings.lodge_response_max_bytes,
     )

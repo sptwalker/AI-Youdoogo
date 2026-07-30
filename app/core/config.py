@@ -1,11 +1,16 @@
 """应用统一配置入口：所有环境变量经由 Settings 读取，禁止散落 os.getenv。"""
 
 from functools import lru_cache
+from urllib.parse import unquote, urlsplit
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_JWT_SECRET = "local-only-jwt-secret-change-in-production"
+_MAX_LODGE_HTTP_TIMEOUT_SECONDS = 30.0
+_MAX_LODGE_JWKS_CACHE_TTL_SECONDS = 3_600
+_MAX_LODGE_STATUS_CACHE_TTL_SECONDS = 300
+_MAX_LODGE_RESPONSE_BYTES = 1_048_576
 
 
 class Settings(BaseSettings):
@@ -64,6 +69,7 @@ class Settings(BaseSettings):
     lodge_http_timeout_seconds: float = 3.0
     lodge_jwks_cache_ttl_seconds: int = 300
     lodge_status_cache_ttl_seconds: int = 60
+    lodge_status_cache_max_entries: int = 10_000
     lodge_response_max_bytes: int = 65_536
 
     # 大模型密钥（国产为主，DeepSeek 主力）
@@ -130,7 +136,50 @@ class Settings(BaseSettings):
                 raise ValueError(f"Lodge enabled but missing: {', '.join(missing)}")
             if self.lodge_audience != "youdoogo":
                 raise ValueError("LODGE_AUDIENCE must be exactly youdoogo")
+            _validate_lodge_url(self.lodge_issuer, "LODGE_ISSUER")
+            _validate_lodge_url(self.lodge_jwks_url, "LODGE_JWKS_URL", require_path=True)
+            _validate_lodge_url(self.lodge_status_url, "LODGE_STATUS_URL", require_path=True)
+            if not 0 < self.lodge_http_timeout_seconds <= _MAX_LODGE_HTTP_TIMEOUT_SECONDS:
+                raise ValueError("LODGE_HTTP_TIMEOUT_SECONDS must be between 0 and 30")
+            if not 0 < self.lodge_jwks_cache_ttl_seconds <= _MAX_LODGE_JWKS_CACHE_TTL_SECONDS:
+                raise ValueError("LODGE_JWKS_CACHE_TTL_SECONDS must be between 1 and 3600")
+            if not 0 < self.lodge_status_cache_ttl_seconds <= _MAX_LODGE_STATUS_CACHE_TTL_SECONDS:
+                raise ValueError("LODGE_STATUS_CACHE_TTL_SECONDS must be between 1 and 300")
+            if self.lodge_status_cache_max_entries <= 0:
+                raise ValueError("LODGE_STATUS_CACHE_MAX_ENTRIES must be greater than zero")
+            if not 0 < self.lodge_response_max_bytes <= _MAX_LODGE_RESPONSE_BYTES:
+                raise ValueError("LODGE_RESPONSE_MAX_BYTES must be between 1 and 1048576")
         return self
+
+
+def _validate_lodge_url(raw_url: str, setting_name: str, *, require_path: bool = False) -> None:
+    """Reject ambiguous remote endpoints before a client can be constructed."""
+    try:
+        parsed = urlsplit(raw_url)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{setting_name} must be a valid HTTPS URL") from exc
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.query
+    ):
+        raise ValueError(
+            f"{setting_name} must be a fixed HTTPS URL without userinfo, query, or fragment"
+        )
+    if require_path and not _is_safe_fixed_path(parsed.path):
+        raise ValueError(f"{setting_name} must include a safe, non-root path")
+
+
+def _is_safe_fixed_path(path: str) -> bool:
+    decoded_path = unquote(path)
+    if not decoded_path.startswith("/") or decoded_path.rstrip("/") == "" or "//" in decoded_path:
+        return False
+    return all(segment not in {".", ".."} for segment in decoded_path.split("/") if segment)
 
 
 @lru_cache

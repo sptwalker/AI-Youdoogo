@@ -24,6 +24,7 @@ class LodgeStatusClient:
         http_client: httpx.AsyncClient,
         timeout_seconds: float = 3.0,
         cache_ttl_seconds: int = 60,
+        cache_max_entries: int = 10_000,
         max_response_bytes: int = 65_536,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -31,13 +32,19 @@ class LodgeStatusClient:
             raise LodgeIdentityConfigurationError("LODGE_STATUS_URL must use HTTPS")
         if not service_token.strip():
             raise LodgeIdentityConfigurationError("LODGE_STATUS_SERVICE_TOKEN is required")
-        if timeout_seconds <= 0 or cache_ttl_seconds < 1 or max_response_bytes < 1:
+        if (
+            timeout_seconds <= 0
+            or cache_ttl_seconds < 1
+            or cache_max_entries < 1
+            or max_response_bytes < 1
+        ):
             raise LodgeIdentityConfigurationError("invalid Lodge status client limits")
         self._url = url
         self._service_token = service_token.strip()
         self._http_client = http_client
         self._timeout_seconds = timeout_seconds
         self._cache_ttl_seconds = cache_ttl_seconds
+        self._cache_max_entries = cache_max_entries
         self._max_response_bytes = max_response_bytes
         self._clock = clock
         self._cache: dict[tuple[str, str, str, int, str], float] = {}
@@ -50,7 +57,9 @@ class LodgeStatusClient:
             principal.identity_version,
             principal.token_id,
         )
-        if self._cache.get(cache_key, 0.0) > self._clock():
+        now = self._clock()
+        self._discard_expired(now)
+        if self._cache.get(cache_key, 0.0) > now:
             return
         try:
             async with self._http_client.stream(
@@ -77,13 +86,28 @@ class LodgeStatusClient:
             self._assert_matches(payload, principal)
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             raise LodgeStatusDenied("Lodge identity status cannot affirm this session") from exc
-        self._cache[cache_key] = self._clock() + self._cache_ttl_seconds
+        now = self._clock()
+        self._discard_expired(now)
+        self._cache[cache_key] = now + self._cache_ttl_seconds
+        self._enforce_capacity()
+
+    def _discard_expired(self, now: float) -> None:
+        expired = [cache_key for cache_key, expires_at in self._cache.items() if expires_at <= now]
+        for cache_key in expired:
+            del self._cache[cache_key]
+
+    def _enforce_capacity(self) -> None:
+        while len(self._cache) > self._cache_max_entries:
+            cache_key, _ = min(self._cache.items(), key=lambda item: (item[1], item[0]))
+            del self._cache[cache_key]
 
     def _assert_matches(self, payload: Any, principal: LodgePrincipal) -> None:
         if not isinstance(payload, dict):
             raise ValueError("status is not an object")
         entitlement = payload["entitlement"]
         current_identity_version = payload["current_identity_ver"]
+        checked_at = payload["checked_at"]
+        scopes = payload["scopes"]
         if (
             payload["active"] is not True
             or payload["subject"] != principal.subject
@@ -98,6 +122,10 @@ class LodgeStatusClient:
             or payload["session_active"] is not True
             or not isinstance(entitlement, dict)
             or entitlement.get("allowed") is not True
+            or not isinstance(checked_at, str)
+            or not checked_at.strip()
+            or not isinstance(scopes, list)
+            or any(not isinstance(scope, str) or not scope for scope in scopes)
         ):
             raise ValueError("status does not match verified token")
 

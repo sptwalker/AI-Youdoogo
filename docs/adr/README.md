@@ -18,6 +18,7 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
 | [0006](0006-knowledge-index-port.md) | `KnowledgeIndexPort` (write) | `knowledge_indexing.public.build_local_knowledge_index_port(session)` | `test_architecture_boundaries.py::test_knowledge_index_flows_through_port_seam` | Phase 2: `RemoteKnowledgeIndexAdapter` |
 | [0007](0007-runtime-contract-type-decoupling.md) | Runtime contract type-decoupling (DTO) | N/A (contract self-owns `WorkflowLaunchStep`; `expert: object`) | `test_planning_workflow_task_contracts.py::test_runtime_contract_imports_no_cross_context_types` | Phase 4: Runtime Contract v2 |
 | [0008](0008-expert-aggregate-logical-split.md) | Domain aggregate split (`OrgExpertMember` / `ExpertExecutionDefinition`) | N/A (domain composition root `ExpertProfile`) | `test_expert_roster_application.py` (3 boundary tests) | Phase 3: physical table split + `ExpertRelease` versioning |
+| [0010](0010-lodge-resource-server-foundation.md) | Lodge resource-server (`lodge_identity_v2`) | `service_from_settings(settings, http_client)` | `test_lodge_identity.py` | 默认关闭；Lodge browser target token + online status |
 
 **注**：各 ADR 文件记录完整决策、收编范围、债务与延后项；本索引只汇总关键接缝事实。
 
@@ -57,3 +58,4 @@ AI-Youdoogo 通用AI平台拆分绞杀链（Phase 0）已把全部跨 Context �
 - 0007: 运行时契约剔除跨 Context 产品类型
 - 0008: 专家聚合逻辑拆分（单表）
 - 0009: 跨服务契约治理策略（Envelope / SemVer / CDC，实现归 Phase 1）
+- 0010: Lodge resource-server（target token、online status、fail-closed 缓存）
