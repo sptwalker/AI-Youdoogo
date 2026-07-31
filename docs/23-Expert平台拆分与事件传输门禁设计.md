@@ -198,6 +198,22 @@ Provider 协议真正缺的那块契约：**每个能力声明自身的跨服务
 **红线**：不改 dispatch 语义、不启用远端传输（门禁默认关）；`EVENT_GATED` 现仍就地执行，真正的远端异步
 交接是 Phase 3 远端平台主体，`# ponytail` 标注升级路径；业务副作用与最终授权仍归资源服务。
 
+### 4.6 Module 6 详细设计（本轮交付：回滚 = current_release_id 指回旧版）
+
+**范围界定（诚实）**：Module 2 的不可变 `expert_release` + 软指针 `current_release_id`、Module 3 的
+`list_releases` 选版面、Module 4 的 `get_by_id` 按指针驱动执行——回滚所需地基已全部就位。plan #6 三句里
+「执行路由切回本地 Agent Runner」是**当前既有状态**（执行本就在本地 `AgentExecutionApplication`，无远端
+Runner 可切离；`FallbackCompletionPort` 已远程为主本地兜底）→ `# ponytail`；「平台发布资产导出为本地快照」
+属远端平台落地物，本轮不做。Module 6 只补真正缺的那一步：**把某坏发布回滚到历史某个好版本**。
+
+**做法（加法式、复用现有仓）**：`ExpertManagementApplication.rollback_release(expert_id, target_version_no)`
+——校验专家存在 → 经 `list_releases` 解析目标 `version_no` 对应的不可变快照 → `set_current` 把
+`current_release_id` 指回该旧版 → 提交。**不 cut 新版**（历史发布恒不可变），Module 4 `get_by_id` 随即以
+回滚版驱动执行。无新增仓方法、无 schema 变更、无迁移，与 `publish_release` 对称。
+
+**红线**：是否回滚由**真人触发**（AI 仅辅助，业务决议须真人确认）；回滚只改指针不改历史快照，可再回滚/
+再前滚（幂等选版）；无发布记录的专家无从回滚（`current_release_id` 仍空，执行回落活行，零行为变更）。
+
 ### 验收（Phase 3 整体，docs/21 §Phase 3）
 
 同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务

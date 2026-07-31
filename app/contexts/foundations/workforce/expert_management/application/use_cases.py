@@ -261,6 +261,32 @@ class ExpertManagementApplication:
         async with self._uow_factory() as uow:
             return await uow.releases.list_releases(expert_id)
 
+    async def rollback_release(
+        self, expert_id: uuid.UUID, target_version_no: int
+    ) -> ExpertReleaseView:
+        """回滚执行配置到某历史版本（Module 6 §4.6）：把 current_release_id 指回旧版快照。
+
+        只改指针、不 cut 新版（历史发布恒不可变）；Module 4 get_by_id 随即以该版驱动执行。
+        是否回滚由真人触发（AI 红线）。目标版本不存在则报错。
+        """
+        async with self._uow_factory() as uow:
+            expert = await uow.experts.get(expert_id)
+            if expert is None or expert.is_deleted:
+                raise ResourceNotFound("智能体员工不存在")
+            target = next(
+                (
+                    release
+                    for release in await uow.releases.list_releases(expert_id)
+                    if release.version_no == target_version_no
+                ),
+                None,
+            )
+            if target is None:
+                raise ResourceNotFound("目标发布版本不存在")
+            await uow.releases.set_current(expert_id, target.release_id)
+            await uow.commit()
+        return target
+
     async def delete(self, expert_id: uuid.UUID) -> None:
         async with self._uow_factory() as uow:
             expert = await uow.experts.get(expert_id)

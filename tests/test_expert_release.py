@@ -245,3 +245,38 @@ async def test_list_releases_returns_versions_descending() -> None:
     # 无评测证据的 v2 保持空，v1 携分——枚举面如实回读
     assert releases[0].eval_score is None
     assert releases[1].eval_score == 0.5 and releases[1].eval_case_count == 3
+
+
+async def test_rollback_repoints_current_to_older_version() -> None:
+    """回滚只改指针指回旧版（Module 6 §4.6）——不 cut 新版，可再前滚。"""
+    profile = _profile()
+    app, uow = _application(profile)
+
+    v1 = await app.publish_release(EXPERT_ID)
+    v2 = await app.publish_release(EXPERT_ID)
+    assert uow.releases.current[EXPERT_ID] == v2.release_id
+
+    rolled = await app.rollback_release(EXPERT_ID, target_version_no=1)
+
+    assert rolled.release_id == v1.release_id
+    assert uow.releases.current[EXPERT_ID] == v1.release_id
+    assert len(uow.releases.added) == 2  # 未 cut 新版，历史不可变
+
+    # 可再前滚回 v2（幂等选版）
+    await app.rollback_release(EXPERT_ID, target_version_no=2)
+    assert uow.releases.current[EXPERT_ID] == v2.release_id
+
+
+async def test_rollback_missing_version_raises() -> None:
+    profile = _profile()
+    app, _ = _application(profile)
+    await app.publish_release(EXPERT_ID)
+
+    with pytest.raises(ResourceNotFound):
+        await app.rollback_release(EXPERT_ID, target_version_no=99)
+
+
+async def test_rollback_missing_expert_raises() -> None:
+    app, _ = _application(None)
+    with pytest.raises(ResourceNotFound):
+        await app.rollback_release(EXPERT_ID, target_version_no=1)
