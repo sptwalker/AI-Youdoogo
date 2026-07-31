@@ -151,6 +151,29 @@ is_delete）+：
 - `ExpertReleaseRepository.list_releases(expert_id) -> tuple[ExpertReleaseView, ...]`（按 version_no 倒序）。
 - `ExpertReleaseView` 增 `eval_score` / `eval_case_count` 字段。
 
+### 4.4 Module 4 详细设计（本轮交付：已发布快照驱动执行 = Execute/SSE 消费 release 面）
+
+**范围界定（诚实）**：Agent 执行链本身**已完整存在**且已是 Phase 3 目标形态——`AgentExecutionApplication.stream`
+逐块 SSE；`CurrentKnowledgeAugmentationAdapter` 调 Knowledge **Search**（非 Answer，规避 Knowledge↔Expert
+回环）；`FallbackCompletionPort` 远程为主本地兜底调 LLM 网关。**不重造**。Module 4 只补 Module 2/3 遗留的
+唯一缺环：**执行读的是哪一份配置**。
+
+**问题**：所有执行经 `SQLAlchemyExpertSnapshotQuery.get_by_id` 取 `ExpertExecutionSnapshot`，当前读**可变的**
+`agent_role` 活行——于是草稿态编辑立即污染在跑的执行，且 Module 2/3 冻结的 `expert_release` 快照无人消费（写死的
+博物馆）。Module 4 让**已发布的不可变 release 驱动执行**：草稿改动在真人 `publish_release` 前不影响线上运行。
+
+**做法（加法式、单一切换点）**：`get_by_id` 先看 `agent_role.current_release_id`——
+- 有指针 → 从其指向的 `expert_release` 冻结行构建快照（released 资产驱动执行）；
+- 无指针（seed / 从未发布的存量专家）→ 回落读活行 `agent_role`（**零行为变更**，向后兼容）。
+
+`snapshot_from_release(row)` 把 release 行映射为 `ExpertExecutionSnapshot`：`version` 取 `f"v{version_no}"`
+（可复现该版），`prompt_template/model_role/permission_scope/tools/duty` 取冻结值；`name/title/department_id/
+owner_user_id` 这些**组织归属**字段仍读活 `agent_role`（ADR 0008：org 与 execution 是两个子聚合，release 只冻
+execution，组织信息本就不该进不可变执行快照）。
+
+**红线**：只改"读哪份执行配置"，不改执行语义、不碰知识/网关链；无发布记录的专家行为逐字不变；AI 输出仍可编辑/驳回/终止。
+
+
 ### 验收（Phase 3 整体，docs/21 §Phase 3）
 
 同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务

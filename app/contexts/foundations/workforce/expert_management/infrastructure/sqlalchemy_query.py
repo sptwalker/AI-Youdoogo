@@ -16,18 +16,24 @@ from app.contexts.foundations.workforce.expert_management.contracts.roster impor
     DepartmentExpertCount,
     ExpertRosterSnapshot,
 )
-from app.models.agent import AgentRole
+from app.models.agent import AgentRole, ExpertRelease
+
+
+def _capabilities(tools: object) -> tuple[str, ...]:
+    items = tools if isinstance(tools, list) else []
+    return tuple(item for item in items if isinstance(item, str))
+
+
+def _permissions(scope: object) -> tuple[tuple[str, str], ...]:
+    mapping = scope if isinstance(scope, dict) else {}
+    return tuple(
+        (str(key), _permission_value(value))
+        for key, value in sorted(mapping.items(), key=lambda item: str(item[0]))
+    )
 
 
 def snapshot_from_role(role: AgentRole) -> ExpertExecutionSnapshot:
     """Translate an ORM row into the published Expert snapshot."""
-    capabilities = tuple(item for item in (role.tools or []) if isinstance(item, str))
-    permissions = tuple(
-        (str(key), _permission_value(value))
-        for key, value in sorted(
-            (role.permission_scope or {}).items(), key=lambda item: str(item[0])
-        )
-    )
     return ExpertExecutionSnapshot(
         expert_id=role.id,
         version=(
@@ -40,8 +46,28 @@ def snapshot_from_role(role: AgentRole) -> ExpertExecutionSnapshot:
         department_id=role.department_id,
         prompt_template=role.prompt_template,
         model_role=role.model_role,
-        capability_keys=capabilities,
-        permission_entries=permissions,
+        capability_keys=_capabilities(role.tools),
+        permission_entries=_permissions(role.permission_scope),
+        owner_user_id=role.owner_user_id,
+    )
+
+
+def snapshot_from_release(role: AgentRole, release: ExpertRelease) -> ExpertExecutionSnapshot:
+    """已发布快照驱动执行（Module 4 §4.4）：execution 字段取冻结 release，org 字段仍取活行。
+
+    ADR 0008：release 只冻结 execution 子聚合；name/title/department/owner 属组织归属，不进不可变
+    执行快照，故仍从 agent_role 读。version 取 v{version_no} 可复现该版。
+    """
+    return ExpertExecutionSnapshot(
+        expert_id=role.id,
+        version=f"v{release.version_no}",
+        name=role.name,
+        title=role.title or "",
+        department_id=role.department_id,
+        prompt_template=release.prompt_template,
+        model_role=release.model_role,
+        capability_keys=_capabilities(release.tools),
+        permission_entries=_permissions(release.permission_scope),
         owner_user_id=role.owner_user_id,
     )
 
@@ -96,7 +122,15 @@ class SQLAlchemyExpertSnapshotQuery:
         self._session = session
 
     async def get_by_id(self, expert_id: uuid.UUID) -> ExpertExecutionSnapshot | None:
-        return self._snapshot(await self._find(AgentRole.id == expert_id))
+        """已发布快照驱动执行（Module 4 §4.4）：有 current_release_id 读 release，否则回落活行。"""
+        role = await self._find(AgentRole.id == expert_id)
+        if role is None:
+            return None
+        if role.current_release_id is not None:
+            release = await self._session.get(ExpertRelease, role.current_release_id)
+            if release is not None:
+                return snapshot_from_release(role, release)
+        return snapshot_from_role(role)
 
     async def get_by_name(self, name: str) -> ExpertExecutionSnapshot | None:
         return self._snapshot(await self._find(AgentRole.name == name))
