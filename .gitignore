@@ -14,6 +14,9 @@ htmlcov/
 .env.*
 !.env.example
 !.env.production.example
+# 密钥/凭证导出文件（如厂商控制台导出的 API Key CSV），禁止入库
+docs/apiKey-*.csv
+*apiKey*.csv
 
 # uv
 uv.lock.bak
