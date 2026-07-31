@@ -174,6 +174,30 @@ execution，组织信息本就不该进不可变执行快照）。
 **红线**：只改"读哪份执行配置"，不改执行语义、不碰知识/网关链；无发布记录的专家行为逐字不变；AI 输出仍可编辑/驳回/终止。
 
 
+### 4.5 Module 5 详细设计（本轮交付：Capability Provider 协议 = 传输资格声明）
+
+**范围界定（诚实）**：能力执行栈**已完整存在**——`CapabilityExecutionApplication.execute` 走
+resolve→参数校验→授权→审批门→幂等→dispatch；`CurrentCapabilityApproval` 已按 `risk` 经 human-review
+驱动真人复核。远端 Capability Provider **尚不存在**，两个现存服务仓（gateway/knowledge）非事件消费者。
+Module 5 **不**建远端 Provider、**不**改 in-process dispatch 语义、**不**启用事件传输（门禁默认关）。只补
+Provider 协议真正缺的那块契约：**每个能力声明自身的跨服务传输资格**——哪些可作只读/短事务被 Provider
+**同步就地**服务、哪些必须经 §3 事件门禁**异步交接**。这条声明是 plan #5「先迁只读+短事务同步工具；
+长耗时/审批型工具必须走事件交接」的可机检落点，也是 Module 6 回滚路由与未来远端 Provider 的共同判别依据。
+
+**做法（纯派生、加法式）**：以 `side_effect`（plan 命名的「业务副作用归资源服务」轴）为判别：
+
+- `side_effect == NONE` → `SYNC_LOCAL`：只读/短事务，Provider 可同步就地服务（`env_context` / `data_query`）。
+- 否则（`INTERNAL_WRITE` / `EXTERNAL_WRITE`）→ `EVENT_GATED`：有副作用/长耗时/审批型，必须经事件门禁
+  异步交接（`collab` / `deliver`）。
+
+`capability_transport(definition) -> CapabilityTransport` 派生函数 + `CapabilityTransport` 枚举置于 catalog
+契约，经 `public` 导出；`GET /api/v1/agents/skills` 列表回带 `transport`，令角色配置面与未来 Provider 可读
+传输资格。`risk` 轴保持**正交**——审批门已由 §4 current_policy 按 risk 驱动真人复核，不并入传输判别
+（若日后出现「只读高危」能力再扩，`# ponytail`）。
+
+**红线**：不改 dispatch 语义、不启用远端传输（门禁默认关）；`EVENT_GATED` 现仍就地执行，真正的远端异步
+交接是 Phase 3 远端平台主体，`# ponytail` 标注升级路径；业务副作用与最终授权仍归资源服务。
+
 ### 验收（Phase 3 整体，docs/21 §Phase 3）
 
 同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务

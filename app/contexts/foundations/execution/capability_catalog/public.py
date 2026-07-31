@@ -4,6 +4,8 @@ from app.contexts.foundations.execution.capability_catalog.contracts.definition 
     CapabilityDefinition,
     CapabilityRisk,
     CapabilitySideEffect,
+    CapabilityTransport,
+    capability_transport,
 )
 from app.contexts.foundations.execution.capability_catalog.entrypoints.operations import (
     list_capabilities,
@@ -13,5 +15,7 @@ __all__ = [
     "CapabilityDefinition",
     "CapabilityRisk",
     "CapabilitySideEffect",
+    "CapabilityTransport",
+    "capability_transport",
     "list_capabilities",
 ]

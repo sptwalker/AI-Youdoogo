@@ -20,6 +20,9 @@ from app.contexts.foundations.execution.agent_execution.contracts.consult import
 from app.contexts.foundations.execution.agent_execution.entrypoints import (
     operations as agent_execution_operations,
 )
+from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
+    capability_transport,
+)
 from app.contexts.foundations.execution.capability_catalog.entrypoints import (
     operations as capability_operations,
 )
@@ -161,6 +164,7 @@ async def list_skills(_: CurrentUser) -> dict:
                 "label": definition.label,
                 "description": definition.description,
                 "default_on": definition.default_enabled,
+                "transport": capability_transport(definition).value,
             }
             for definition in definitions
         ]
