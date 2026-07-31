@@ -151,3 +151,44 @@ class ExpertProfile:
 
     def delete(self) -> None:
         self.member.delete()
+
+
+@dataclass(frozen=True, slots=True)
+class ExpertRelease:
+    """不可变执行发布快照（Module 2 / docs/23 §4.2）——发布时冻结 execution 定义，只增不改。"""
+
+    id: uuid.UUID
+    expert_id: uuid.UUID
+    version_no: int
+    prompt_template: str
+    model_role: str
+    permission_scope_json: str
+    tools_json: str
+    duty: str | None
+    released_by: uuid.UUID | None
+    released_at: datetime
+
+    @classmethod
+    def cut(
+        cls,
+        *,
+        release_id: uuid.UUID,
+        expert: ExpertProfile,
+        version_no: int,
+        released_by: uuid.UUID | None,
+        released_at: datetime,
+    ) -> ExpertRelease:
+        """把某专家当前执行定义冻结成一版发布快照。"""
+        ex = expert.execution
+        return cls(
+            id=release_id,
+            expert_id=expert.id,
+            version_no=version_no,
+            prompt_template=ex.prompt_template,
+            model_role=ex.model_role,
+            permission_scope_json=ex.permission_scope_json,
+            tools_json=ex.tools_json,
+            duty=ex.duty,
+            released_by=released_by,
+            released_at=released_at,
+        )

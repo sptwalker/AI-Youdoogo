@@ -1,6 +1,6 @@
 """models 包：导出 Base 供 Alembic 元数据发现。"""
 
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.models.agent import AgentRole, AgentTaskRecord, ExpertRelease
 from app.models.ai_provider import AiProvider
 from app.models.audit_log import AuditLog
 from app.models.base import Base
@@ -45,6 +45,7 @@ __all__ = [
     "DiscussionChannel",
     "DiscussionMessage",
     "EvalCase",
+    "ExpertRelease",
     "InboxEvent",
     "KnowledgeBase",
     "KnowledgeFile",

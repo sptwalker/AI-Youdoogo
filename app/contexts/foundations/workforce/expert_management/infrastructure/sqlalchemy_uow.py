@@ -8,6 +8,7 @@ from app.contexts.foundations.workforce.expert_management.application.errors imp
     ExpertWriteConflict,
 )
 from app.contexts.foundations.workforce.expert_management.application.management_ports import (
+    ExpertReleaseRepository,
     ExpertRepository,
     ExpertSourceChangePort,
 )
@@ -17,6 +18,9 @@ from app.contexts.foundations.workforce.expert_management.infrastructure import 
 from app.contexts.foundations.workforce.expert_management.infrastructure.adapters import (
     ExpertSourceChangeAdapter,
 )
+from app.contexts.foundations.workforce.expert_management.infrastructure.release_repository import (
+    SQLAlchemyExpertReleaseRepository,
+)
 from app.platform.database.unit_of_work import IntegrityTranslatingUnitOfWork
 
 
@@ -25,6 +29,7 @@ class SQLAlchemyExpertUnitOfWork(IntegrityTranslatingUnitOfWork):
         super().__init__(session, write_conflict=ExpertWriteConflict)
         self._experts = sqlalchemy_repository.SQLAlchemyExpertRepository(session)
         self._source_changes = ExpertSourceChangeAdapter(session)
+        self._releases = SQLAlchemyExpertReleaseRepository(session)
 
     @property
     def experts(self) -> ExpertRepository:
@@ -33,3 +38,7 @@ class SQLAlchemyExpertUnitOfWork(IntegrityTranslatingUnitOfWork):
     @property
     def source_changes(self) -> ExpertSourceChangePort:
         return self._source_changes
+
+    @property
+    def releases(self) -> ExpertReleaseRepository:
+        return self._releases

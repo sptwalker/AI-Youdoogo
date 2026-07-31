@@ -105,6 +105,39 @@ Phase 3 的 Capability Provider 里，**长耗时 / 审批型工具**必须以�
    事件交接**。业务副作用与最终授权仍归资源服务（Tool 定义与 Handler 分离）。
 6. **回滚**：执行路由切回本地 Agent Runner；业务保留专家执行快照兼容字段；平台发布资产可导出为本地快照。
 
+### 4.2 Module 2 详细设计（本轮交付：不可变发布面，Branch-by-Abstraction 加法式）
+
+**范围界定（诚实）**：远端 Expert 平台尚不存在，本轮**不**做物理拆服务、**不**动 `agent_role` 现有列、
+**不**改 97 处调用方的读路径。只加：一张只增不改的发布快照表 + 业务表一个软指针 + 一个发布用例。
+`agent_role` 继续充当可变的 "ExpertDefinition"（身份 + 当前工作态执行配置），发布 = 把当前执行配置冻结成
+一行 `ExpertRelease`。真正物理拆表 / 独立事务留待远端平台落地（`# ponytail` 标注）。
+
+**表 `expert_release`（不可变，只增不改）** — `CommonMixin`（id / create_time=发布时刻 / update_time /
+is_delete）+：
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `expert_id` | Uuid FK→agent_role.id | 属主专家 |
+| `version_no` | Integer | 该专家内单调递增版本号，`(expert_id, version_no)` 唯一 |
+| `prompt_template` | Text | 发布时冻结 |
+| `model_role` | String(32) | daily / reasoning，发布时冻结 |
+| `permission_scope` | JSONB | 发布时冻结 |
+| `tools` | JSONB | 发布时冻结 |
+| `duty` | Text? | 发布时冻结 |
+| `released_by` | Uuid? | 发布操作人（AI 仅辅助，最终真人确认——留痕位） |
+
+**业务表 `agent_role` 加软指针** `current_release_id: Uuid?`（**不加 FK 约束**，避免与
+`expert_release.expert_id` 成循环外键、破坏 sqlite `create_all` 排序；真链由 release 行反向 FK 保证）。
+指向"当前已发布"快照；回滚（Module 6）= 改指针到旧 `version_no`。
+
+**发布用例** `ExpertManagementApplication.publish_release(expert_id, released_by=None)`：读当前专家 →
+`next_version_no = max(version_no)+1` → 插入不可变 `ExpertRelease` 快照 → 置 `current_release_id`。
+同一 UoW 事务内完成。**触发时机**（create/update/seed 后自动切版 vs 显式发布）由 Module 3 的
+草稿→评测→发布生命周期决定，本轮只提供操作，不挂自动触发（`# ponytail`）。
+
+**为何现在做**：不可变执行快照本身满足审计红线（"某 AI 产出用了哪个配置"可精确复现），且是 Module 3
+（资产版本化）与 Module 6（回滚）的地基；非仅为远端消费者。加法式默认不改现网行为。
+
 ### 验收（Phase 3 整体，docs/21 §Phase 3）
 
 同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务

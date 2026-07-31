@@ -20,6 +20,9 @@ from app.contexts.foundations.workforce.expert_management.application.management
 from app.contexts.foundations.workforce.expert_management.application.ports import (
     ExpertRosterQueryPort,
 )
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertReleaseView,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,
     ExpertRosterSnapshot,
@@ -27,6 +30,7 @@ from app.contexts.foundations.workforce.expert_management.contracts.roster impor
 from app.contexts.foundations.workforce.expert_management.domain.models import (
     ExpertExecutionDefinition,
     ExpertProfile,
+    ExpertRelease,
     OrgExpertMember,
     validate_model_role,
     validate_tier,
@@ -210,6 +214,37 @@ class ExpertManagementApplication:
         except ExpertWriteConflict as exc:
             raise ConflictDetected("角色名或编码已存在") from exc
         return await self._reload(expert)
+
+    async def publish_release(
+        self, expert_id: uuid.UUID, *, released_by: uuid.UUID | None = None
+    ) -> ExpertReleaseView:
+        """把某专家当前执行定义冻结成新一版不可变发布（Module 2 / docs/23 §4.2）。
+
+        触发时机（自动切版 vs 显式发布）由 Module 3 生命周期决定，本方法只提供操作。
+        """
+        async with self._uow_factory() as uow:
+            expert = await uow.experts.get(expert_id)
+            if expert is None or expert.is_deleted:
+                raise ResourceNotFound("智能体员工不存在")
+            release = ExpertRelease.cut(
+                release_id=self._identifiers.new_id(),
+                expert=expert,
+                version_no=await uow.releases.next_version_no(expert_id),
+                released_by=released_by,
+                released_at=self._clock.now(),
+            )
+            await uow.releases.add(release)
+            await uow.flush()
+            await uow.releases.set_current(expert_id, release.id)
+            await uow.commit()
+        return ExpertReleaseView(
+            release_id=release.id,
+            expert_id=release.expert_id,
+            version_no=release.version_no,
+            model_role=release.model_role,
+            released_by=release.released_by,
+            released_at=release.released_at,
+        )
 
     async def delete(self, expert_id: uuid.UUID) -> None:
         async with self._uow_factory() as uow:

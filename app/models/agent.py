@@ -56,6 +56,32 @@ class AgentRole(CommonMixin, Base):
     # 骨架保护：种子高管/总监不被误删
     is_seed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(default=True, server_default="true")
+    # 当前已发布的不可变执行快照指针（Phase 3 Module 2 / docs/23 §4.2）。
+    # ponytail: 软指针不加 FK，避免与 expert_release.expert_id 成循环外键（破坏 sqlite create_all
+    # 排序）；真链由 expert_release 行反向 FK 保证，回滚=改此指针到旧 version。
+    current_release_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
+
+class ExpertRelease(CommonMixin, Base):
+    """专家执行定义的不可变发布快照（Phase 3 Module 2 / docs/23 §4.2）。
+
+    每次发布把 agent_role 当前的 Prompt/模型档/工具/权限/duty 冻结成一行；
+    ``(expert_id, version_no)`` 唯一、只增不改。业务表 ``agent_role.current_release_id`` 指向
+    最新已发布快照；回滚（Module 6）= 改指针到旧 version。``create_time`` 即发布时刻。
+    独立物理表为后续 Expert 平台拆分留缝，当前仍单库单进程。
+    """
+
+    __tablename__ = "expert_release"
+    __table_args__ = (Index("uq_expert_release_version", "expert_id", "version_no", unique=True),)
+
+    expert_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agent_role.id"))
+    version_no: Mapped[int] = mapped_column(Integer)
+    prompt_template: Mapped[str] = mapped_column(Text)
+    model_role: Mapped[str] = mapped_column(String(32))
+    permission_scope: Mapped[dict[str, Any]] = mapped_column(_JSONB, default=dict)
+    tools: Mapped[list[Any]] = mapped_column(_JSONB, default=list)
+    duty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    released_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
 
 class AgentTaskRecord(CommonMixin, Base):
