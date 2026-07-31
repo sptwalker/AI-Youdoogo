@@ -25,7 +25,7 @@ class ExpertExecutionSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class ExpertReleaseView:
-    """一次发布的对外视图（Module 2 / docs/23 §4.2）。"""
+    """一次发布的对外视图（Module 2 §4.2 + Module 3 §4.3 评测证据）。"""
 
     release_id: uuid.UUID
     expert_id: uuid.UUID
@@ -33,3 +33,5 @@ class ExpertReleaseView:
     model_role: str
     released_by: uuid.UUID | None
     released_at: datetime
+    eval_score: float | None = None
+    eval_case_count: int | None = None

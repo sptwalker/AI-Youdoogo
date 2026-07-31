@@ -167,6 +167,8 @@ class ExpertRelease:
     duty: str | None
     released_by: uuid.UUID | None
     released_at: datetime
+    eval_score: float | None = None
+    eval_case_count: int | None = None
 
     @classmethod
     def cut(
@@ -177,8 +179,10 @@ class ExpertRelease:
         version_no: int,
         released_by: uuid.UUID | None,
         released_at: datetime,
+        eval_score: float | None = None,
+        eval_case_count: int | None = None,
     ) -> ExpertRelease:
-        """把某专家当前执行定义冻结成一版发布快照。"""
+        """把某专家当前执行定义冻结成一版发布快照（可附评测证据，Module 3）。"""
         ex = expert.execution
         return cls(
             id=release_id,
@@ -191,4 +195,6 @@ class ExpertRelease:
             duty=ex.duty,
             released_by=released_by,
             released_at=released_at,
+            eval_score=eval_score,
+            eval_case_count=eval_case_count,
         )

@@ -7,6 +7,9 @@ from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
 
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertReleaseView,
+)
 from app.contexts.foundations.workforce.expert_management.domain.models import (
     ExpertProfile,
     ExpertRelease,
@@ -33,6 +36,8 @@ class ExpertReleaseRepository(Protocol):
     async def add(self, release: ExpertRelease) -> None: ...
 
     async def set_current(self, expert_id: uuid.UUID, release_id: uuid.UUID) -> None: ...
+
+    async def list_releases(self, expert_id: uuid.UUID) -> tuple[ExpertReleaseView, ...]: ...
 
 
 class ExpertSourceChangePort(Protocol):

@@ -216,11 +216,17 @@ class ExpertManagementApplication:
         return await self._reload(expert)
 
     async def publish_release(
-        self, expert_id: uuid.UUID, *, released_by: uuid.UUID | None = None
+        self,
+        expert_id: uuid.UUID,
+        *,
+        released_by: uuid.UUID | None = None,
+        eval_score: float | None = None,
+        eval_case_count: int | None = None,
     ) -> ExpertReleaseView:
         """把某专家当前执行定义冻结成新一版不可变发布（Module 2 / docs/23 §4.2）。
 
-        触发时机（自动切版 vs 显式发布）由 Module 3 生命周期决定，本方法只提供操作。
+        可附评测证据 ``eval_score``/``eval_case_count``（Module 3 §4.3）——评测只产分，
+        是否发布仍真人确认（AI 红线），本方法只在真人触发时把分数一并冻结进快照。
         """
         async with self._uow_factory() as uow:
             expert = await uow.experts.get(expert_id)
@@ -232,6 +238,8 @@ class ExpertManagementApplication:
                 version_no=await uow.releases.next_version_no(expert_id),
                 released_by=released_by,
                 released_at=self._clock.now(),
+                eval_score=eval_score,
+                eval_case_count=eval_case_count,
             )
             await uow.releases.add(release)
             await uow.flush()
@@ -244,7 +252,14 @@ class ExpertManagementApplication:
             model_role=release.model_role,
             released_by=release.released_by,
             released_at=release.released_at,
+            eval_score=release.eval_score,
+            eval_case_count=release.eval_case_count,
         )
+
+    async def list_releases(self, expert_id: uuid.UUID) -> tuple[ExpertReleaseView, ...]:
+        """按 version_no 倒序枚举某专家的历史发布（Module 3 §4.3，Module 6 回滚选版依据）。"""
+        async with self._uow_factory() as uow:
+            return await uow.releases.list_releases(expert_id)
 
     async def delete(self, expert_id: uuid.UUID) -> None:
         async with self._uow_factory() as uow:

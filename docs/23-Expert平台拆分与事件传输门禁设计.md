@@ -138,6 +138,19 @@ is_delete）+：
 **为何现在做**：不可变执行快照本身满足审计红线（"某 AI 产出用了哪个配置"可精确复现），且是 Module 3
 （资产版本化）与 Module 6（回滚）的地基；非仅为远端消费者。加法式默认不改现网行为。
 
+### 4.3 Module 3 详细设计（本轮交付：把发布快照升级为「已评测、可枚举」的版本化资产）
+
+**范围界定（诚实）**：`草稿 → 评测 → 发布` 三段的**评测**能力已存在（`RunEvaluation` 跑 eval_case 出聚合分）、
+**草稿**即 agent_role 可变执行态、**发布**即 Module 2 的 `publish_release`。Module 3 只补两处让快照成为真正
+"可版本化资产"：① 发布时把**评测证据**（分数 + 用例数）冻结进 release（把独立的评测分与它所门控的版本绑定，
+可审计复现）；② 提供**版本谱系读回** `list_releases`（枚举某专家全部历史版本——"可版本化"的读侧，也是 Module 6
+回滚选版的地基）。**红线不变**：评测只产出分数，是否发布仍真人确认；本轮不做"过阈自动发布"（`# ponytail`）。
+
+- `expert_release` 加两列 `eval_score: Float?`、`eval_case_count: Integer?`（发布时快照，可空=未附评测证据）。
+- `publish_release(expert_id, *, released_by=None, eval_score=None, eval_case_count=None)` 透传两值。
+- `ExpertReleaseRepository.list_releases(expert_id) -> tuple[ExpertReleaseView, ...]`（按 version_no 倒序）。
+- `ExpertReleaseView` 增 `eval_score` / `eval_case_count` 字段。
+
 ### 验收（Phase 3 整体，docs/21 §Phase 3）
 
 同一 release 可复现 Prompt / Tool / Model 配置；组织变更不生成 AI 资产版本；所有业务工具由资源服务

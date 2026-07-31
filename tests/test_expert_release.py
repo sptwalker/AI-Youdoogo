@@ -16,6 +16,9 @@ import pytest
 from app.contexts.foundations.workforce.expert_management.application.use_cases import (
     ExpertManagementApplication,
 )
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertReleaseView,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,
     ExpertRosterSnapshot,
@@ -79,6 +82,25 @@ class FakeReleases:
 
     async def set_current(self, expert_id: uuid.UUID, release_id: uuid.UUID) -> None:
         self.current[expert_id] = release_id
+
+    async def list_releases(self, expert_id: uuid.UUID) -> tuple[ExpertReleaseView, ...]:
+        return tuple(
+            ExpertReleaseView(
+                release_id=r.id,
+                expert_id=r.expert_id,
+                version_no=r.version_no,
+                model_role=r.model_role,
+                released_by=r.released_by,
+                released_at=r.released_at,
+                eval_score=r.eval_score,
+                eval_case_count=r.eval_case_count,
+            )
+            for r in sorted(
+                (r for r in self.added if r.expert_id == expert_id),
+                key=lambda r: r.version_no,
+                reverse=True,
+            )
+        )
 
 
 class FakeUnitOfWork:
@@ -195,3 +217,31 @@ async def test_publish_deleted_expert_raises() -> None:
     app, _ = _application(profile)
     with pytest.raises(ResourceNotFound):
         await app.publish_release(EXPERT_ID)
+
+
+async def test_publish_freezes_eval_evidence_into_snapshot() -> None:
+    """评测证据随发布冻结进快照（Module 3 §4.3）——只产分不自动发布，此处真人携分发布。"""
+    profile = _profile()
+    app, uow = _application(profile)
+
+    view = await app.publish_release(EXPERT_ID, eval_score=0.87, eval_case_count=12)
+
+    assert view.eval_score == 0.87
+    assert view.eval_case_count == 12
+    assert uow.releases.added[0].eval_score == 0.87
+    assert uow.releases.added[0].eval_case_count == 12
+
+
+async def test_list_releases_returns_versions_descending() -> None:
+    profile = _profile()
+    app, _ = _application(profile)
+
+    await app.publish_release(EXPERT_ID, eval_score=0.5, eval_case_count=3)
+    await app.publish_release(EXPERT_ID)
+
+    releases = await app.list_releases(EXPERT_ID)
+
+    assert [r.version_no for r in releases] == [2, 1]
+    # 无评测证据的 v2 保持空，v1 携分——枚举面如实回读
+    assert releases[0].eval_score is None
+    assert releases[1].eval_score == 0.5 and releases[1].eval_case_count == 3

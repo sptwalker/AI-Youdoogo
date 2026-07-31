@@ -6,7 +6,18 @@ agent_task_record 是「所有AI操作必须留痕、数据可溯源」红线的
 import uuid
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text, Uuid, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -82,6 +93,10 @@ class ExpertRelease(CommonMixin, Base):
     tools: Mapped[list[Any]] = mapped_column(_JSONB, default=list)
     duty: Mapped[str | None] = mapped_column(Text, nullable=True)
     released_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # 发布时冻结的评测证据（Module 3 / docs/23 §4.3）：门控本版发布的聚合分 + 用例数；
+    # 空=未附评测证据。评测只产分不自动发布，是否发布仍真人确认（AI 红线）。
+    eval_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eval_case_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class AgentTaskRecord(CommonMixin, Base):
