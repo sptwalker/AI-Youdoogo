@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.task import TaskCard
 from app.models.workflow import WorkflowRun
 from app.services import workflow_service
@@ -83,7 +84,19 @@ class DatabaseWorkflowEngine:
 
 _database_engine = DatabaseWorkflowEngine()
 
+# ponytail: 注册表当前仅 database 一项；接第二引擎（远程 Runtime/LangGraph）时在此登记，
+# router 才真按 workflow_type 分派。engine 端口已锁：可靠状态/Outbox/真人停点不得旁路。
+_ENGINES: dict[str, WorkflowEngine] = {"database": _database_engine}
 
-def get_workflow_engine() -> WorkflowEngine:
-    """返回当前 workflow adapter；未来可在此切换 LangGraph POC。"""
-    return _database_engine
+
+def get_workflow_engine(workflow_type: str | None = None) -> WorkflowEngine:
+    """按 workflow_type（缺省读 config.workflow_engine）选引擎；未知即拒（fail-closed）。
+
+    与创建期盖 ``workflow_run.engine`` 戳读同一 ``config.workflow_engine``，保证「选哪个引擎执行」与
+    「戳哪个引擎溯源」一致。未知引擎名拒绝而非静默回落，防配置漂移把流程投进不存在的引擎。
+    """
+    name = workflow_type or get_settings().workflow_engine
+    try:
+        return _ENGINES[name]
+    except KeyError:
+        raise ValueError(f"未知 workflow engine: {name!r}") from None

@@ -83,6 +83,9 @@ class WorkflowRun(CommonMixin, Base):
     trace_id: Mapped[uuid.UUID] = mapped_column(Uuid, default=uuid.uuid4)
     plan: Mapped[list[dict[str, Any]]] = mapped_column(_JSONB, default=list, server_default="[]")
     version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 创建期固定的执行引擎（docs/24 §4）：新建时读 config.workflow_engine 盖戳、之后不可改写——
+    # 避免双真源（docs/21 §14），并支撑按引擎 drain（count_active_runs_by_engine）。
+    engine: Mapped[str] = mapped_column(String(32), default="database", server_default="database")
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

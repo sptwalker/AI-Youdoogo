@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.execution.workflow_runtime.application.ports import (
@@ -28,7 +28,15 @@ from app.contexts.foundations.execution.workflow_runtime.infrastructure.events i
     publish_workflow_progress,
 )
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
-from app.models.workflow import RUN_QUEUED, WorkflowEvent, WorkflowRun, WorkflowStep
+from app.core.config import get_settings
+from app.models.workflow import (
+    RUN_QUEUED,
+    RUN_RUNNING,
+    RUN_WAITING_HUMAN,
+    WorkflowEvent,
+    WorkflowRun,
+    WorkflowStep,
+)
 from app.platform.outbox.repository import enqueue, utcnow
 
 
@@ -90,6 +98,7 @@ def _new_workflow(command: StartWorkflowCommand) -> _NewWorkflow:
         trace_id=trace_id,
         plan=plan_to_json(command.steps),
         version=0,
+        engine=get_settings().workflow_engine,  # 创建期固定引擎戳（docs/24 §4.4），之后不可改写
     )
     return _NewWorkflow(
         run=run,
@@ -282,6 +291,24 @@ async def list_steps(session: AsyncSession, workflow_id: uuid.UUID) -> list[Work
         .order_by(WorkflowStep.step_no)
     )
     return list((await session.execute(statement)).scalars())
+
+
+async def count_active_runs_by_engine(session: AsyncSession) -> dict[str, int]:
+    """按 engine 统计非终态（queued/running/waiting_human）run 数（docs/24 §4.6）。
+
+    支撑「旧流程 drain 到终态、监控无活动实例后再下线旧 worker」：返回空 dict 即所有引擎已排空。
+    只读、不改状态；排空由「停止新建路由到旧引擎 + 旧 run 自然跑到终态」达成，本函数只做可观测。
+    """
+    statement = (
+        select(WorkflowRun.engine, func.count())
+        .where(
+            WorkflowRun.status.in_((RUN_QUEUED, RUN_RUNNING, RUN_WAITING_HUMAN)),
+            WorkflowRun.is_delete.is_(False),
+        )
+        .group_by(WorkflowRun.engine)
+    )
+    result = await session.execute(statement)
+    return {engine: count for engine, count in result.all()}
 
 
 def start_result(run: WorkflowRun) -> StartWorkflowResult:

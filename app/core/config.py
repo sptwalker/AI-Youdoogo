@@ -117,6 +117,11 @@ class Settings(BaseSettings):
     event_remote_step_skills: tuple[str, ...] = ()  # 远端异步 skill allowlist（空=全本地）
     event_remote_step_lease_seconds: int = 3600  # 停车长租约秒（echo 往返 <1s；过期即降级）
 
+    # Workflow 执行引擎选择（docs/24 §4 / docs/21 Phase4 step6）：新建 run 创建期固定盖此戳
+    # （workflow_run.engine，之后不可改写，避免双真源）。database=自研 DAG runtime（默认）；
+    # 接远程 Runtime/LangGraph 时改此默认或按 workflow_type 传参。未知引擎名 fail-closed 拒绝。
+    workflow_engine: str = "database"
+
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
     workflow_worker_poll_seconds: float = 1.0
