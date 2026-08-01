@@ -163,6 +163,7 @@ class _NullRoster:
 
 def _application(
     profile: ExpertProfile | None,
+    publisher: object | None = None,
 ) -> tuple[ExpertManagementApplication, FakeUnitOfWork]:
     uow = FakeUnitOfWork(profile)
     app = ExpertManagementApplication(
@@ -170,6 +171,7 @@ def _application(
         roster=_NullRoster(),
         identifiers=SeqIdentifier(),
         clock=FixedClock(),
+        publisher=publisher,  # type: ignore[arg-type]
     )
     return app, uow
 
@@ -280,3 +282,46 @@ async def test_rollback_missing_expert_raises() -> None:
     app, _ = _application(None)
     with pytest.raises(ResourceNotFound):
         await app.rollback_release(EXPERT_ID, target_version_no=1)
+
+
+class _CapturingPublisher:
+    """记录被推送的冻结快照（Module 2 发布后推远端）。"""
+
+    def __init__(self) -> None:
+        self.published: list[ExpertRelease] = []
+
+    async def publish(self, release: ExpertRelease) -> None:
+        self.published.append(release)
+
+
+class _FailingPublisher:
+    async def publish(self, release: ExpertRelease) -> None:
+        raise RuntimeError("专家平台不可达")
+
+
+async def test_publish_pushes_frozen_snapshot_to_publisher() -> None:
+    """发布后把冻结快照推给 publisher（remote 模式接线点）——推的是不可变快照本体。"""
+    profile = _profile()
+    pub = _CapturingPublisher()
+    app, _ = _application(profile, publisher=pub)
+
+    view = await app.publish_release(EXPERT_ID)
+
+    assert len(pub.published) == 1
+    pushed = pub.published[0]
+    assert pushed.expert_id == EXPERT_ID
+    assert pushed.version_no == view.version_no
+    assert pushed.prompt_template == "v1 提示词"
+
+
+async def test_publish_push_failure_non_fatal() -> None:
+    """推送失败不回滚已发布快照（youdoo 真源，尽力而为）——view 照常返回、current 已推进。"""
+    profile = _profile()
+    app, uow = _application(profile, publisher=_FailingPublisher())
+
+    view = await app.publish_release(EXPERT_ID)
+
+    assert view.version_no == 1
+    assert uow.commit_count == 1
+    assert uow.releases.current[EXPERT_ID] == view.release_id
+

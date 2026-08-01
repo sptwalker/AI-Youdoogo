@@ -34,6 +34,7 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     legacy_execution,
+    remote_completion,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.event_handler import (
     enqueue_ready_steps as enqueue_runtime_steps,
@@ -51,6 +52,7 @@ from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalch
     SQLAlchemyExpertSnapshotQuery,
 )
 from app.models.workflow import OutboxEvent
+from app.platform.eventing.inbox import EventEnvelope
 
 
 class _EnvironmentSnapshotCache:
@@ -87,6 +89,18 @@ def unregister_event_handler(event_type: str) -> None:
 
 def _task_projection(session: AsyncSession) -> SQLAlchemyTaskManagementAdapter:
     return SQLAlchemyTaskManagementAdapter(session)
+
+
+async def apply_step_completed(session: AsyncSession, envelope: EventEnvelope) -> bool:
+    """入站投影：把 expert 回执写回停车 step（docs/23 §6.3）。
+
+    装配期经 register_inbox_projector 注入。
+    """
+    return await remote_completion.apply_completed(
+        session,
+        envelope.payload or {},
+        task_projection=_task_projection(session),
+    )
 
 
 async def enqueue_ready_steps(session: AsyncSession, workflow_id: uuid.UUID) -> int:

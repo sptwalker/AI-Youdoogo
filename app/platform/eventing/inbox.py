@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel
@@ -27,6 +28,28 @@ class EventEnvelope(BaseModel):
     aggregate_id: uuid.UUID
     payload: dict[str, Any] = {}
     dedupe_key: str
+
+
+# 入站投影钩子：首收某类型事件时同步执行的业务投影（docs/23 §6.3）。platform 保持 context-free，
+# 具体投影（如唤醒停车 step）由 bootstrap 装配期 register_inbox_projector 注入
+# → 无 platform→context 反向依赖。
+InboxProjector = Callable[[AsyncSession, "EventEnvelope"], Awaitable[bool]]
+_inbox_projectors: dict[str, InboxProjector] = {}
+
+
+def register_inbox_projector(event_type: str, projector: InboxProjector) -> None:
+    """装配期注册入站投影；同类型重复注册以最后一次为准。"""
+    _inbox_projectors[event_type] = projector
+
+
+def unregister_inbox_projector(event_type: str) -> None:
+    """卸载入站投影（供关停/测试清理）。"""
+    _inbox_projectors.pop(event_type, None)
+
+
+def get_inbox_projector(event_type: str) -> InboxProjector | None:
+    """取该类型的入站投影；无则 None（http 端点仅落库、不投影）。"""
+    return _inbox_projectors.get(event_type)
 
 
 async def receive_event(db: AsyncSession, envelope: EventEnvelope, *, source: str) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from app.contexts.foundations.workforce.expert_management.application.contracts import (
@@ -20,6 +21,10 @@ from app.contexts.foundations.workforce.expert_management.application.management
 from app.contexts.foundations.workforce.expert_management.application.ports import (
     ExpertRosterQueryPort,
 )
+from app.contexts.foundations.workforce.expert_management.application.release_publisher import (
+    NoopReleasePublisher,
+    ReleasePublisherPort,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertReleaseView,
 )
@@ -36,6 +41,8 @@ from app.contexts.foundations.workforce.expert_management.domain.models import (
     validate_tier,
 )
 from app.contexts.shared_kernel import ConflictDetected, ResourceNotFound
+
+logger = logging.getLogger(__name__)
 
 
 def _snapshot(expert: ExpertProfile) -> ExpertRosterSnapshot:
@@ -85,11 +92,13 @@ class ExpertManagementApplication:
         roster: ExpertRosterQueryPort,
         identifiers: IdentifierPort,
         clock: Clock,
+        publisher: ReleasePublisherPort | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._roster = roster
         self._identifiers = identifiers
         self._clock = clock
+        self._publisher = publisher or NoopReleasePublisher()
 
     async def create(self, command: CreateExpertCommand) -> ExpertRosterSnapshot:
         validate_model_role(command.model_role)
@@ -245,6 +254,13 @@ class ExpertManagementApplication:
             await uow.flush()
             await uow.releases.set_current(expert_id, release.id)
             await uow.commit()
+        # 发布后把冻结快照推远端（默认 Noop 不出站）；失败非致命——youdoo 是真源，尽力而为。
+        try:
+            await self._publisher.publish(release)
+        except Exception:  # noqa: BLE001 - 推送失败不回滚已发布快照
+            logger.warning(
+                "发布快照推送远端失败 expert=%s version=%s", expert_id, release.version_no
+            )
         return ExpertReleaseView(
             release_id=release.id,
             expert_id=release.expert_id,

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.internal_token import verify_internal_token
-from app.platform.eventing.inbox import EventEnvelope, receive_event
+from app.platform.eventing.inbox import EventEnvelope, get_inbox_projector, receive_event
 from app.platform.eventing.relay import EVENTS_SCOPE
 from app.platform.http_runtime import ok
 
@@ -43,7 +43,15 @@ async def receive_internal_event(
     db: Annotated[AsyncSession, Depends(get_db)],
     source: Annotated[str, Depends(_require_events_scope)],
 ) -> dict:
-    """收下一条跨服务事件（幂等：同 event_id 重投只落一行）。"""
+    """收下一条跨服务事件（幂等：同 event_id 重投只落一行）。
+
+    首收且该类型注册了入站投影（如 ``expert.execution.completed.v1`` 唤醒停车 step）→ 同一事务内
+    同步投影后再 commit；投影抛错 → 事务回滚（含 inbox 行）→ 5xx → 对端 relay 重投（docs/23 §6.3）。
+    """
     accepted = await receive_event(db, envelope, source=source)
+    if accepted:
+        projector = get_inbox_projector(envelope.event_type)
+        if projector is not None:
+            await projector(db, envelope)
     await db.commit()
     return ok({"event_id": str(envelope.event_id), "accepted": accepted})

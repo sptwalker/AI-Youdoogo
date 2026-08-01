@@ -79,12 +79,32 @@ class Settings(BaseSettings):
     # 抽样（会分裂写真源，违 docs/21 禁双写红线）——只做硬 local|remote 切换，无 canary。
     knowledge_index_mode: str = "local"  # local | remote
 
+    # Expert Platform 远程切换（Phase 3 / docs/23 §6.2 第一场景）：Branch by Abstraction。
+    # 缝设在既有 LlmCompletionPort——mode=remote 且 url 非空 → RemoteExpertExecutionAdapter
+    # （远程为主、本地兜底）；否则回退 build_llm_completion_port（默认 local，无服务时逐字不变）。
+    expert_execution_mode: str = "local"  # local | remote
+    expert_platform_url: str = ""  # 专家平台根地址（http://ai-expert-platform:8080）；空=未部署
+    expert_platform_timeout: float = 60.0  # 单次请求超时（秒）
+    expert_platform_max_retries: int = 2  # 连接错误/5xx 有界重试（创建幂等，可安全重试）
+    expert_platform_canary_percent: int = 0  # remote 灰度百分比 0–100（同 LLM canary 语义）
+    # 真·网关执行器转发开关（docs/23 §6.4）：on → _create_remote mint gateway_token（aud=
+    # ai-model-gateway, scope=llm:complete）随体转发，远端 GatewayExecutor Bearer 中继跑真模型；
+    # off（默认）→ 不 mint、body 无令牌 → 远端回落 echo。开启须配 internal_jwt_private_key。
+    expert_forward_gateway_token: bool = False
+
     # 事件传输门禁（Phase 3 硬前置 / docs/21 §Immediate Backlog C + docs/23）：出站 HTTP Relay
     # 把 outbox 事件投递给对端 Inbox。默认关 → 现网 worker 行为零改变；开关 on → 装配 HttpInboxRelay
     # 并 register_event_handler；缺 peer/私钥则启动即失败（fail-fast，见 _enforce_event_relay）。
     event_relay_enabled: bool = False  # 总开关
     event_inbox_peer_url: str = ""  # 对端 inbox 根地址（回环验证填自身，如 http://localhost:8000）
+    event_inbox_peer_audience: str = ""  # 对端 inbox 期望的 aud（空=回退本服务 issuer 走回环自验；
+    # 跨仓填对端 service_id 如 ai-expert-platform，使 transport 令牌可被对端验签）
     event_relay_event_types: tuple[str, ...] = ()  # 允许中继的事件类型 allowlist（空=不中继任何）
+    # 后台步骤异步远端执行（docs/23 §6.3）：skill ∈ allowlist 的 ready step
+    # 出站给 expert 并停车，其余走本地 execute（默认空=全本地，逐字不变）。
+    # 停车 = sentinel-owner + 长租约；过期即本地重跑降级。
+    event_remote_step_skills: tuple[str, ...] = ()  # 远端异步 skill allowlist（空=全本地）
+    event_remote_step_lease_seconds: int = 3600  # 停车长租约秒（echo 往返 <1s；过期即降级）
 
     # Durable workflow worker（PostgreSQL outbox + 租约）
     workflow_worker_enabled: bool = True
@@ -157,6 +177,20 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _enforce_expert_platform(self) -> "Settings":
+        """切远程专家平台必须配 url + 私钥：启动即失败，而非运行时首个执行才 500。"""
+        if self.expert_execution_mode not in ("local", "remote"):
+            raise ValueError("EXPERT_EXECUTION_MODE 必须是 local 或 remote")
+        if self.expert_execution_mode == "remote":
+            if not self.expert_platform_url:
+                raise ValueError("EXPERT_EXECUTION_MODE=remote 时必须配置 EXPERT_PLATFORM_URL")
+            if not self.internal_jwt_private_key:
+                raise ValueError("EXPERT_EXECUTION_MODE=remote 时必须配置 INTERNAL_JWT_PRIVATE_KEY")
+        if not 0 <= self.expert_platform_canary_percent <= 100:
+            raise ValueError("EXPERT_PLATFORM_CANARY_PERCENT 必须在 0–100 之间")
+        return self
+
+    @model_validator(mode="after")
     def _enforce_knowledge_gateway(self) -> "Settings":
         """切远程知识检索必须配服务地址：启动即失败，而非运行时首个检索才 500（同 LLM 网关）。"""
         if self.knowledge_search_mode not in ("local", "remote"):
@@ -185,6 +219,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "EVENT_RELAY_ENABLED=true 时必须配置 INTERNAL_JWT_PRIVATE_KEY（中继需签发令牌）"
                 )
+        if self.event_remote_step_skills and not self.event_relay_enabled:
+            raise ValueError(
+                "EVENT_REMOTE_STEP_SKILLS 非空时必须开 EVENT_RELAY_ENABLED（远端步骤经 relay 出站）"
+            )
         return self
 
 

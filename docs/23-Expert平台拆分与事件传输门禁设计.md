@@ -225,3 +225,207 @@ Runner 可切离；`FallbackCompletionPort` 已远程为主本地兜底）→ `#
 - 无双写（事件是单向交接，非双写真源）。
 - AI 决策仍真人确认（业务 / 资金 / 项目 / 人事决议须真人生效）。
 - 密钥不硬编码；日志不打 Authorization / body 明文。
+
+## 6. 远端执行场景落地（Runtime ↔ Expert 只事件驱动）
+
+Phase 3 的 Expert 平台承接两类执行，**两者都默认关、生产逐字不变、开关归零即回退本地**：
+
+- **第一场景「交互式同步执行」**（已交付，见 §4.2 Module 2）：真人对话/咨询走同步 HTTP
+  `POST /v1/experts/{id}/executions` → SSE 流式。youdoo 本地留读（可见知识库/全局提示/术语），
+  远端做算（prompt 组装 + 知识 Search 扇出 + 模型）。缝在 `RemoteAgentExecutionApplication`，
+  首 delta 前失败回退本地。**同步路径不经事件传输门禁**。
+
+- **第二场景「后台步骤异步远端执行」**（本模块，§6.3）：workflow step 被标为「远端异步执行」时，
+  youdoo 不本地 `run_agent`，而是把该步骤作为 **事件** 出站给 Expert，step 在 youdoo 侧**停车**；
+  Expert 消费、执行、把结果作为**事件**回发；youdoo 消费回发、唤醒停车 step、写回、驱动下一步。
+  docs/21 line 1176「长耗时→事件 Command→异步，完成后发结果事件」、line 1304「Expert 消费
+  `workflow.step.ready.v1`、发布 `expert.execution.completed.v1`」的落地。**Runtime ↔ Expert 全程只
+  事件驱动、无同步调用**，复用 §3 的 Outbox（出站重试/DLQ）+ Inbox（入站幂等）门禁 PoC。
+
+### 6.3 第二场景：后台步骤异步远端执行
+
+#### 6.3.1 三段闭环时序
+
+```
+① 出站（youdoo）  workflow.advance → enqueue_ready_steps 循环，对每个 ready step 二分：
+     step.skill ∈ event_remote_step_skills 且 relay 开 且 step.assignee_agent_id 非空？
+       否 → enqueue("workflow.step.execute")                       【原路径逐字不变】
+       是 → claim_step_result(worker_id="remote-expert", lease=event_remote_step_lease_seconds)  【停车：RUNNING + 长租约】
+            enqueue("workflow.step.ready.v1", dedupe=workflow-step:{id}:ready:v{version})         【出站事件，payload 见 6.3.2】
+   worker dispatch → 兜底 handler = StepReadyRelay：投递时动态注入新鲜 callback_token（不入库）→ POST expert /internal/events
+
+② 消费+执行+回发（expert）  POST /internal/events（scope=events:receive 验签）→ 内存幂等去重
+     → prepare_execution（据本地发布快照组装；model_role 取 snapshot.model_role）→ EchoExecutor drain
+     → 组 expert.execution.completed.v1（event_id=uuid5(step_id:version) 确定性）→ 缓存
+     → POST youdoo /internal/events，Bearer = 原样回带的 callback_token（不 mint）
+   回发失败 → 端点返 5xx → youdoo outbox 重投 step.ready → expert 命中缓存重回发（幂等）
+
+③ 唤醒（youdoo）  POST /internal/events 收到 completed → receive_event 幂等落库
+     → apply_completed：定位 step（校验 lease_owner=remote-expert & version）→ 复用
+        SQLAlchemyWorkflowRepository.finalize（complete_step fenced by version → 写 output_data/置终态
+        → pipe_outputs → 非 red_line 才 enqueue workflow.advance 驱动下一步）
+   兜底支线（超时降级）：expert 永不回发 → 长租约过期 → ready_steps 视 step 为 expired
+        → 本地 run_agent 重跑（免费降级，无需人工介入）；迟到回发因 version 已变被 fence 挡下静默丢弃
+```
+
+#### 6.3.2 两条事件 payload 契约
+
+**事件 1 `workflow.step.ready.v1`（youdoo→expert）** — `EventEnvelope`：`aggregate_type="workflow_step"`,
+`aggregate_id=step_id`, `dedupe_key=workflow-step:{step_id}:ready:v{version}`。payload（持久化进 OutboxEvent 行）：
+
+| 字段 | 说明 |
+|---|---|
+| `workflow_run_id` | run id（回带） |
+| `workflow_step_id` | step id（回带） |
+| `step_version` | **停车 claim 后的 step.version**；回发须原样带回作 `complete_step` fence 键 |
+| `expert_id` | = `step.assignee_agent_id`；expert 据此取本地发布快照 |
+| `user_message` | `step.title`/`instruction` 渲染的步骤消息 |
+| `trace_id` / `correlation_id` | 链路追踪 / 回发关联 |
+
+**投递时注入、不入库**：`callback_token`（ES256, aud=youdoo issuer, scope=`events:receive`, exp≤5min）。
+
+> **本模块（echo 骨架）刻意收敛的字段**：`model_role`（改由 expert 用 `snapshot.model_role`）、
+> `use_knowledge`/`knowledge_base_ids`/`knowledge_token`/`global_prompt`/`term_prompt`（echo 不做知识扇出，
+> 亦不需转发令牌）。**这是前向兼容子集**：echo 忽略 system_prompt，知识扇出对回吐无影响，故与「证明异步
+> 交接」目标无关。**升级路径**：真执行器进远端时（下一 B 模块）恢复 §6.2 全字段——届时出站点复用
+> `prepare` + 本地读（可见库/全局/术语）组装、StepReadyRelay 追加注入 `knowledge_token`，与第一场景 parity。
+> `# ponytail: 与本地 ExecuteWorkflowStep(use_knowledge=True) 的知识 parity 缺口 = 已知、已文档化，echo 阶段无害`
+
+**事件 2 `expert.execution.completed.v1`（expert→youdoo）** — `EventEnvelope`：
+`event_id=uuid5(NS,"{step_id}:{version}")`（确定性 → 天然入站去重）, `aggregate_type="workflow_step"`,
+`aggregate_id=step_id`, `dedupe_key=expert-completed:{step_id}:v{version}`。payload：
+`{workflow_run_id, workflow_step_id, step_version（原样回带=complete_step expected_version）, correlation_id,
+succeeded, content, model, usage, error}`。
+
+#### 6.3.3 回执令牌方案（expert 不签名）
+
+expert 只持验签公钥、不能签发。故 youdoo 侧 `StepReadyRelay`（薄子类 `HttpInboxRelay`）在**每次投递时**
+动态 `mint_internal_token(aud=youdoo issuer, scope=("events:receive",))` 得 callback_token，注入 **payload
+副本**（绝不写回 OutboxEvent 行 → 规避令牌随行入库过期）。expert 原样 `Bearer` 回带，youdoo inbox
+`verify_internal_token(aud=issuer, scope=events:receive)`（自签自验回环）。**每次投递（含 outbox 重投）都
+新鲜签发** → 重投时令牌不过期。
+
+> `# ponytail: exp≤5min 仅在「收到即同步 echo+回发」下安全。真长耗时执行器（收到 202 → 后台执行 → 完成才
+> 回发）下令牌已过期——升级路径：youdoo 暴露 callback-token 刷新端点，或给 expert 专用回发密钥对。
+> **勿在 event_remote_step_skills 放长耗时 skill 而不先升级令牌方案。**`
+
+#### 6.3.4 停车状态语义
+
+停车 = **sentinel-owner + 长租约**，零新状态、零改 `ready_steps`/`complete_step`：
+
+- `complete_step` 的 fenced update 硬要求 `status==STEP_RUNNING`（`step_completion.py`）；sentinel 停车保持
+  RUNNING → 唤醒时 `finalize` 零改动即可写回。
+- `ready_steps`（`step_leases.py`）的 `expired` 分支（RUNNING 且 `lease_until<now`）直接给出超时降级。
+  `event_remote_step_lease_seconds` 默认 3600（echo 往返 <1s）。
+- 与真人停点可辨：真人审批仍是 `STEP_WAITING_HUMAN`（red_line step 成功后由 `complete_step` 置入），与
+  sentinel 的 RUNNING 天然区分——**AI 红线不破**。
+
+> `# ponytail: sentinel 停车面板显示 RUNNING 不透明（靠 lease_owner="remote-expert" 前缀辨识）；需"等待
+> 远端"独立可视时升级 STEP_WAITING_EVENT 常量（仍 String 列，无 migration）。`
+
+#### 6.3.5 唯一 writer 复用 + 双层幂等
+
+唤醒**绝不另造持久化 writer**：`apply_completed` 定位 step → 重建 `ClaimedWorkflowStep`（worker_id=
+remote-expert, version=payload.step_version）+ 最小 `PreparedWorkflowStep` + `ExecuteWorkflowStepResult`
+→ 调 `SQLAlchemyWorkflowUnitOfWorkFactory(db, task_projection)().workflows.finalize(...)`（= 现有 `complete_step`
++ `pipe_outputs` + `enqueue(workflow.advance)`）。**双层幂等**：
+
+1. Inbox `event_id`（`uuid5(step_id:version)` 确定性）→ 首层去重，重投 `receive_event` 返 `False`、不再投影。
+2. `complete_step` 的 `where version==expected_version` fence → 即便越过首层，第二次 rowcount=0 → `finalize`
+   返 `False` → 不双写、不双 `advance`。
+
+#### 6.3.6 默认关矩阵 + 回滚
+
+| 服务 | 键 | 默认（生产零出站） | 开启 |
+|---|---|---|---|
+| youdoo | `event_relay_enabled` | `false` | `true` |
+| youdoo | `event_inbox_peer_url` | `""` | `<expert 根地址>` |
+| youdoo | `event_relay_event_types` | `()` | 含 `workflow.step.ready.v1` |
+| youdoo | `event_remote_step_skills` | `()` | 含目标 skill |
+| youdoo | `event_remote_step_lease_seconds` | `3600` | 按执行时长调 |
+| expert | `event_inbox_enabled` | `false` | `true`（挂 `/internal/events`） |
+| expert | `youdoo_inbox_url` | `""` | `<youdoo 根地址>` |
+
+**回滚**：`event_remote_step_skills=()` → 分叉不进入，所有 step 走本地 `execute`；`event_relay_enabled=false`
+→ relay 不注册。停车中 step 靠租约过期本地重跑收敛。**无 migration → 无 schema 回滚**。
+
+#### 6.3.7 红线核对（补 §5）
+
+- 出站/回发/入站均只记 `status/event_type/event_id/step_id`，不打 Authorization/token/user_message/body 明文。
+- expert 只持验签公钥、全程不签名；callback_token 由 youdoo 私钥签发。
+- 无双写（事件单向交接，youdoo 是 workflow 真源，唯一 writer 复用 `finalize`）。
+- AI 红线不破：red_line step 成功后 `complete_step` 置 `STEP_WAITING_HUMAN`、**不** enqueue advance（须真人确认）。
+
+### 6.4 真·网关执行器（第一场景 rich sync 路径：echo → 真模型）
+
+模块 1/2/3 的远端执行体一律是 `EchoExecutor` 占位（逐字回吐 `user_message`，不调真模型）。本模块把
+**第一场景「交互式同步执行」（§6.2 Module 2，`POST /v1/experts/{id}/executions`）** 的执行体从 echo
+换成**真 ai-model-gateway 真模型**，让远端专家真正作答。**默认关、生产逐字不变、开关归零即回 echo。**
+
+#### 6.4.1 为何 token-forwarding（唯一合规解，非可选）
+
+ai-model-gateway（`gateway/auth.py`）强校验 `iss=youdoogo-platform`（youdoo 私钥签发）+ `aud=ai-model-gateway`
++ scope `llm:complete`。expert 仓**只持验签公钥、绝不持私钥**（红线）→ **无法自签**任何 `iss=youdoogo-platform`
+的网关令牌。故唯一合规路径 = **youdoo 签发网关令牌 → 随执行请求体转发 → expert 原样 `Bearer` 中继到网关**，
+expert 全程不签名。逐字复用第一场景已有的 `knowledge_token` 转发先例（`RemoteAgentExecutionApplication._relay_token`）。
+
+```
+youdoo RemoteAgentExecutionApplication._create_remote（expert_execution_mode=remote）
+  _gateway_token()  → mint(aud=ai-model-gateway, scope=llm:complete)   【门控 expert_forward_gateway_token；关→None】
+  RemoteExpertPrepareAdapter.create(..., gateway_token=…)  → body 携令牌
+    → POST expert /v1/experts/{id}/executions
+        prepare_execution（组装+知识扇出）→ ExecutionRequest
+        req.gateway_token = body.gateway_token（dataclasses.replace）→ store.put
+    → GET .../stream → GatewayExecutor.stream(req)
+        req.gateway_token 空 或 gateway_url 空 → 回落 EchoExecutor【默认关/①③路径逐字不变】
+        否则 → POST {gateway_url}/v1/chat/completions
+                 body {model_role, system_prompt, user_message, temperature, stream:true}
+                 Authorization: Bearer {req.gateway_token}（原样中继）
+               → 解析 SSE 帧逐帧 yield；未收 [DONE] 即中断 = 抛错
+  远端首 delta 前失败 → FallbackCompletionPort 语义委托本地兜底（现有，不改）
+```
+
+#### 6.4.2 三段 body / SSE 帧契约
+
+**youdoo→expert `POST /v1/experts/{id}/executions`**：现有富 body（§6.2）**加一字段** `gateway_token: str`
+（ES256, `iss=youdoogo-platform`, `aud=ai-model-gateway`, `scope=llm:complete`, `exp≤300s`）。默认关时缺省/`null`。
+
+**expert→gateway `POST /v1/chat/completions`**（复用网关既有契约，**零改网关**）：body
+`{model_role, system_prompt, user_message, temperature, stream:true}`，`Authorization: Bearer {gateway_token}`。
+响应 SSE 帧 `{delta, accumulated_content, model, usage:{prompt_tokens,completion_tokens,total_tokens}}` +
+`data: [DONE]`——与 expert stream 帧、youdoo `RemoteExpertExecutionAdapter._parse_sse_line` **三处逐字对齐**。
+**流未收 `[DONE]` 即中断 = 错误**（对齐网关 mid-stream-failure 契约），GatewayExecutor 抛错不静默。
+
+#### 6.4.3 GatewayExecutor 回落 echo + 单路径增量边界
+
+expert 侧 3 条路径共享同一 `app.state.executor`：① `/v1/expert-executions`（模块1 简单 sync）、
+② `/v1/experts/{id}/executions`（模块2 富 sync，**本模块目标**）、③ `/internal/events` step.ready（模块3 异步）。
+`GatewayExecutor` 在**无 `gateway_token` 或无 `gateway_url` 时回落 `EchoExecutor`**（镜像 youdoo `FallbackCompletionPort`）——
+故只有 ② 路径（youdoo 转发了令牌）走真模型，①③ 未转发 → 逐字回 echo，本模块零波及。
+
+> `# ponytail: 回落 echo 是共享 executor 下的单路径增量手段。①（简单 sync）与 ③（异步 step.ready，且其
+> payload 尚无 model_role/system_prompt）逐个转正后，回落分支可移除、executor 硬要求 token。`
+
+#### 6.4.4 默认关矩阵 + 回滚
+
+| 服务 | 键 | 默认（生产逐字不变） | 开启 |
+|---|---|---|---|
+| youdoo | `expert_forward_gateway_token` | `false`（零 mint、body 无令牌） | `true`（须 `internal_jwt_private_key` 已配） |
+| youdoo | `expert_execution_mode` | `local`（现有安全网） | `remote`（+ `expert_platform_url` + canary%） |
+| expert | `gateway_url` | `""`（用 `default_executor` echo） | `<网关根地址>` |
+
+**回滚**：任一侧开关归零 → 走 echo，逐字回到模块 1/2 现状；**无 migration → 无 schema 回滚**。
+FallbackCompletionPort（远端首 delta 前失败降级本地）+ `expert_execution_mode`/canary 现有安全网不变。
+
+#### 6.4.5 令牌 `exp≤300s` 适用性
+
+rich sync 是 create→stream **秒级往返**：youdoo mint 令牌后立即随体发 expert，expert 立即中继网关，令牌
+全程新鲜。与 §6.3.3 同律——**勿把此转发用于长耗时路径而不先升级令牌方案**（异步 step.ready 真模型化时须处理）。
+
+#### 6.4.6 红线核对（补 §5）
+
+- 转发/中继/流式均只记 `status/model_role/消息长度`，不打 Authorization/token/system_prompt/user_message/body 明文。
+- expert 只持验签公钥、**从不签名**；网关令牌由 youdoo 私钥签发、expert 原样中继。
+- 无双写（纯执行体改道，不碰任何库，无 migration）。
+- 契约级验收用**假网关 ASGI**（逐字对齐 SSE 帧、零 LLM 花费）；真·LLM 端到端（真卡/外网/真花费）留灰度模块。
+- 回链 docs/09（网关角色模型映射 / failover 链）与本文 §6.2。

@@ -17,10 +17,20 @@ from app.contexts.foundations.model_gateway.infrastructure.local_adapter import 
     LocalLlmAdapter,
 )
 from app.contexts.foundations.model_gateway.infrastructure.remote_adapter import (
+    GatewayError,
     RemoteLlmAdapter,
 )
 from app.core.config import get_settings
 from app.llm import get_llm_for_role
+
+# 跨上下文只经此 public 面消费（不得反向依赖本上下文 infrastructure 内层，见架构守卫）。
+__all__ = [
+    "FallbackCompletionPort",
+    "GatewayError",
+    "build_llm_completion_port",
+    "build_local_llm_completion_port",
+    "build_remote_llm_completion_port",
+]
 
 
 def build_local_llm_completion_port() -> LlmCompletionPort:

@@ -24,16 +24,21 @@ from app.contexts.foundations.execution.agent_execution.application.knowledge im
 from app.contexts.foundations.execution.agent_execution.application.knowledge import (
     build_knowledge_block as _build_knowledge_block,
 )
+from app.contexts.foundations.execution.agent_execution.application.ports import (
+    AgentExecutionPort,
+)
 from app.contexts.foundations.execution.agent_execution.application.prompts import (
     DEFAULT_GLOBAL_PROMPT as _DEFAULT_GLOBAL_PROMPT,
 )
 from app.contexts.foundations.execution.agent_execution.application.use_cases import (
-    AgentExecutionApplication,
     llm_role_for,
 )
 from app.contexts.foundations.execution.agent_execution.contracts.execution import (
     AgentExecutionRequest,
     ExecutionTrace,
+)
+from app.contexts.foundations.execution.agent_execution.infrastructure.composition import (
+    select_agent_execution,
 )
 from app.contexts.foundations.execution.agent_execution.infrastructure.langchain_gateway import (
     CurrentUsageAuthorizationAdapter,
@@ -43,9 +48,6 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.sqlalchem
 )
 from app.contexts.foundations.execution.agent_execution.infrastructure.system_clock import (
     SystemExecutionClock,
-)
-from app.contexts.foundations.model_gateway.public import (
-    build_llm_completion_port,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertSnapshotQuery,
@@ -109,12 +111,12 @@ async def _prepare(
     return llm_role_for(snapshot.model_role), system_prompt, message, sources
 
 
-def _application(db: AsyncSession, role: AgentRole) -> AgentExecutionApplication:
-    return AgentExecutionApplication(
+def _application(db: AsyncSession, role: AgentRole) -> AgentExecutionPort:
+    return select_agent_execution(
+        db,
         prompt_port=LegacyPromptAssemblyAdapter(db, role, _DEFAULT_GLOBAL_PROMPT),
         knowledge_port=LegacyKnowledgeAugmentationAdapter(db, role),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
-        llm_port=build_llm_completion_port(),
         recorder=SQLAlchemyAgentExecutionRecorder(db, role, record_usage),
         clock=SystemExecutionClock(),
     )

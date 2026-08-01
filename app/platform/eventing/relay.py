@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,10 @@ class HttpInboxRelay:
         self._timeout = timeout
         self._transport = transport  # 注入点：门禁演练用 ASGITransport 回环，生产为 None（真网络）
 
+    def _payload(self, event: OutboxEvent) -> dict[str, Any]:
+        """出站 payload。默认原样出库；子类可注入投递期临时字段（不写回 OutboxEvent 行）。"""
+        return event.payload or {}
+
     async def __call__(self, _session: AsyncSession, event: OutboxEvent) -> None:
         """投递一条事件。出站不碰 DB（session 未用）；失败上抛交 outbox 重试/DLQ。"""
         envelope = EventEnvelope(
@@ -47,7 +52,7 @@ class HttpInboxRelay:
             event_type=event.event_type,
             aggregate_type=event.aggregate_type,
             aggregate_id=event.aggregate_id,
-            payload=event.payload or {},
+            payload=self._payload(event),
             dedupe_key=event.dedupe_key,
         )
         token = mint_internal_token(
@@ -68,13 +73,45 @@ class HttpInboxRelay:
 
 
 def build_relay_from_settings() -> HttpInboxRelay:
-    """按配置构造回环/远端 relay。audience 与 source 用本服务 issuer（回环自签自验）。
+    """按配置构造回环/远端 relay。transport 令牌 audience = 对端期望 aud（空回退本 issuer 走回环）。
 
-    # ponytail: 回环 audience=本服务 issuer；真实远端消费者上线时按对端 service_id 配 audience。
+    # ponytail: 回环 audience=本服务 issuer；跨仓填 event_inbox_peer_audience=对端 service_id。
     """
     settings = get_settings()
     return HttpInboxRelay(
         peer_url=settings.event_inbox_peer_url,
-        audience=settings.internal_jwt_issuer,
+        audience=settings.event_inbox_peer_audience or settings.internal_jwt_issuer,
+        source_service=settings.internal_jwt_issuer,
+    )
+
+
+class StepReadyRelay(HttpInboxRelay):
+    """``workflow.step.ready.v1`` 专用 relay（docs/23 §6.3.3）。
+
+    在**每次投递时**动态签发新鲜 callback_token 注入 payload 副本——expert 只持验签公钥、不能签发，
+    故回执令牌须由 youdoo（私钥）签发、expert 原样 ``Bearer`` 回带、youdoo inbox 自验。令牌**绝不
+    写回 OutboxEvent 行**（规避随行入库过期）；每次投递（含 outbox 重投）都新鲜签发 → 重投不过期。
+    aud = 本服务 issuer（youdoo inbox 校验的 audience），与出站 Authorization 令牌同 audience。
+    """
+
+    def _payload(self, event: OutboxEvent) -> dict[str, Any]:
+        callback_token = mint_internal_token(
+            service_id=self._source,
+            audience=get_settings().internal_jwt_issuer,
+            scope=(EVENTS_SCOPE,),
+        )
+        # 只注入内存 payload 副本；不打印令牌明文（红线）。
+        return {**(event.payload or {}), "callback_token": callback_token}
+
+
+def build_step_ready_relay_from_settings() -> StepReadyRelay:
+    """按配置构造 step.ready relay。transport 令牌 audience = 对端期望 aud（空回退本服务 issuer）。
+
+    callback_token（``_payload`` 注入）恒用本服务 issuer 作 aud——回发目标是本服务 inbox，自签自验。
+    """
+    settings = get_settings()
+    return StepReadyRelay(
+        peer_url=settings.event_inbox_peer_url,
+        audience=settings.event_inbox_peer_audience or settings.internal_jwt_issuer,
         source_service=settings.internal_jwt_issuer,
     )
