@@ -49,11 +49,10 @@ from app.contexts.foundations.execution.capability_execution.infrastructure.sqla
     SQLAlchemyCapabilityExecutionUnitOfWork,
 )
 from app.core.database import get_db
+from app.platform.eventing.remote_step import CAPABILITIES_EXECUTE_SCOPE
 from app.platform.http_runtime import ok
 
 logger = logging.getLogger(__name__)
-
-CAPABILITIES_EXECUTE_SCOPE = "capabilities:execute"
 
 router = APIRouter(tags=["capability-provider"])
 

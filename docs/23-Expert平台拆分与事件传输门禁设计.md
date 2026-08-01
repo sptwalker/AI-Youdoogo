@@ -599,3 +599,81 @@ expert 侧 `ReleaseStore` 原为**进程内存单副本，重启即失**。后�
   `capability_catalog.infrastructure`（架构门禁 `test_context_dependencies_point_inward`：跨 Context 只允许
   依赖对方 `contracts`）。故具体 `InMemoryCapabilityCatalog` 在 `bootstrap/wiring.py`（组合根，豁免）构造并
   经 `app.state` 注入；handler 缺省走 `REGISTRY`，测试注入 stub。
+
+### 6.8 远端 expert 工具调用环（文本协议回环）
+
+§6.7 给了 youdoo 的**回调服务端**（`POST /internal/capabilities/execute`）；本节补**调用方**——远端 expert
+让模型多轮调用工具：模型输出工具标记文本 → expert 解析 → 回调该端点 → 结果拼回 prompt 再调网关续跑，直到
+无标记。**仅 rich sync 路径**（`POST /v1/experts/{id}/executions`，已喂真模型）；step.ready 回环留后续。
+
+**为何文本协议而非原生 function-calling**：`ai-model-gateway` 当前是**窄单轮契约**
+`{model_role, system_prompt, user_message}` → 文本，无 `messages[]`/`tools`/`tool_calls`/`bind_tools`。文本协议
+把"对话历史"**压平进 `user_message`**，逐轮仍走窄单轮契约 → **网关零改**。且与 youdoo 本地既有机制
+（`ToolDispatcher.dispatch_text` 文本标记派发）**同 philosophy**。诚实取舍：可靠性次于 native（模型须按标记
+格式输出），换取网关零改 + 单模块可交付 + 默认关可回滚；原生透传留作可靠性驱动的升级。
+
+#### 6.8.1 标记协议（线契约，两仓各定常量，形状即契约）
+
+模型被 youdoo 的工具广告教导，需调用工具时输出哨兵包裹的单行 JSON：
+```
+<<<CAPABILITY_CALL>>>
+{"capability":"data_query","arguments":{"sql":"SELECT ..."}}
+<<<END>>>
+```
+expert 逐轮扫 `accumulated_content` 找该标记：命中 → 解析 → 回调 → 结果拼回 → 续跑；无标记 → 收尾。
+解析失败（无标记/JSON 坏）→ 视作无调用，逐字吐出该轮输出（不 crash）。
+
+#### 6.8.2 youdoo → expert 注入（rich sync body，门控开才带）
+
+- `capabilities_token`：`mint_internal_token(aud=settings.internal_jwt_issuer,
+  scope=("capabilities:execute",), actor=user)`——**aud 是 youdoo 自身 issuer**（回调打回 youdoo 自验），
+  非网关/expert aud（信任推理同 §6.5 的 `callback_token`）。
+- `capabilities_callback_url`：youdoo 自身对 expert 可达的根地址（配置 `capability_callback_url`）。
+- **工具广告**追加进 `global_prompt`：说明标记协议 + data_query 的 `{sql}` 入参。首版为 data_query 单工具
+  **硬编码常量**（放 agent_execution infrastructure，避开跨 Context 依赖 catalog.infrastructure 的门禁）。
+
+expert → youdoo 回调：`POST {capabilities_callback_url}/internal/capabilities/execute`，
+body = `{capability_key, arguments, expert_id, trace_id?, idempotency_key?}`（匹配 `CapabilityExecuteRequest`），
+`Bearer=capabilities_token`。响应封套 `data.{status,notes,dataset_json,...}` 拼回下轮 `user_message`。
+
+#### 6.8.3 默认关矩阵 + 回滚
+
+- **默认关**：youdoo `capability_callback_url=""` → 不 mint、不广告、body 无字段 → expert 收不到
+  `capabilities_token` → `ToolLoopExecutor` 透传不循环 → 生产逐字不变。
+- **开启**：youdoo 配 `capability_callback_url`（自身可达根）+ `capability_provider_enabled=true`
+  （§6.7 挂回调端点）+ Internal JWT 密钥。
+- **回滚**：置空 → 环消失，无残留（无 DB / 无 migration）。
+- **红线**：expert/youdoo 日志只记 capability_key/status，不打 token/arguments/body。
+
+#### 6.8.4 诚实边界 + 升级路径
+
+- **首版工具集 = 仅 `data_query`**（唯一 SYNC_LOCAL + 有真 executor；`env_context` 无 executor、
+  `collab`/`deliver` EVENT_GATED→§6.7 端点 409）。
+- **rich sync + step.ready 两路径已接**（§6.8.5）；simple sync（`POST /v1/expert-executions`）未接。
+- **`ToolLoopExecutor` buffer-then-emit**：逐轮 buffer 全部 chunk 再判标记 → 最终轮非增量流式（native tools
+  透传才增量），中间工具轮不外泄。**`max_rounds` 有界**防死循环/token 耗尽，**单轮单调用**（并行留后）。
+- 升级路径 `# ponytail`：原生 function-calling（扩网关 OpenAI tools/messages/tool_calls 透传 + expert 原生
+  循环 + youdoo `input_schema_json`→tools 生成）；多工具（catalog 生成广告，放开 EVENT_GATED 经事件门禁的
+  异步工具）。
+
+#### 6.8.5 step.ready 异步路径接入工具环（第二场景 §6.3 / §6.5 转正）
+
+§6.8.2 的 rich sync 走 `remote_prepare_adapter` 把 `capabilities_token`/`capabilities_callback_url` + 工具广告
+随体传远端；异步 step.ready 路径无此 adapter（payload 由 outbox 事件承载），故注入点改在 **`StepReadyRelay._payload`
+投递期**——与 `gateway_token` 同一先例（§6.5：只写内存 payload 副本、绝不写回 OutboxEvent 行 → 每次投递含
+outbox 重投都新鲜签发 → 天然解 `exp≤300s` 与停车长租约的过期矛盾）。
+
+- **门控**：`capability_callback_url` 非空才注入（与 rich sync 同一开关，单一真源）。注入三字段：
+  - `capabilities_token`：`mint(aud=internal_jwt_issuer, scope=capabilities:execute)`（无 actor——relay 投递期无
+    直接真人上下文，同 `gateway_token` 注入不带 actor）。
+  - `capabilities_callback_url`：`settings.capability_callback_url`。
+  - `tool_advert`：工具广告文本常量（与 rich sync 同一 `DATA_QUERY_TOOL_ADVERT`，上提 `remote_step.py` 供
+    relay + prepare_adapter 共享单一真源）。异步 payload 无 `global_prompt`，故广告经**独立 `tool_advert` 字段**
+    传递，expert `_build_request` 用它作 `prepare_execution` 的 `global_prompt`。
+- **expert 侧**：`inbox._build_request` 把 payload 的 `tool_advert` 作 `global_prompt`、并把三字段（token/url/
+  expert_id）`replace` 进 `ExecutionRequest`。`app.state.executor` 本已是 `ToolLoopExecutor` 包裹
+  （§6.8 rich sync 同实例，`consume_step_ready` 复用），两者齐备即进环，否则透传（逐字回现状）。
+- **默认关矩阵**：`capability_callback_url` 空 → relay 不注入 → payload 无三字段 → expert `_build_request` 组裸请求
+  → `ToolLoopExecutor` 透传 → 生产逐字不变。端到端另需接收端 `capability_provider_enabled` + Internal JWT 密钥。
+- **诚实边界**：仅注入路径变（rich sync body → relay payload），工具集/协议/`buffer-then-emit`/`max_rounds`/单工具
+  同 §6.8.4 逐字不变。simple sync 仍未接（该路径 `ExecutionRequest` 不带 capabilities 字段）。

@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.internal_token import mint_internal_token
 from app.platform.eventing.inbox import EventEnvelope
-from app.platform.eventing.remote_step import GATEWAY_AUDIENCE, LLM_COMPLETE_SCOPE
+from app.platform.eventing.remote_step import (
+    CAPABILITIES_EXECUTE_SCOPE,
+    DATA_QUERY_TOOL_ADVERT,
+    GATEWAY_AUDIENCE,
+    LLM_COMPLETE_SCOPE,
+)
 from app.platform.outbox.model import OutboxEvent
 
 logger = logging.getLogger(__name__)
@@ -113,6 +118,17 @@ class StepReadyRelay(HttpInboxRelay):
                 audience=GATEWAY_AUDIENCE,
                 scope=(LLM_COMPLETE_SCOPE,),
             )
+        # 工具调用环（docs/23 §6.8.5）：门控开→注入新鲜 capabilities_token（aud=本服务 issuer,
+        # scope=capabilities:execute，回调打回 youdoo 自验）+ 回调根地址 + 工具广告文本。expert
+        # _build_request 用 tool_advert 作 global_prompt、三字段进 ToolLoopExecutor；关→不注入。
+        if settings.capability_callback_url:
+            extra["capabilities_token"] = mint_internal_token(
+                service_id=self._source,
+                audience=settings.internal_jwt_issuer,
+                scope=(CAPABILITIES_EXECUTE_SCOPE,),
+            )
+            extra["capabilities_callback_url"] = settings.capability_callback_url
+            extra["tool_advert"] = DATA_QUERY_TOOL_ADVERT
         return {**(event.payload or {}), **extra}
 
 

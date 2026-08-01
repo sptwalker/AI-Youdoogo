@@ -28,6 +28,7 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.remote_ex
 from app.core.config import get_settings
 from app.core.internal_token import mint_internal_token
 from app.core.request_context import get_trace_id
+from app.platform.eventing.remote_step import DATA_QUERY_TOOL_ADVERT
 
 _EXPERT_AUDIENCE = "ai-expert-platform"
 _SCHEMA_VERSION = "v1"
@@ -109,8 +110,12 @@ class RemoteExpertPrepareAdapter:
         term_prompt: str,
         temperature: float = 0.3,
         gateway_token: str | None = None,
+        capabilities_token: str | None = None,
+        capabilities_callback_url: str | None = None,
     ) -> tuple[str, tuple[SourceReference, ...]]:
         """创建远端执行（远端做组装 + 知识扇出）→ ``(execution_id, sources)``。"""
+        # capabilities_token 非空 → 追加工具广告进 global_prompt（教模型用文本标记调 data_query）。
+        advert = DATA_QUERY_TOOL_ADVERT if capabilities_token else ""
         body: dict[str, object] = {
             "model_role": model_role,
             "user_message": user_message,
@@ -119,9 +124,12 @@ class RemoteExpertPrepareAdapter:
             "use_knowledge": use_knowledge,
             "knowledge_base_ids": knowledge_base_ids,
             "knowledge_token": knowledge_token,
-            "global_prompt": global_prompt,
+            "global_prompt": global_prompt + advert,
             "term_prompt": term_prompt,
             "gateway_token": gateway_token,  # 转发令牌（aud=网关）；None → 远端回落 echo
+            # 工具环转发令牌 + 本端回调地址（None → 远端 ToolLoopExecutor 透传不循环）。
+            "capabilities_token": capabilities_token,
+            "capabilities_callback_url": capabilities_callback_url,
         }
         path = f"{self._base_url}/v1/experts/{expert_id}/executions"
         client = self._client or httpx.AsyncClient(timeout=self._timeout)

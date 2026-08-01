@@ -55,8 +55,13 @@ from app.contexts.foundations.knowledge.semantic_catalog.public import term_prom
 from app.contexts.foundations.knowledge.wiki_management.public import (
     agent_visible_knowledge_base_ids,
 )
+from app.core.config import get_settings
 from app.core.internal_token import mint_internal_token
-from app.platform.eventing.remote_step import GATEWAY_AUDIENCE, LLM_COMPLETE_SCOPE
+from app.platform.eventing.remote_step import (
+    CAPABILITIES_EXECUTE_SCOPE,
+    GATEWAY_AUDIENCE,
+    LLM_COMPLETE_SCOPE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +133,18 @@ class RemoteAgentExecutionApplication:
             actor_id=str(request.user_id) if request.user_id else None,
         )
 
+    def _capabilities_token(self, request: AgentExecutionRequest) -> str | None:
+        """工具环转发令牌（aud=self issuer, scope=capabilities:execute, actor=真人）；未配回调地址
+        → None → 远端透传不循环。aud=自身 issuer：回调打回 youdoo 自验。私钥只本服务。"""
+        if not get_settings().capability_callback_url:
+            return None
+        return mint_internal_token(
+            service_id="ai-youdoogo",
+            audience=get_settings().internal_jwt_issuer,
+            scope=(CAPABILITIES_EXECUTE_SCOPE,),
+            actor_id=str(request.user_id) if request.user_id else None,
+        )
+
     async def _create_remote(
         self, request: AgentExecutionRequest
     ) -> tuple[str, tuple[SourceReference, ...]]:
@@ -146,6 +163,8 @@ class RemoteAgentExecutionApplication:
             knowledge_base_ids=knowledge_base_ids,
             knowledge_token=self._relay_token(request),
             gateway_token=self._gateway_token(request),
+            capabilities_token=self._capabilities_token(request),
+            capabilities_callback_url=get_settings().capability_callback_url or None,
             global_prompt=global_prompt,
             term_prompt=term,
         )

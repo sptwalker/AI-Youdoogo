@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     # 路由不注册 → 生产逐字不变、零新入站攻击面。验签走 internal_jwt_public_key（调用方持私钥）。
     capability_provider_enabled: bool = False
 
+    # 远端 expert 工具调用环（docs/23 §6.8）：youdoo 自身对 expert 可达的根地址。非空 → rich sync 时
+    # mint capabilities_token（aud=self issuer, scope=capabilities:execute）+ 追加工具广告随体转发，
+    # 远端 ToolLoopExecutor 让模型多轮回调本端点取数。空（默认）→ 不 mint、不广告 → 远端透传不循环。
+    # 端到端还需本端开 capability_provider_enabled（接收回调）+ Internal JWT 密钥。
+    capability_callback_url: str = ""  # 如 http://ai-youdoogo:8000；空=工具环关，生产逐字不变
+
     # 事件传输门禁（Phase 3 硬前置 / docs/21 §Immediate Backlog C + docs/23）：出站 HTTP Relay
     # 把 outbox 事件投递给对端 Inbox。默认关 → 现网 worker 行为零改变；开关 on → 装配 HttpInboxRelay
     # 并 register_event_handler；缺 peer/私钥则启动即失败（fail-fast，见 _enforce_event_relay）。

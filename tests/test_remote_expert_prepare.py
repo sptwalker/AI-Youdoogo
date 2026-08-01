@@ -110,6 +110,8 @@ class StubPrepare:
         term_prompt: str,
         temperature: float = 0.3,
         gateway_token: str | None = None,
+        capabilities_token: str | None = None,
+        capabilities_callback_url: str | None = None,
     ) -> tuple[str, tuple[SourceReference, ...]]:
         self.create_kwargs = {
             "expert_id": expert_id,
@@ -118,6 +120,8 @@ class StubPrepare:
             "knowledge_base_ids": knowledge_base_ids,
             "knowledge_token": knowledge_token,
             "gateway_token": gateway_token,
+            "capabilities_token": capabilities_token,
+            "capabilities_callback_url": capabilities_callback_url,
             "global_prompt": global_prompt,
             "term_prompt": term_prompt,
         }
@@ -332,3 +336,105 @@ async def test_forward_off_sends_no_gateway_token() -> None:
     await app.execute(_request(user_id=USER_ID))
 
     assert prepare.create_kwargs["gateway_token"] is None
+
+
+# --- 工具调用环转发（docs/23 §6.8）：门控 capability_callback_url 非空 ---
+
+
+async def test_capabilities_token_minted_when_callback_url_set(
+    _gateway_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配了 capability_callback_url：capabilities_token 是真 JWT，verify(aud=self issuer) 通过含
+    capabilities:execute + actor；callback_url 随体传远端。"""
+    from app.core.config import get_settings
+    from app.core.internal_token import verify_internal_token
+
+    monkeypatch.setattr(get_settings(), "capability_callback_url", "http://ai-youdoogo:8000")
+    prepare = StubPrepare(chunks=[_chunk("x", "x", model="ds")])
+    app, _ = _app(prepare, StubFallback())
+
+    await app.execute(_request(user_id=USER_ID))
+
+    token = prepare.create_kwargs["capabilities_token"]
+    assert isinstance(token, str) and token
+    claims = verify_internal_token(token, audience="youdoogo-platform")  # aud=self issuer
+    assert "capabilities:execute" in claims.scope
+    assert claims.actor_id == str(USER_ID)
+    assert prepare.create_kwargs["capabilities_callback_url"] == "http://ai-youdoogo:8000"
+
+
+async def test_capabilities_off_sends_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未配 capability_callback_url（默认空）：不 mint，两字段均 None → 远端透传不循环。"""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "capability_callback_url", "")
+    prepare = StubPrepare(chunks=[_chunk("x", "x", model="echo-default")])
+    app, _ = _app(prepare, StubFallback())
+
+    await app.execute(_request(user_id=USER_ID))
+
+    assert prepare.create_kwargs["capabilities_token"] is None
+    assert prepare.create_kwargs["capabilities_callback_url"] is None
+
+
+async def test_real_adapter_appends_tool_advert_only_when_token_present() -> None:
+    """真 RemoteExpertPrepareAdapter：capabilities_token 非空 → global_prompt 追加工具广告 + 两字段
+    进 body；无 token → 广告缺席、字段 None。用假 expert 端点（ASGITransport）捕获 body。"""
+    import httpx
+    from fastapi import FastAPI
+
+    from app.contexts.foundations.execution.agent_execution.infrastructure.remote_prepare_adapter import (  # noqa: E501
+        RemoteExpertPrepareAdapter,
+    )
+
+    captured: dict[str, object] = {}
+    fake = FastAPI()
+
+    # body 直接收 dict（FastAPI 解析 JSON 体）——避开 `from __future__ import annotations` 下
+    # `request: Request` 字符串注解无法在模块 globals 解析（Request 为局部）被当 query 参 → 422。
+    @fake.post("/v1/experts/{expert_id}/executions")
+    async def create(expert_id: str, body: dict) -> dict:
+        captured["body"] = body
+        return {"execution_id": "exec-1", "sources": []}
+
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=fake), base_url="http://expert")
+    adapter = RemoteExpertPrepareAdapter(
+        base_url="http://expert", client=client, token_minter=lambda: "svc-tok"
+    )
+
+    await adapter.create(
+        "e1",
+        model_role="default",
+        user_message="利润多少",
+        use_knowledge=False,
+        knowledge_base_ids=None,
+        knowledge_token=None,
+        global_prompt="全局提示",
+        term_prompt="术语",
+        capabilities_token="cap-tok",
+        capabilities_callback_url="http://ai-youdoogo:8000",
+    )
+    body_on = captured["body"]
+    assert isinstance(body_on, dict)
+    assert "data_query" in str(body_on["global_prompt"])
+    assert "<<<CAPABILITY_CALL>>>" in str(body_on["global_prompt"])
+    assert body_on["capabilities_token"] == "cap-tok"
+    assert body_on["capabilities_callback_url"] == "http://ai-youdoogo:8000"
+
+    await adapter.create(
+        "e1",
+        model_role="default",
+        user_message="利润多少",
+        use_knowledge=False,
+        knowledge_base_ids=None,
+        knowledge_token=None,
+        global_prompt="全局提示",
+        term_prompt="术语",
+    )
+    body_off = captured["body"]
+    assert isinstance(body_off, dict)
+    assert body_off["global_prompt"] == "全局提示"  # 无广告
+    assert body_off["capabilities_token"] is None
+    assert body_off["capabilities_callback_url"] is None
+    await client.aclose()
+
