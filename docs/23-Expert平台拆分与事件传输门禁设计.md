@@ -497,3 +497,45 @@ youdoo enqueue_ready_steps（skill∈allowlist）→ sentinel 停车 + enqueue s
 - 无双写（纯执行体改道 + 令牌投递期注入，不碰任何库，无 migration）。
 - 契约级验收用**假网关 ASGI**（零 LLM 花费）；真·LLM 端到端留灰度模块。
 - 知识扇出 + 按步 `model_role` override 显式留后续增量（异步 payload 尚无这些字段）。
+
+### 6.6 远端 ExpertRelease 物理持久化（JSON 文件快照）
+
+expert 侧 `ReleaseStore` 原为**进程内存单副本，重启即失**。后果：expert 重启后 `releases.get(expert_id)`
+返 `None` → 富 sync 路径② 404「专家未发布」、异步 step.ready 路径③ 回落 echo（§6.5.3），直到 youdoo
+真源**重新发布重推**才恢复。本模块给 `ReleaseStore` 加**可选文件持久化**，重启存活。
+
+#### 6.6.1 为何 JSON 文件而非 PG
+
+- **expert 仓刻意零 DB 依赖**：仅 fastapi/httpx/pyjwt/cryptography/pydantic，无 sqlalchemy/asyncpg/alembic。
+  引 PG 会破此设计（+compose 起库 + 迁移运维），仅当 expert 独立部署且需与其它 PG 数据联表时才值得——当前无此需求。
+- **接口只需 `get(当前版)` / `put(覆盖)`**：每 expert 只留一条当前发布版（youdoo 换版/回滚经真人触发后重推
+  覆盖，§4.6），用不上关系库/多版本查询。JSON 文件全量 dump 即够。
+- **youdoo 是发布真源**：expert 侧是推送投影，可随时被 `HttpReleasePublisher` 重推覆盖（幂等）；文件丢失/损坏
+  → youdoo 重推重建，非权威数据源。
+- `# ponytail: 全量 dump 每次覆写；快照量级（每 expert 一条当前版）下 O(n) 无虞，量大/多副本再切 Redis/PG。`
+
+#### 6.6.2 原子写 + 损坏容错
+
+- **原子写**：`put` 更新内存 dict 后全量 dump → 写 `{path}.tmp` → `os.replace(tmp, path)`（同目录 rename
+  原子、跨平台覆盖，Windows 亦可）。防半写：进程崩在写中途只坏 `.tmp`，`path` 仍是上一致状态。
+- **损坏容错**：构造时 `_load()` 读文件 → JSON 解析失败/字段缺失 → `logger.warning` 起空（不 crash）。
+  空起后 youdoo 重推重建。文件不存在 = 首次启动，静默空起。
+
+#### 6.6.3 边界与默认关矩阵
+
+- **youdoo 真源不变**：`ExpertRelease` 仍落 youdoo 库、`HttpReleasePublisher` 推送 body 逐字不变（无线协议改动）。
+  expert 落盘的是**投影副本**，只服务本进程 restart-survival。
+- **默认关**：expert `release_store_path=""` → `ReleaseStore(path=None)` 纯内存，逐字回到现状（重启仍失，
+  与前序模块一致，生产零改变）。**开启**：`RELEASE_STORE_PATH=/data/expert/releases.json` → 持久、重启存活。
+- **回滚**：置空 → 回内存；删文件无副作用（youdoo 重推重建）。无 DB / 无 migration / 无 schema 回滚。
+
+#### 6.6.4 收敛 §6.5.3 的「无快照回落 echo」
+
+配了 `release_store_path` 后，**真源已推过的 expert** 在重启后仍有快照 → 富 sync 不再 404、异步 step.ready
+不再回落 echo。§6.5.3 的回落 echo 收敛为「仅未推过/文件损坏的 expert」。红线：日志只记 `expert_id`/
+`version_no`/加载条数，**不打印 `prompt_template` 明文**。
+
+#### 6.6.5 升级路径
+
+单文件 + 全量 dump 适配当前单副本 expert。若量级增长（万级 expert）或**多副本部署**（多进程共享发布快照）→
+切 Redis/PG 共享存储（`ReleaseStore` 接口 `get`/`put` 不变，仅换实现，调用点零改）。
