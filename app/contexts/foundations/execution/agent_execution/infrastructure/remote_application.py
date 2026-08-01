@@ -56,11 +56,11 @@ from app.contexts.foundations.knowledge.wiki_management.public import (
     agent_visible_knowledge_base_ids,
 )
 from app.core.internal_token import mint_internal_token
+from app.platform.eventing.remote_step import GATEWAY_AUDIENCE, LLM_COMPLETE_SCOPE
 
 logger = logging.getLogger(__name__)
 
 _KNOWLEDGE_AUDIENCE = "ai-knowledge-service"
-_GATEWAY_AUDIENCE = "ai-model-gateway"
 
 
 class RemoteAgentExecutionApplication:
@@ -123,8 +123,8 @@ class RemoteAgentExecutionApplication:
             return None
         return mint_internal_token(
             service_id="ai-youdoogo",
-            audience=_GATEWAY_AUDIENCE,
-            scope=("llm:complete",),
+            audience=GATEWAY_AUDIENCE,
+            scope=(LLM_COMPLETE_SCOPE,),
             actor_id=str(request.user_id) if request.user_id else None,
         )
 

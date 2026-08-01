@@ -303,6 +303,35 @@ async def test_step_ready_relay_injects_fresh_token_not_persisted(maker: _Sessio
         assert "callback_token" not in (row.payload or {})  # 原行仍不含
 
 
+async def test_step_ready_relay_forwards_gateway_token_when_flagged(maker: _SessionMaker) -> None:
+    """docs/23 §6.5：门控开→投递副本注入合法 gateway_token（aud=网关）；关→不注入。"""
+    from app.core.internal_token import verify_internal_token
+
+    async with maker() as db:
+        run_id = await _create_run(db)
+        await enqueue_ready_steps(db, run_id)
+        await db.commit()
+        row = (
+            await db.execute(
+                select(OutboxEvent).where(OutboxEvent.event_type == STEP_READY_EVENT)
+            )
+        ).scalar_one()
+        s = get_settings()
+        issuer = s.internal_jwt_issuer
+        relay = StepReadyRelay(peer_url="http://test", audience=issuer, source_service=issuer)
+
+        s.expert_forward_gateway_token = True
+        try:
+            token = relay._payload(row)["gateway_token"]  # noqa: SLF001
+        finally:
+            s.expert_forward_gateway_token = False
+        claims = verify_internal_token(str(token), audience="ai-model-gateway")
+        assert "llm:complete" in claims.scope
+        assert "gateway_token" not in (row.payload or {})  # 绝不入库
+
+        assert "gateway_token" not in relay._payload(row)  # noqa: SLF001 - 关→不注入
+
+
 async def test_completed_via_http_inbox_projects(maker: _SessionMaker) -> None:
     """completed 经真 /internal/events（验签+幂等落库+投影）唤醒停车 step。"""
     engine_sessions = maker

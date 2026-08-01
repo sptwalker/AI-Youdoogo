@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.internal_token import mint_internal_token
 from app.platform.eventing.inbox import EventEnvelope
+from app.platform.eventing.remote_step import GATEWAY_AUDIENCE, LLM_COMPLETE_SCOPE
 from app.platform.outbox.model import OutboxEvent
 
 logger = logging.getLogger(__name__)
@@ -95,13 +96,24 @@ class StepReadyRelay(HttpInboxRelay):
     """
 
     def _payload(self, event: OutboxEvent) -> dict[str, Any]:
+        settings = get_settings()
         callback_token = mint_internal_token(
             service_id=self._source,
-            audience=get_settings().internal_jwt_issuer,
+            audience=settings.internal_jwt_issuer,
             scope=(EVENTS_SCOPE,),
         )
         # 只注入内存 payload 副本；不打印令牌明文（红线）。
-        return {**(event.payload or {}), "callback_token": callback_token}
+        extra: dict[str, Any] = {"callback_token": callback_token}
+        # 真·网关执行器转发（docs/23 §6.5）：门控开→投递期注入新鲜 gateway_token（aud=网关,
+        # scope=llm:complete），expert 原样 Bearer 中继跑真模型；关→不注入→远端回落 echo。
+        # 投递期注入（含 outbox 重投）→ 每次新鲜，天然解 exp≤300s 与停车长租约的过期矛盾。
+        if settings.expert_forward_gateway_token:
+            extra["gateway_token"] = mint_internal_token(
+                service_id=self._source,
+                audience=GATEWAY_AUDIENCE,
+                scope=(LLM_COMPLETE_SCOPE,),
+            )
+        return {**(event.payload or {}), **extra}
 
 
 def build_step_ready_relay_from_settings() -> StepReadyRelay:

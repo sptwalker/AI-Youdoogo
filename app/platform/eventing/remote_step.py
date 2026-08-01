@@ -9,3 +9,8 @@ from __future__ import annotations
 STEP_READY_EVENT = "workflow.step.ready.v1"  # youdoo→expert：步骤就绪、请远端执行
 EXPERT_COMPLETED_EVENT = "expert.execution.completed.v1"  # expert→youdoo：执行完成、请唤醒停车 step
 REMOTE_SENTINEL = "remote-expert"  # 停车 step 的 lease_owner；与真人停点(WAITING_HUMAN)天然可辨
+
+# 网关转发令牌的 aud/scope（docs/23 §6.4/§6.5）：rich sync 与异步 step.ready 两条转发点共用同一
+# 字面量。放此（platform.eventing）供 relay 出站注入与 context 侧 mint 共享，避免各持一份漂移。
+GATEWAY_AUDIENCE = "ai-model-gateway"
+LLM_COMPLETE_SCOPE = "llm:complete"

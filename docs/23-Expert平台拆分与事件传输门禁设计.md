@@ -429,3 +429,71 @@ rich sync 是 create→stream **秒级往返**：youdoo mint 令牌后立即随�
 - 无双写（纯执行体改道，不碰任何库，无 migration）。
 - 契约级验收用**假网关 ASGI**（逐字对齐 SSE 帧、零 LLM 花费）；真·LLM 端到端（真卡/外网/真花费）留灰度模块。
 - 回链 docs/09（网关角色模型映射 / failover 链）与本文 §6.2。
+
+### 6.5 异步 step.ready 路径：echo → 真模型（第二场景 §6.3 转正）
+
+§6.4 让**第一场景 rich sync 路径②** 走真模型；本模块让 **第二场景「后台步骤异步远端执行」（§6.3，
+`/internal/events` step.ready）** 也走真模型——第③条执行路径转正。**默认关、生产逐字不变、开关归零即回 echo。**
+
+#### 6.5.1 关键洞察：无需 youdoo 传 model_role/system_prompt（runtime 边界不破）
+
+§6.3.2 的出站 `_step_ready_payload` **刻意不读 expert 快照**（据 step 列直接组装，保 runtime 边界干净）→
+payload 无 `model_role`/`system_prompt`。但 **expert `/internal/events` 侧已持有自己的 `ReleaseStore`**
+（§6.2 发布时 youdoo 推来的冻结快照）。故真模型化**不必**让 youdoo 传 prompt 相关字段：
+
+- **model_role + system_prompt** ← expert 用 payload 已有的 `expert_id` 查**自己的 release**，走 §6.2
+  `prepare_execution` 同款组装（`system_prompt=f"{global_prompt}\n\n{prompt_template}{term_prompt}"`，异步
+  路径 `global_prompt`/`term_prompt` 为空 → 退化为 `prompt_template`；`use_knowledge=False`）。
+- **youdoo 唯一新增** = `StepReadyRelay._payload` **投递时注入新鲜 `gateway_token`**（门控
+  `expert_forward_gateway_token`）——**逐字复用 §6.3.3 callback_token 的注入法**：投递期 mint、注入 payload
+  副本、**绝不写回 OutboxEvent 行**。每次投递（含 outbox 重投）都新鲜签发 → 天然解 `exp≤300s` 与停车长租约
+  的过期矛盾（令牌只需活过 expert→gateway 一跳）。
+
+```
+youdoo enqueue_ready_steps（skill∈allowlist）→ sentinel 停车 + enqueue step.ready（payload 据 step 列，无 token）
+  StepReadyRelay._payload（每次投递）：注入 callback_token + gateway_token【门控 expert_forward_gateway_token；关→不注入】
+    → POST expert /internal/events
+        consume_step_ready：releases.get(expert_id)
+          有快照 → prepare_execution（global/term 空、use_knowledge=False）→ ExecutionRequest
+                   req.gateway_token = payload["gateway_token"]（replace）
+          无快照 → 裸请求、不带 token（无法组 system_prompt/model_role）
+        → app.state.executor.stream(req)  = GatewayExecutor（配了 gateway_url 时）
+            req.gateway_token 空 或 gateway_url 空 或 无快照 → 回落 EchoExecutor【默认关/逐字不变】
+            否则 → 真 ai-model-gateway（body {model_role, system_prompt, user_message, temperature}）
+        → 组 completed（content=真模型输出）→ Bearer callback_token 回发 youdoo inbox
+```
+
+#### 6.5.2 三执行路径转正进度（更新 §6.4.3）
+
+| 路径 | 端点 | executor | 真模型 |
+|---|---|---|---|
+| ① 简单 sync | `/v1/expert-executions` | 共享 | ✗（youdoo 未转发令牌 → echo） |
+| ② 富 sync | `/v1/experts/{id}/executions` | 共享 | ✅（§6.4） |
+| ③ 异步 step.ready | `/internal/events` | 共享 | ✅（本模块，有快照 + 令牌时） |
+
+`GatewayExecutor` 回落 echo 仍是共享 executor 下的单路径增量手段。① 未转发令牌 → 仍 echo。
+`# ponytail: ① 简单 sync 路径转正后回落 echo 可移除、executor 硬要求 token。`
+
+#### 6.5.3 无快照回落 + 令牌 exp≤300s 适用性
+
+- **无 release 快照回落 echo**：`ReleaseStore` 进程内存易失（重启/未推 → 空）。无快照时无法组 `system_prompt`
+  与有效 `model_role`，故**不带 gateway_token** → `GatewayExecutor` 回落 echo（安全降级，不拿 `model_role="remote"`
+  裸打网关）。`# ponytail: 远端 ExpertRelease 物理持久表落地后此回落收敛为「必有快照」。`
+- **`exp≤300s`**：step.ready **投递即同步执行+回发**（expert 收到 → drain 真模型流 → 回发 completed），非
+  「收 202 后台执行」。`gateway_token` 投递期注入，活过 expert→gateway 一跳（秒级）即可；`callback_token` 需活过
+  「drain 真模型（秒级，典型 <60s）→ 回发」全程，仍在 300s 内。与 §6.3.3/§6.4.5 同律——**勿在
+  `event_remote_step_skills` 放长耗时 skill 而不先升级令牌方案**（§6.3.3 ponytail 已警示）。
+
+#### 6.5.4 默认关矩阵 + 回滚
+
+沿用 §6.3.6（事件传输开关）+ §6.4.4（`expert_forward_gateway_token` / expert `gateway_url`）。三方任一归零即回 echo：
+`expert_forward_gateway_token=false`（youdoo 不注入令牌）/ expert `gateway_url=""`（用 echo 占位）/
+`event_remote_step_skills=()`（不进异步分叉）。**无 migration → 无 schema 回滚。**
+
+#### 6.5.5 红线核对（补 §5）
+
+- `StepReadyRelay._payload` 注入 `gateway_token` 只进内存 payload 副本，绝不写回 OutboxEvent、日志不打明文。
+- expert 只持验签公钥、全程不签名；`gateway_token`/`callback_token` 均 youdoo 私钥签发、expert 原样中继/回带。
+- 无双写（纯执行体改道 + 令牌投递期注入，不碰任何库，无 migration）。
+- 契约级验收用**假网关 ASGI**（零 LLM 花费）；真·LLM 端到端留灰度模块。
+- 知识扇出 + 按步 `model_role` override 显式留后续增量（异步 payload 尚无这些字段）。
