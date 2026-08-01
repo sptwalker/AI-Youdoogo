@@ -539,3 +539,63 @@ expert 侧 `ReleaseStore` 原为**进程内存单副本，重启即失**。后�
 
 单文件 + 全量 dump 适配当前单副本 expert。若量级增长（万级 expert）或**多副本部署**（多进程共享发布快照）→
 切 Redis/PG 共享存储（`ReleaseStore` 接口 `get`/`put` 不变，仅换实现，调用点零改）。
+
+### 6.7 youdoo 同步 Capability Provider 服务面（`POST /internal/capabilities/execute`）
+
+§4.5 让每个能力**声明**自身传输资格（`capability_transport` → `SYNC_LOCAL` / `EVENT_GATED`），但该声明
+此前**只在 `GET /api/v1/agents/skills` 回显、无任何路由消费**。本模块补第一个真实消费者：youdoo 暴露一个
+**内部同步端点**，供未来远端 Capability Provider（远端 expert 想同步就地服务某只读/短事务能力时）跨服务
+调用。**本模块仅 youdoo 服务面**——远端 expert 侧的工具调用环（模型发 tool_call → 回调本端点 → 喂回模型
+续跑）是下一模块。
+
+#### 6.7.1 只放行 SYNC_LOCAL，EVENT_GATED 用 409 拒
+
+端点在 resolve 能力定义后、执行前判 `capability_transport(definition)`：
+
+- `SYNC_LOCAL`（`side_effect==NONE`，只读/短事务）→ 放行，复用 `CapabilityExecutionApplication` 全链
+  同步执行、返结果。
+- `EVENT_GATED`（`INTERNAL_WRITE`/`EXTERNAL_WRITE`，`collab`/`deliver`）→ **HTTP 409** 拒。这是**协议层
+  资格拒绝**（有写副作用的能力根本不该走同步就地端点，须经 §3 事件门禁异步交接），用 409 让调用方明确区分
+  「能力不合传输资格」与「能力执行被业务拒绝」（后者是封套内 `status=rejected` + 200）。
+- 能力未注册 → 封套内 `status=rejected`（200，业务拒绝，非协议拒绝）。
+
+#### 6.7.2 鉴权复用 `require_service` + scope；permission_keys 源自 definition
+
+- **鉴权**：`Depends(require_service("capabilities:execute"))`（`app/api/deps.py`）——验签 ES256 服务令牌 +
+  强制 `capabilities:execute` scope 一行到位。`AuthenticationFailed`→401（无/坏令牌）、`PermissionDenied`
+  →403（缺 scope），已由全局 `error_wiring` 映射。这正是 `require_service` docstring 里「等的那个首个入站
+  远端端点」。
+- **permission_keys 源自 `definition.permission_keys`，不从请求体收**（信任边界）：远端是**服务身份**（非
+  真人），若信任请求体自带的 `permission_keys` = 调用方可自我提权。语义 = 「服务身份获准执行此能力，即拥有
+  此能力声明所需权限」；与 `CurrentCapabilityAuthorization` 未来收紧（若改为校验 `permission_keys ⊇
+  definition.permission_keys`）**同源兼容**，本端点天然通过。`principal_id=None`（无真人主体），`expert_id`
+  从请求体收（handler 定位目标 AI 员工需要，非授权字段）。`# ponytail`：真人代理（actor claim）需更细
+  粒度授权时，在此接 access_control 策略（升级路径）。
+- **复用全链不减**：授权门 / 审批门（`CurrentCapabilityApproval` 按 risk 驱动 human-review）/ 幂等
+  （`idempotency_key` claim/replay）/ dispatch **一条不少**，本端点只当消费者调用，不复制语义。
+
+#### 6.7.3 默认关矩阵 + 回滚
+
+- **默认关**：`capability_provider_enabled=false` → `wiring.register_routes` **不注册该路由** → 生产逐字
+  不变、零新增攻击面（比「无条件挂+隐性关」更小攻击面）。
+- **开启**：`CAPABILITY_PROVIDER_ENABLED=true`（须已配 Internal JWT 密钥）→ 挂 `POST /internal/capabilities/execute`。
+- **回滚**：置空/false → 路由消失，无残留副作用（无 DB / 无 migration / 无 schema）。
+- **红线**：日志只记 `capability_key`/`version`/`status`/`transport`/`trace_id`，**不打 token/arguments/body 明文**。
+
+#### 6.7.4 诚实边界 + 升级路径
+
+- **首版实际可同步执行的 SYNC_LOCAL 能力 = `data_query`**。SYNC_LOCAL 现有两能力中 `env_context` 是
+  **prompt 注入型**（`REGISTRY` 里 `executor_factory=None`，是快照注入而非远端调用语义），故经端点走
+  resolve→handler 不可用→rejected。**不为 `env_context` 造 handler**（YAGNI）。
+- **本模块无远端调用方**：youdoo 服务端已就位、契约级验证（回环 + 私钥 mint），真远端消费方（expert 工具
+  调用环）是下一模块。`# ponytail` 升级路径：接 access_control 细授权 / 远端 expert 多轮 tool_call 环。
+
+#### 6.7.5 落地位置与组合根装配
+
+- **端点归属 Context entrypoints**（非 platform）：`app/contexts/foundations/execution/capability_execution/
+  entrypoints/http.py`。能力执行 HTTP 入口属该 Context 的 entrypoints 层——`platform/**` 架构门禁禁止依赖
+  `app.contexts`/`app.agents`，故不落 platform。
+- **catalog 由组合根注入**（`ProviderOverride` on `app.state`）：Context entrypoints 不得跨 Context 依赖
+  `capability_catalog.infrastructure`（架构门禁 `test_context_dependencies_point_inward`：跨 Context 只允许
+  依赖对方 `contracts`）。故具体 `InMemoryCapabilityCatalog` 在 `bootstrap/wiring.py`（组合根，豁免）构造并
+  经 `app.state` 注入；handler 缺省走 `REGISTRY`，测试注入 stub。

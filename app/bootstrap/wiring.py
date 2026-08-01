@@ -25,6 +25,7 @@ from app.api.v1.users import router as users_router
 from app.contexts.business.proposal_management.entrypoints import (
     register_proposal_error_handlers,
 )
+from app.core.config import get_settings
 from app.platform.eventing.entrypoints import router as eventing_router
 
 
@@ -56,4 +57,24 @@ def register_routes(app: FastAPI) -> None:
         app.include_router(router, prefix=prefix)
     # 服务间事件入站端点：不挂 /api/v1（内部服务身份鉴权，非面向用户的公开 API）。
     app.include_router(eventing_router)
+    # 同步 Capability Provider 服务面（docs/23 §6.7）：默认关 → 不注册（生产逐字不变、零新攻击面）。
+    if get_settings().capability_provider_enabled:
+        from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
+            InMemoryCapabilityCatalog,
+        )
+        from app.contexts.foundations.execution.capability_execution.entrypoints import (
+            PROVIDER_OVERRIDE_KEY,
+            ProviderOverride,
+        )
+        from app.contexts.foundations.execution.capability_execution.entrypoints import (
+            router as capability_provider_router,
+        )
+
+        # 组合根注入具体 catalog（entrypoints 不跨 Context 依赖 infra）；handler 默认走 REGISTRY。
+        setattr(
+            app.state,
+            PROVIDER_OVERRIDE_KEY,
+            ProviderOverride(catalog=InMemoryCapabilityCatalog()),
+        )
+        app.include_router(capability_provider_router)  # 内部端点不挂 /api/v1
     register_proposal_error_handlers(app)

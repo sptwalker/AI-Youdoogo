@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     # off（默认）→ 不 mint、body 无令牌 → 远端回落 echo。开启须配 internal_jwt_private_key。
     expert_forward_gateway_token: bool = False
 
+    # 同步 Capability Provider 服务面（docs/23 §6.7）：on → 挂 POST /internal/capabilities/execute
+    # （服务身份 + capabilities:execute scope，只放行 SYNC_LOCAL 能力，复用全链执行）。默认关 →
+    # 路由不注册 → 生产逐字不变、零新入站攻击面。验签走 internal_jwt_public_key（调用方持私钥）。
+    capability_provider_enabled: bool = False
+
     # 事件传输门禁（Phase 3 硬前置 / docs/21 §Immediate Backlog C + docs/23）：出站 HTTP Relay
     # 把 outbox 事件投递给对端 Inbox。默认关 → 现网 worker 行为零改变；开关 on → 装配 HttpInboxRelay
     # 并 register_event_handler；缺 peer/私钥则启动即失败（fail-fast，见 _enforce_event_relay）。
