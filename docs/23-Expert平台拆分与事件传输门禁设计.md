@@ -72,9 +72,15 @@ Phase 3 的 Capability Provider 里，**长耗时 / 审批型工具**必须以�
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `event_relay_enabled` | `False` | 总开关；关=现网零改变 |
+| `event_relay_enabled` | `False` | 出站总开关；关=现网零改变 |
+| `event_inbox_enabled` | `False` | 入站 `/internal/events` 挂载开关；默认关=路由不注册（零新入站面，对称 §6.7 `capability_provider_enabled`） |
 | `event_inbox_peer_url` | `""` | 对端 inbox 根地址；回环填自身 |
 | `event_relay_event_types` | `()` | 允许中继的事件类型 allowlist |
+
+**入站门（`event_inbox_enabled`）**：`wiring.register_routes` 仅在 on 时 `include_router(eventing_router)`——
+关则 `/internal/events` 不存在（404），与出站 `event_relay_enabled` 正交（一个管收、一个管发）。**回环自验**
+（relay 指向自身）与**收对端事件**都需本端 on；否则 relay 投递打到未挂载端点 → 404 → 进 DLQ。门禁演练
+（§3.4）与 §6.3.5 唤醒测试因此显式挂载该 router（`app` 于 import 期按默认关构建，测试按需补挂）。
 
 ### 3.4 Go/No-Go 门禁 DoD（演练全绿才放行 Phase 3 远程事件消费者）
 

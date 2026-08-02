@@ -55,8 +55,10 @@ def register_routes(app: FastAPI) -> None:
         eval_router,
     ):
         app.include_router(router, prefix=prefix)
-    # 服务间事件入站端点：不挂 /api/v1（内部服务身份鉴权，非面向用户的公开 API）。
-    app.include_router(eventing_router)
+    # 服务间事件入站端点（docs/23 §3.3）：默认关 → 不注册（零新入站面）；on 才挂。不挂 /api/v1
+    # （内部服务身份鉴权，非公开 API）。回环自验/收对端事件需 event_inbox_enabled=on。
+    if get_settings().event_inbox_enabled:
+        app.include_router(eventing_router)
     # 同步 Capability Provider 服务面（docs/23 §6.7）：默认关 → 不注册（生产逐字不变、零新攻击面）。
     if get_settings().capability_provider_enabled:
         from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (

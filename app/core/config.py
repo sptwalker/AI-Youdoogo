@@ -106,7 +106,10 @@ class Settings(BaseSettings):
     # 事件传输门禁（Phase 3 硬前置 / docs/21 §Immediate Backlog C + docs/23）：出站 HTTP Relay
     # 把 outbox 事件投递给对端 Inbox。默认关 → 现网 worker 行为零改变；开关 on → 装配 HttpInboxRelay
     # 并 register_event_handler；缺 peer/私钥则启动即失败（fail-fast，见 _enforce_event_relay）。
-    event_relay_enabled: bool = False  # 总开关
+    event_relay_enabled: bool = False  # 出站总开关
+    # 入站门（docs/23 §3.3）：on 才挂 /internal/events，默认关=零新入站面。与出站正交；
+    # 回环自验/收对端事件需 on，否则 relay 投递打到未挂载端点 → 404 → DLQ。
+    event_inbox_enabled: bool = False
     event_inbox_peer_url: str = ""  # 对端 inbox 根地址（回环验证填自身，如 http://localhost:8000）
     event_inbox_peer_audience: str = ""  # 对端 inbox 期望的 aud（空=回退本服务 issuer 走回环自验；
     # 跨仓填对端 service_id 如 ai-expert-platform，使 transport 令牌可被对端验签）

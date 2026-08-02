@@ -60,6 +60,12 @@ async def wired() -> AsyncGenerator[tuple[_SessionMaker, ASGITransport], None]:
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    # 入站门默认关 → 显式补挂 /internal/events 一次（app.state 去重）。
+    if not getattr(app.state, "_eventing_mounted", False):
+        from app.platform.eventing.entrypoints import router as eventing_router
+
+        app.include_router(eventing_router)
+        app.state._eventing_mounted = True
     yield sessions, ASGITransport(app=app)
     app.dependency_overrides.clear()
     await engine.dispose()
@@ -220,3 +226,30 @@ async def _list_inbox(db: AsyncSession) -> tuple[list[eventing.InboxEvent], int]
         (await db.execute(select(func.count()).select_from(eventing.InboxEvent))).scalar_one()
     )
     return rows, total
+
+
+async def test_inbox_mount_gated_by_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """入站门：关 → /internal/events 不存在（404）；开 → 在（鉴权拒 401/403）。"""
+    from app.bootstrap.wiring import register_routes
+
+    settings = get_settings()
+    body = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": _EVENT_TYPE,
+        "aggregate_type": "expert",
+        "aggregate_id": str(uuid.uuid4()),
+        "payload": {},
+        "dedupe_key": "gate",
+    }
+
+    monkeypatch.setattr(settings, "event_inbox_enabled", False)
+    off = FastAPI()
+    register_routes(off)
+    async with AsyncClient(transport=ASGITransport(app=off), base_url="http://test") as c:
+        assert (await c.post("/internal/events", json=body)).status_code == 404
+
+    monkeypatch.setattr(settings, "event_inbox_enabled", True)
+    on = FastAPI()
+    register_routes(on)
+    async with AsyncClient(transport=ASGITransport(app=on), base_url="http://test") as c:
+        assert (await c.post("/internal/events", json=body)).status_code in (401, 403)

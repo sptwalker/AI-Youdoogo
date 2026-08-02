@@ -379,6 +379,12 @@ async def test_completed_via_http_inbox_projects(maker: _SessionMaker) -> None:
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    # 入站门默认关 → 显式补挂 /internal/events 一次（app.state 去重）。
+    if not getattr(app.state, "_eventing_mounted", False):
+        from app.platform.eventing.entrypoints import router as eventing_router
+
+        app.include_router(eventing_router)
+        app.state._eventing_mounted = True
     register_inbox_projector(EXPERT_COMPLETED_EVENT, apply_step_completed)
     try:
         async with engine_sessions() as db:
