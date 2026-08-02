@@ -6,8 +6,11 @@
 **客户端契约**，用 httpx.MockTransport 离线验证。
 
 Envelope（docs/21 §8.1）：Authorization Bearer（C1 Internal JWT）、X-Request-ID（C3 trace_id）、
-X-Tenant-Key、X-Caller-Service、X-Schema-Version。信任边界：非 2xx / body 结构不符 / SSE 非法
-→ 抛错，绝不静默返回空串。日志红线（§7.1）：不打印 Authorization 与 body 明文。
+X-Tenant-Key、X-Caller-Service、X-Schema-Version。信任边界：非 2xx / body 结构不符 / SSE 帧非法
+JSON → 抛错，绝不静默返回空串。**流式例外**：上游中途失败时网关按 §7.1 直接终止 SSE（无 [DONE]、
+无错误帧），本客户端止于已收内容、不判为错（ponytail：mid-stream 截断当前不检测；升级路径 = 加
+[DONE] 哨兵校验，仿 expert ``gateway_executor``）。
+日志红线（§7.1）：不打印 Authorization 与 body 明文。
 """
 
 from __future__ import annotations

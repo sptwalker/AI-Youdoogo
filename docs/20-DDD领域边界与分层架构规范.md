@@ -22,7 +22,7 @@
 | P3：Identity、Organization、Knowledge、Environment | 已完成 | 身份、组织/专家快照、访问决策、Wiki/Index/Retrieval/Semantic/Memory 与 ContextSnapshot 边界已落地 |
 | P3：Communication、Meeting、Analytics、Governance | 已完成 | 助理会话、群消息、协作请求、会议、运营分析及 Audit/Review/Quality/Budget/Configuration 边界已落地 |
 | P4：HTTP Entrypoints 与前端 Feature | 已完成 | Group Chat 与大页面拆分已完成；迁移 route 已使用 Context entrypoint，且不再直接依赖 ORM、旧 Service、具体 Agent/LLM 或 Context infrastructure |
-| 文档与全量验证 | 已完成 | Ruff、Mypy（656 个源文件）、701 个非交付 Pytest、前端 29 tests/lint/build、`035_channel_member` 单一 head、app/worker smoke 与 Graphify 代码架构复核均通过 |
+| 文档与全量验证 | 已完成 | Ruff、Mypy（702 个源文件）、932 个非交付 Pytest、前端 test/lint/build、`040_workflow_run_engine` 单一 head、app/worker smoke 与架构门禁测试（boundaries/runtime/governance）均通过 |
 
 迁移期 `app/api/core/models/schemas/services/agents/knowledge/llm/integrations` 中尚有历史入口。新实现必须进入
 对应 Context 或 Platform；仍有调用方的旧模块只能向新实现单向委托或 re-export，新模块禁止反向依赖

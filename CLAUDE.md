@@ -57,8 +57,9 @@ entrypoint，route 对 ORM、旧 Service 和具体 Agent/LLM 的依赖已清除�
 
 应用错误不携带 HTTP 元数据；HTTP status/code 只允许在 Bootstrap 或 Context entrypoint/HTTP adapter
 中映射。旧 `AppError` 调用和 `app.core.exceptions` 兼容层已全部移除。最终门禁已通过 Ruff、Mypy、
-683 个非交付 Pytest、前端 test/lint/build、单一 migration head、app/worker smoke；Graphify 代码图已刷新
-并验证无 import cycle、无 Context→legacy 反向依赖、无重复持久化 writer。
+全量非交付 Pytest、前端 test/lint/build、单一 migration head、app/worker smoke；架构门禁测试
+（`test_architecture_boundaries` / `test_runtime_boundaries` / `test_governance_boundaries`）持续
+守护无 import cycle、无 Context→legacy 反向依赖、无重复持久化 writer。
 
 ## 开发铁律
 
@@ -110,3 +111,28 @@ cd frontend ; npm run test ; npm run lint ; npm run build
 | 18-多人AI即时通讯群组设计 | 多人真人+多AI即时群聊：飞书组织同步/SSO登录/SSE广播+Redis pub/sub实时/群成员/未读/文件/入库（分期I1~I7） |
 | 19-飞书登录配置与运维 | 应用本地飞书 OAuth、身份绑定、上线前置与回滚 |
 | 20-DDD领域边界与分层架构规范 | Wiki/Expert/Tool/API/Workflow 等基础底座域、业务域、Platform、Context内分层及渐进迁移规则（已生效） |
+| 21-通用AI平台拆分架构与落地方案 | 四平台拆分总方案/先立契约后绞杀/Go-No-Go门禁/物理独立部署主动推迟（§11） |
+| 22-数据迁移对账与回滚设计 | 拆分期双写/对账指纹/一键回滚（local↔remote 灰度切换的数据安全底座） |
+| 23-Expert平台拆分与网关灰度Runbook | 专家拆分线协议/内部JWT事件门禁/远端工具调用环（§6.8）+ LLM local→remote 灰度切换与回滚操作手册 |
+| 24-Workflow-Runtime收口设计 | durable WorkflowRun/Step 七步逻辑收口/engine 创建期溯源戳/drain 闸 step6+7/物理独立仓推迟与升级路径 |
+
+## 平台分拆收尾状态（docs/21～24，逻辑边界已收口）
+
+按 docs/21「先立契约、后绞杀」把四个通用能力域从主仓抽出。主仓保留 `Remote*Adapter` 客户端 +
+`*_mode`（local/remote）+ canary 灰度百分比，默认 `local`、canary=0，可一键回退；写侧（knowledge_index）
+硬切不灰度（不双写）。
+
+| 平台 | 卫星仓（相对路径 / 包名） | 主仓客户端 | 收口状态 |
+|---|---|---|---|
+| LLM 网关 | `../ai-model-gateway`（`gateway`） | `model_gateway` RemoteAdapter | chat 契约对等 + 服务端落地；embedding/rerank 端点已建、消费侧刻意留白（分期，非缺口） |
+| 知识服务 | `../ai-knowledge-service`（`service`） | `knowledge_retrieval` / `knowledge_indexing` RemoteAdapter | search/index 契约对等 + 服务端落地 |
+| 专家平台 | `../ai-expert-platform`（`expert`） | `agent_execution` Remote 执行 + 工具调用环 | execution 契约对等 + 服务端落地；远端工具环（文本协议）默认关可回滚 |
+| 工作流运行时 | 主仓内 `execution/workflow_runtime` | durable WorkflowRun/Step + engine 溯源戳 | 逻辑边界收口；**物理独立仓按 docs/21 §11 主动推迟**（非未完成） |
+
+- **安全红线**：三卫星仅持验证公钥（`internal_jwt_public_key`，留空即启动失败）；私钥只在主仓
+  `mint_internal_token` 签发，ES256 锁定，强制校验 aud/iss/scope。**卫星服务端本身不签名。**
+- **物理独立部署 = 主动推迟，不是没做完**：首期只落地逻辑边界 + 契约对等 + 服务端；按 §11 Go/No-Go，
+  容量/门禁达标后再打独立 Deployment（升级路径见 docs/24）。三卫星当前为 walking-skeleton 级实现
+  （echo/最小执行器、易失状态、单卡无 failover），承接线上流量前须按各自 `# ponytail:` 升级路径补实。
+- **三卫星质量门**：各自 `ruff + mypy + pytest`（覆盖率地板 89/84/88，实际 91/86/90）+ 最小 GitLab CI
+  （`dev`/MR 触发，runner tag=AI，python:3.12-slim）；均已托管 GitLab、`dev` 为开发主分支。

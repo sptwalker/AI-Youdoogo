@@ -7,8 +7,10 @@
 
 线协议（docs/23）：``POST /v1/expert-executions`` → ``{execution_id}``（``stream:false`` 另回
 ``{content,model,usage}``）；``GET /v1/expert-executions/{id}/stream`` → SSE 帧与网关 chat-stream
-逐字对齐。Envelope 同 RemoteLlmAdapter。信任边界：非 2xx / 结构不符 / SSE 非法 → 抛错，绝不静默
-返回空串。日志红线（§5）：不打印 Authorization / system_prompt / user_message 明文。
+逐字对齐。Envelope 同 RemoteLlmAdapter。信任边界：非 2xx / 结构不符 / SSE 帧非法 JSON → 抛错，绝不
+静默返回空串。**流式例外**：上游中途失败时专家平台按 §6.2 直接终止 SSE（无 [DONE]、无错误帧），本
+客户端止于已收内容、不判为错（ponytail：mid-stream 截断当前不检测；升级路径 = 加 [DONE] 哨兵校验）。
+日志红线（§5）：不打印 Authorization / system_prompt / user_message 明文。
 """
 
 from __future__ import annotations
