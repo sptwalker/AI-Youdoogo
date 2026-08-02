@@ -230,3 +230,58 @@ async def test_idempotent_replay(client: AsyncClient) -> None:
     ).json()
     assert first["data"]["invocation_id"] == second["data"]["invocation_id"]
     assert second["data"]["replayed"] is True
+
+
+# --- _RegistryHandler.execute 真实 dispatch（端点测试注入 stub handler 绕过它，故直测 106-139）---
+
+
+class _StubExec:
+    """脚本化 executor：execute 回定 SkillResult，验 _RegistryHandler 的 legacy→Handler 映射。"""
+
+    async def execute(self, db: object, role: object, request: object, context: object) -> object:
+        from app.agents.contracts import SkillResult
+
+        return SkillResult(notes=["n"], datasets=[{"a": 1}], artifacts=[{"b": 2}])
+
+
+async def test_registry_handler_maps_skill_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """注册键 → executor 跑一次，legacy 结果映为 HandlerExecutionResult 紧凑 JSON。"""
+    from app.agents.skill_registry import REGISTRY, Skill
+    from app.contexts.foundations.execution.capability_execution.entrypoints.http import (
+        _RegistryHandler,
+    )
+
+    monkeypatch.setitem(
+        REGISTRY,
+        "stubcap",
+        Skill(_definition("stubcap", CapabilitySideEffect.NONE), executor_factory=_StubExec),
+    )
+    principal = CapabilityPrincipal(principal_id=None, expert_id=uuid.uuid4())
+    request = CapabilityExecutionRequest(
+        capability_key="stubcap", action_index=0, arguments_json="{}", principal=principal
+    )
+
+    result = await _RegistryHandler(object(), principal).execute(  # type: ignore[arg-type]
+        request, _definition("stubcap", CapabilitySideEffect.NONE)
+    )
+
+    assert result.notes == ("n",)
+    assert result.dataset_json == ('{"a":1}',)
+    assert result.artifact_json == ('{"b":2}',)
+
+
+async def test_registry_handler_unregistered_raises() -> None:
+    """未注册键 → LookupError（handler 不可用）；端点层据此走 500 兜底。"""
+    from app.contexts.foundations.execution.capability_execution.entrypoints.http import (
+        _RegistryHandler,
+    )
+
+    principal = CapabilityPrincipal(principal_id=None, expert_id=uuid.uuid4())
+    request = CapabilityExecutionRequest(
+        capability_key="ghostcap", action_index=0, arguments_json="{}", principal=principal
+    )
+
+    with pytest.raises(LookupError):
+        await _RegistryHandler(object(), principal).execute(  # type: ignore[arg-type]
+            request, _definition("ghostcap", CapabilitySideEffect.NONE)
+        )

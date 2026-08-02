@@ -241,6 +241,19 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _enforce_capability_callback(self) -> "Settings":
+        """配了工具回调地址必开 Provider：否则 expert 回调打到未挂载端点→404→工具环静默失效。
+
+        fail-fast 于启动，而非运行时首个工具回调才断（对称于 _enforce_event_relay 的出站前置）。
+        """
+        if self.capability_callback_url and not self.capability_provider_enabled:
+            raise ValueError(
+                "CAPABILITY_CALLBACK_URL 非空时必须开 CAPABILITY_PROVIDER_ENABLED"
+                "（回调打回本端 /internal/capabilities/execute，Provider 关则 404）"
+            )
+        return self
+
 
 @lru_cache
 def get_settings() -> Settings:

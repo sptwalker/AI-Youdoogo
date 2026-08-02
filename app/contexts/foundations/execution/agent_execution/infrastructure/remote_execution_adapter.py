@@ -19,18 +19,12 @@ from collections.abc import AsyncIterator, Callable
 import httpx
 
 from app.contexts.foundations.model_gateway.contracts.completion import (
-    LlmCompletionPort,
     LlmCompletionRequest,
     LlmCompletionResponse,
     LlmCompletionStreamChunk,
     TokenUsage,
 )
-from app.contexts.foundations.model_gateway.public import (
-    FallbackCompletionPort,
-    GatewayError,
-    _route_remote,
-    build_llm_completion_port,
-)
+from app.contexts.foundations.model_gateway.public import GatewayError
 from app.core.config import get_settings
 from app.core.internal_token import mint_internal_token
 from app.core.request_context import get_trace_id
@@ -201,22 +195,3 @@ def _parse_sse_line(line: str) -> LlmCompletionStreamChunk | None:
         model=str(model) if model is not None else None,
         usage=_usage(obj.get("usage")),
     )
-
-
-def build_expert_execution_llm_port() -> LlmCompletionPort:
-    """选择器：专家平台 mode=remote 且配了地址时，按 canary 抽样把「跑模型」这步改道远端。
-
-    默认 local（percent=0 或 mode=local）→ 等价 ``build_llm_completion_port()``，生产逐字不变。
-    命中远程时包一层 remote→local 兜底（本地端口为永久安全网）；回滚=mode 归 local/canary 归 0。
-    """
-    settings = get_settings()
-    if (
-        settings.expert_execution_mode == "remote"
-        and settings.expert_platform_url
-        and _route_remote(settings.expert_platform_canary_percent)
-    ):
-        return FallbackCompletionPort(
-            primary=RemoteExpertExecutionAdapter(base_url=settings.expert_platform_url),
-            fallback=build_llm_completion_port(),
-        )
-    return build_llm_completion_port()

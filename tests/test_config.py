@@ -35,6 +35,21 @@ def test_local_allows_default() -> None:
     assert s.jwt_secret == "local-only-jwt-secret-change-in-production"
 
 
+def test_capability_callback_requires_provider() -> None:
+    """配了工具回调地址但没开 Provider → 启动即失败（fail-fast，避免运行时回调 404 静默失效）。"""
+    with pytest.raises(ValueError, match="CAPABILITY_PROVIDER_ENABLED"):
+        Settings(capability_callback_url="http://ai-youdoogo:8000", _env_file=None)
+
+
+def test_capability_callback_ok_with_provider() -> None:
+    s = Settings(
+        capability_callback_url="http://ai-youdoogo:8000",
+        capability_provider_enabled=True,
+        _env_file=None,
+    )
+    assert s.capability_callback_url == "http://ai-youdoogo:8000"
+
+
 def test_production_oauth_requires_exact_standalone_redirect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

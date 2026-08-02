@@ -32,6 +32,9 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.remote_ap
 from app.contexts.foundations.execution.agent_execution.infrastructure.remote_execution_adapter import (  # noqa: E501
     ExpertPlatformError,
 )
+from app.contexts.foundations.execution.agent_execution.infrastructure.remote_prepare_adapter import (  # noqa: E501
+    _parse_sources,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
@@ -437,4 +440,31 @@ async def test_real_adapter_appends_tool_advert_only_when_token_present() -> Non
     assert body_off["capabilities_token"] is None
     assert body_off["capabilities_callback_url"] is None
     await client.aclose()
+
+
+# --- _parse_sources 归一化/错误分支（create 契约只走空 sources，54-65 循环体未覆盖） ---
+
+
+def test_parse_sources_none_is_empty() -> None:
+    assert _parse_sources(None) == ()
+
+
+def test_parse_sources_valid_list() -> None:
+    got = _parse_sources([{"document_id": "d1", "document_name": "财报", "chunk_index": 3}])
+    assert got == (SourceReference(file_id="d1", file_name="财报", chunk_index=3),)
+
+
+def test_parse_sources_rejects_non_list() -> None:
+    with pytest.raises(ExpertPlatformError):
+        _parse_sources("notalist")
+
+
+def test_parse_sources_rejects_non_dict_item() -> None:
+    with pytest.raises(ExpertPlatformError):
+        _parse_sources([123])
+
+
+def test_parse_sources_rejects_missing_field() -> None:
+    with pytest.raises(ExpertPlatformError):
+        _parse_sources([{"document_id": "d1"}])  # 缺 document_name/chunk_index
 

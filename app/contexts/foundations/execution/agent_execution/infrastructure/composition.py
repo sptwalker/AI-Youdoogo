@@ -33,9 +33,6 @@ from app.contexts.foundations.execution.agent_execution.infrastructure.langchain
 from app.contexts.foundations.execution.agent_execution.infrastructure.remote_application import (
     RemoteAgentExecutionApplication,
 )
-from app.contexts.foundations.execution.agent_execution.infrastructure.remote_execution_adapter import (  # noqa: E501
-    build_expert_execution_llm_port,
-)
 from app.contexts.foundations.execution.agent_execution.infrastructure.remote_prepare_adapter import (  # noqa: E501
     RemoteExpertPrepareAdapter,
 )
@@ -72,12 +69,12 @@ def select_agent_execution(
     clock: ExecutionClock,
     external_boundary: ExternalExecutionBoundaryPort | None = None,
 ) -> AgentExecutionPort:
-    """按 ``expert_execution_mode`` 二选一（Branch-by-Abstraction）。
+    """按 ``expert_execution_mode`` + 单次 canary 抽样二选一（Branch-by-Abstraction）。
 
-    默认 local → 本地 ``AgentExecutionApplication``（llm_port 走
-    ``build_expert_execution_llm_port``，mode=local 时即纯本地，生产逐字不变）。remote 命中 →
-    Module 2 ``RemoteAgentExecutionApplication``（远端拥有 prepare），兜底本地 app 的 llm_port 用
-    **纯本地** ``build_llm_completion_port``，避免兜底又走模块 1 远端。两接线点共用本选择器。
+    命中（唯一一次 ``_route_remote`` 抽样）→ Module 2 ``RemoteAgentExecutionApplication``
+    （远端拥有 prepare），本地兜底 llm_port 走 ``build_llm_completion_port``。未命中 / mode=local
+    → 本地 ``AgentExecutionApplication``，llm_port 同样走 ``build_llm_completion_port``（它只按
+    正交的 LLM 网关 canary 定 Local/Remote，不再二次抽 expert canary——否则远端曝光叠成约 2 倍）。
     """
     settings = get_settings()
     if (
@@ -108,7 +105,8 @@ def select_agent_execution(
         prompt_port=prompt_port,
         knowledge_port=knowledge_port,
         usage_authorization=usage_authorization,
-        llm_port=build_expert_execution_llm_port(),
+        # 未命中/本地：纯本地 llm_port，不再二次抽 expert canary（见函数 docstring）。
+        llm_port=build_llm_completion_port(),
         recorder=recorder,
         clock=clock,
         external_boundary=external_boundary,
