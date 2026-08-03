@@ -34,10 +34,10 @@ from app.contexts.foundations.execution.capability_execution.entrypoints import 
     ProviderOverride,
 )
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.internal_token import mint_internal_token
 from app.main import app
 from app.models import Base
+from app.platform.database import get_db
 
 
 def _definition(key: str, side_effect: CapabilitySideEffect) -> CapabilityDefinition:

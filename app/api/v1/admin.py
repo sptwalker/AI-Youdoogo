@@ -28,8 +28,8 @@ from app.contexts.foundations.governance.system_configuration.public import (
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
 from app.contexts.shared_kernel import RuleViolation
-from app.core.database import get_db
 from app.platform import outbox
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(tags=["admin"])

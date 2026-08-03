@@ -9,6 +9,9 @@ from app.contexts.foundations.governance.ai_quality.application.ports import (
     EvaluationExecutorPort,
     EvaluationJudgePort,
     EvaluationSubjectPort,
+    OutputCriticPort,
+    OutputReviewFailureReporterPort,
+    OutputRevisionPort,
     PromptSuggestionPort,
 )
 from app.contexts.foundations.governance.ai_quality.contracts.quality import (
@@ -18,6 +21,8 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
     EvaluationResult,
     FeedbackResult,
     LowScoreSample,
+    OutputReviewRequest,
+    OutputReviewResult,
     PromptImprovementSuggestion,
     RecordFeedbackCommand,
     ShadowComparisonResult,
@@ -220,3 +225,49 @@ class SuggestPromptImprovement:
             suggested_prompt=suggested,
             based_on_samples=len(samples),
         )
+
+
+class ReviewOutput:
+    """Critique critical AI output and revise low-scoring drafts without blocking work."""
+
+    def __init__(
+        self,
+        critic: OutputCriticPort,
+        revisions: OutputRevisionPort,
+        failures: OutputReviewFailureReporterPort,
+    ) -> None:
+        self._critic = critic
+        self._revisions = revisions
+        self._failures = failures
+
+    async def execute(self, request: OutputReviewRequest) -> OutputReviewResult:
+        if not request.output.strip():
+            return OutputReviewResult(request.output, 0, "无", False)
+        try:
+            score, issues = await self._critic.critique(
+                rubric=request.rubric,
+                task_context=request.task_context,
+                output=request.output,
+                user_id=request.user_id,
+            )
+            if score >= request.threshold or issues.strip() in {"", "无"}:
+                return OutputReviewResult(request.output, score, issues or "无", False)
+            revised = await self._revisions.revise(
+                expert_id=request.expert_id,
+                task_context=request.task_context,
+                output=request.output,
+                issues=issues,
+                user_id=request.user_id,
+            )
+            if not revised.strip():
+                return OutputReviewResult(request.output, score, issues, False)
+            return OutputReviewResult(
+                revised,
+                score,
+                issues,
+                True,
+                original_output=request.output,
+            )
+        except Exception:  # noqa: BLE001 - review must degrade to the original draft
+            self._failures.record_failure(request.expert_id)
+            return OutputReviewResult(request.output, 0, "无", False)

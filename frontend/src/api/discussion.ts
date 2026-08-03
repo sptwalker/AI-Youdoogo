@@ -3,22 +3,22 @@ import { message } from 'antd'
 import {
   ApiError,
   clearSessionAndRedirectToLogin,
+  getToken,
   request,
   sseRequest,
   sseSubscribe,
-  TOKEN_KEY,
   type SseConnectionState,
   type SseHandler,
   type SseRequestOptions,
   type SseSubscription,
-} from './client'
+} from './http'
 
 export interface DiscussionRequestOptions {
   signal?: AbortSignal
   silent?: boolean
 }
 
-export interface Channel {
+interface Channel {
   id: string
   name: string
   department_id: string | null
@@ -103,14 +103,6 @@ export function disbandChannel(channelId: string): Promise<null> {
   return request({ method: 'DELETE', url: `/channels/${channelId}` })
 }
 
-export function listChannels(departmentId?: string): Promise<Channel[]> {
-  return request({
-    method: 'GET',
-    url: '/channels',
-    params: departmentId ? { department_id: departmentId } : undefined,
-  })
-}
-
 export function createChannel(payload: {
   name: string
   department_id?: string
@@ -158,7 +150,7 @@ export async function fetchAttachmentBlob(
   att: Attachment,
   options: { signal?: AbortSignal; silent?: boolean } = {},
 ): Promise<Blob> {
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getToken()
   const resp = await fetch(attachmentDownloadUrl(att), {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     signal: options.signal,

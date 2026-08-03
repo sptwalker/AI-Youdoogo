@@ -13,8 +13,8 @@ from openpyxl import load_workbook
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import skills
 from app.agents.contracts import ExecutionContext, SkillRequest
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.foundations.execution.deliverable_management import public
 from app.contexts.foundations.execution.deliverable_management.application.formatting import (
     build_bytes,
@@ -122,12 +122,12 @@ async def test_failed_upload_can_retry_same_idempotent_path_without_partial_reco
     )
     role = _role()
 
-    failed = await skills.execute_all(db, role, _DELIVERY, execution_context=context)
+    failed = await ToolDispatcher().dispatch_text(db, role, _DELIVERY, context)
 
     assert failed.artifacts == []
     assert (await db.execute(select(func.count()).select_from(Deliverable))).scalar_one() == 0
 
-    succeeded = await skills.execute_all(db, role, _DELIVERY, execution_context=context)
+    succeeded = await ToolDispatcher().dispatch_text(db, role, _DELIVERY, context)
 
     assert len(attempted_paths) == 2
     assert attempted_paths[0] == attempted_paths[1]

@@ -9,12 +9,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api import deps
-from app.core.database import get_db
+from app.contexts.business.group_messaging.entrypoints import operations as discussion_service
 from app.main import app
 from app.models import Base
 from app.models.discussion import DiscussionMessage
 from app.models.system import SysUser
-from app.services import discussion_service
+from app.platform.database import get_db
 
 PermissionContext = tuple[AsyncClient, dict[str, uuid.UUID], dict[str, uuid.UUID]]
 

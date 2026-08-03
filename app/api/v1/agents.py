@@ -44,7 +44,7 @@ from app.contexts.foundations.workforce.expert_management.entrypoints import (
 from app.contexts.foundations.workforce.expert_management.entrypoints.legacy import (
     legacy_view,
 )
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.agent import (
     AgentRoleCreate,

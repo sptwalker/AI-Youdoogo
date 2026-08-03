@@ -18,19 +18,24 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from app.contexts.foundations.environment_projection.infrastructure.archivist import (
         ensure_archivist,
     )
-    from app.core import runtime_config
-    from app.services import (
-        ai_provider_service,
-        config_service,
+    from app.contexts.foundations.governance.system_configuration import (
+        public as system_configuration,
     )
+    from app.contexts.foundations.governance.system_configuration.ai_provider_management import (
+        public as ai_provider_management,
+    )
+    from app.contexts.foundations.identity.browser_login import feishu_login_service
+    from app.core import runtime_config
+    from app.integrations.feishu.client import feishu_client
 
     try:
         async with async_session_factory() as db:
-            runtime_config.load(await config_service.all_values(db))
-            seeded = await ai_provider_service.seed_from_env(db)
+            configurations = await system_configuration.list_configurations(db)
+            runtime_config.load({item.key: item.value for item in configurations})
+            seeded = await ai_provider_management.seed_providers_from_environment(db)
             if seeded:
                 logger.info("首次部署：从 .env 种子 %d 张 AI 卡片", seeded)
-            await ai_provider_service.sync_to_factory(db)
+            await ai_provider_management.synchronize_provider_runtime(db)
             await ensure_archivist(db)
         logger.info("配置覆盖层 + AI 卡片已载入")
     except Exception:  # noqa: BLE001 - startup keeps the environment fallback available
@@ -48,6 +53,5 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await workflow_worker.stop_background_worker()
-        from app.services.feishu_login import feishu_login_service
-
         await feishu_login_service.close()
+        await feishu_client.close()

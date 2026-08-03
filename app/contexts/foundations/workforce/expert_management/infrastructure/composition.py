@@ -9,20 +9,21 @@ from app.contexts.foundations.workforce.expert_management.application.release_pu
 from app.contexts.foundations.workforce.expert_management.application.use_cases import (
     ExpertManagementApplication,
 )
-from app.contexts.foundations.workforce.expert_management.infrastructure.adapters import (
-    SystemClock,
-    UUIDIdentifier,
+from app.contexts.foundations.workforce.expert_management.infrastructure.local_adapter import (
+    LocalExpertManagementAdapter,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.release_publisher import (
     HttpReleasePublisher,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertRosterQuery,
+    SQLAlchemyExpertSnapshotQuery,
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_uow import (
     SQLAlchemyExpertUnitOfWork,
 )
 from app.core.config import get_settings
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def _release_publisher() -> ReleasePublisherPort:
@@ -43,4 +44,20 @@ def build_expert_management_application(session: AsyncSession) -> ExpertManageme
         identifiers=UUIDIdentifier(),
         clock=SystemClock(),
         publisher=_release_publisher(),
+    )
+
+
+def build_local_expert_management(session: AsyncSession) -> LocalExpertManagementAdapter:
+    """Bind the stable Expert object API to the current request-scoped persistence."""
+    roster = SQLAlchemyExpertRosterQuery(session)
+    application = ExpertManagementApplication(
+        uow_factory=lambda: SQLAlchemyExpertUnitOfWork(session),
+        roster=roster,
+        identifiers=UUIDIdentifier(),
+        clock=SystemClock(),
+    )
+    return LocalExpertManagementAdapter(
+        application=application,
+        roster=roster,
+        snapshots=SQLAlchemyExpertSnapshotQuery(session),
     )

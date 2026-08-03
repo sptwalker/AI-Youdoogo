@@ -29,7 +29,7 @@ from app.contexts.foundations.knowledge.wiki_management.contracts import (
     DocumentSnapshot,
 )
 from app.contexts.shared_kernel import ApplicationError, ResourceNotFound, RuleViolation
-from app.integrations.feishu.client import FeishuClient
+from app.integrations.feishu.client import feishu_client
 from app.models.knowledge import KnowledgeBase, KnowledgeFile, KnowledgeVector
 from app.platform.object_storage import gateway as storage_gateway
 from app.platform.outbox import repository as outbox_repository
@@ -337,7 +337,7 @@ async def ingest_feishu_doc(
     category: str | None = None,
 ) -> KnowledgeFile:
     """拉取飞书云文档纯文本入库（复用 FeishuClient.get_document_raw_content）。"""
-    text = await FeishuClient().get_document_raw_content(document_id)
+    text = await feishu_client.get_document_raw_content(document_id)
     return await ingest_text(
         db,
         title=f"飞书文档 {document_id}",

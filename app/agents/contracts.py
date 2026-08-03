@@ -16,7 +16,7 @@ from app.models.agent import AgentRole, AgentTaskRecord
 
 
 class AgentRunner(Protocol):
-    """技能调用其他 Agent 时依赖的端口，避免反向 import agents.base。"""
+    """技能调用其他 Agent 时依赖的端口，避免耦合具体执行组合。"""
 
     async def __call__(
         self,
@@ -105,6 +105,12 @@ class SkillResult(BaseModel):
         self.datasets.extend(other.datasets)
         self.artifacts.extend(other.artifacts)
         self.tool_execution_ids.extend(other.tool_execution_ids)
+
+    def fold_notes(self, text: str) -> str:
+        """Append runtime notes to a user-visible response when present."""
+        if not self.notes:
+            return text
+        return text + "\n\n" + "\n".join(f"> 系统：{note}" for note in self.notes)
 
 
 class SkillExecutor(Protocol):

@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # 允许以脚本方式直跑
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows GBK 控制台兼容
 
+from app.contexts.foundations.knowledge.embedding_gateway import embed_query  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
-from app.knowledge.embedding import embed_query  # noqa: E402
 from app.models.knowledge import EMBED_DIM  # noqa: E402
 
 

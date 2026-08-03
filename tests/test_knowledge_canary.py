@@ -8,7 +8,7 @@ import pytest
 
 from app.contexts.foundations.knowledge.knowledge_retrieval import public
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.local_adapter import (
-    LocalKnowledgeSearchAdapter,
+    LocalKnowledgeRetrievalAdapter,
 )
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.remote_adapter import (
     RemoteKnowledgeSearchAdapter,
@@ -27,7 +27,7 @@ def _settings(**over: object) -> Settings:
 
 
 class _StubSession:
-    """LocalKnowledgeSearchAdapter 仅在构造时存 session、search 时才用；选择器测试不触 search。"""
+    """LocalKnowledgeRetrievalAdapter 仅在构造时存 session、search 时才用。"""
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +47,7 @@ def test_route_remote_boundaries() -> None:
 def test_local_when_mode_local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(public, "get_settings", lambda: _settings(knowledge_search_mode="local"))
     port = public.build_knowledge_search_port(_StubSession())  # type: ignore[arg-type]
-    assert isinstance(port, LocalKnowledgeSearchAdapter)
+    assert isinstance(port, LocalKnowledgeRetrievalAdapter)
 
 
 def test_local_when_canary_zero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,7 +55,7 @@ def test_local_when_canary_zero(monkeypatch: pytest.MonkeyPatch) -> None:
         knowledge_search_mode="remote", knowledge_gateway_url="http://kb:8080",
         knowledge_gateway_canary_percent=0))
     port = public.build_knowledge_search_port(_StubSession())  # type: ignore[arg-type]
-    assert isinstance(port, LocalKnowledgeSearchAdapter)
+    assert isinstance(port, LocalKnowledgeRetrievalAdapter)
 
 
 def test_remote_when_canary_full(monkeypatch: pytest.MonkeyPatch) -> None:

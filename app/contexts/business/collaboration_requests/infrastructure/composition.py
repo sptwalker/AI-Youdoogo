@@ -6,14 +6,13 @@ from app.contexts.business.collaboration_requests.application.use_cases import (
     CollaborationRequestsApplication,
 )
 from app.contexts.business.collaboration_requests.infrastructure.adapters import (
-    LegacyAuditAdapter,
     OrganizationReviewScopeAdapter,
-    SystemClock,
-    UUIDIdentifier,
+    PublishedAuditAdapter,
 )
 from app.contexts.business.collaboration_requests.infrastructure.sqlalchemy_uow import (
     SQLAlchemyCollaborationUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_collaboration_requests_application(
@@ -22,7 +21,7 @@ def build_collaboration_requests_application(
     return CollaborationRequestsApplication(
         uow_factory=lambda: SQLAlchemyCollaborationUnitOfWork(session),
         review_scope=OrganizationReviewScopeAdapter(session),
-        audit_port=LegacyAuditAdapter(session),
+        audit_port=PublishedAuditAdapter(session),
         clock=SystemClock(),
         identifiers=UUIDIdentifier(),
     )

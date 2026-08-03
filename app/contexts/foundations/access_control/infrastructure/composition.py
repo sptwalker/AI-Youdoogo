@@ -8,12 +8,11 @@ from app.contexts.foundations.access_control.application.use_cases import (
 from app.contexts.foundations.access_control.infrastructure.adapters import (
     LegacyDepartmentHierarchyAdapter,
     LegacyKnowledgeVisibilityAdapter,
-    SystemClock,
-    UUIDIdentifier,
 )
 from app.contexts.foundations.access_control.infrastructure.sqlalchemy_uow import (
     SQLAlchemyAccessControlUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_access_control_application(session: AsyncSession) -> AccessControlApplication:

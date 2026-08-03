@@ -11,15 +11,17 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 TZ = timezone(timedelta(hours=8))
-PUBLIC_URL = "https://ai.youdoogo.com/"
-CHAT_ID = "oc_52174c913e452fa712e77439a07300ac"
+FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+FEISHU_MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id"
+TOKEN_REQUEST_TIMEOUT_SECONDS = 10
+MESSAGE_REQUEST_TIMEOUT_SECONDS = 15
 
 
 def env(name: str) -> str:
     return os.environ.get(name, "")
 
 
-def card(mode: str) -> dict[str, object]:
+def card(mode: str, *, public_url: str) -> dict[str, object]:
     success = mode == "success"
     icon = "✅" if success else "❌"
     result = "成功" if success else "失败"
@@ -31,7 +33,7 @@ def card(mode: str) -> dict[str, object]:
             f"**提交**：{env('CI_COMMIT_SHORT_SHA')} {env('CI_COMMIT_TITLE')}",
             f"**触发者**：{env('GITLAB_USER_NAME')}",
             f"**完成时间**：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')}",
-            f"**地址**：[YOUDOOGO]({PUBLIC_URL})",
+            f"**地址**：[YOUDOOGO]({public_url})",
         ]
     )
     return {
@@ -52,18 +54,23 @@ def main() -> int:
 
     app_id = env("FEISHU_APP_ID")
     app_secret = env("FEISHU_APP_SECRET")
-    if not app_id or not app_secret:
-        print("[notify] Feishu credentials unavailable; notification skipped", file=sys.stderr)
+    chat_id = env("FEISHU_OPS_CHAT_ID")
+    public_host = env("PUBLIC_HOST")
+    if not app_id or not app_secret or not chat_id or not public_host:
+        print("[notify] Feishu notification configuration unavailable; skipped", file=sys.stderr)
         return 0
+    public_url = f"https://{public_host}/"
 
     token_request = urllib.request.Request(
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        FEISHU_TOKEN_URL,
         data=json.dumps({"app_id": app_id, "app_secret": app_secret}).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(token_request, timeout=10) as response:
+        with urllib.request.urlopen(
+            token_request, timeout=TOKEN_REQUEST_TIMEOUT_SECONDS
+        ) as response:
             token_response = json.load(response)
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         print(f"[notify] token request failed: {exc}", file=sys.stderr)
@@ -75,18 +82,20 @@ def main() -> int:
         return 1
 
     payload = {
-        "receive_id": CHAT_ID,
+        "receive_id": chat_id,
         "msg_type": "interactive",
-        "content": json.dumps(card(mode), ensure_ascii=False),
+        "content": json.dumps(card(mode, public_url=public_url), ensure_ascii=False),
     }
     message_request = urllib.request.Request(
-        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        FEISHU_MESSAGE_URL,
         data=json.dumps(payload, ensure_ascii=False).encode(),
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(message_request, timeout=15) as response:
+        with urllib.request.urlopen(
+            message_request, timeout=MESSAGE_REQUEST_TIMEOUT_SECONDS
+        ) as response:
             message_response = json.load(response)
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         print(f"[notify] send failed: {exc}", file=sys.stderr)

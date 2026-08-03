@@ -48,7 +48,7 @@ from app.contexts.foundations.knowledge.wiki_management.public import (
     get_knowledge_base,
 )
 from app.contexts.shared_kernel import RuleViolation
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.knowledge import (
     AskRequest,

@@ -1,5 +1,5 @@
 /** 系统管理 API（对应后端 app/api/v1/admin.py）：审计日志 + 系统配置。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface AuditLog {
   id: string

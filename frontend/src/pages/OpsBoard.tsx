@@ -3,6 +3,8 @@ import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-
 import { Alert, Button, Card, DatePicker, Space, Tag, Tooltip, Typography, Upload, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import type { UserInfo } from '../api/auth'
 import Markdown from '../components/Markdown'
 import {
   anomalyCheck,
@@ -12,6 +14,7 @@ import {
 } from '../api/agents'
 import { listOpsDaily, syncThinkingData, uploadOpsDaily, type OpsMetric } from '../api/opsData'
 import { valueForDate, type DatedResult } from '../features/ops-board/model'
+import { hasManagerRole } from './managementPermissions'
 
 const columns: ProColumns<OpsMetric>[] = [
   { title: '产品', dataIndex: 'product' },
@@ -23,6 +26,8 @@ const columns: ProColumns<OpsMetric>[] = [
 const SEV_COLOR: Record<string, string> = { critical: 'error', warning: 'warning' }
 
 export default function OpsBoard() {
+  const { me } = useOutletContext<{ me: UserInfo | null }>()
+  const canManage = hasManagerRole(me?.role_code)
   const [date, setDate] = useState<Dayjs>(dayjs())
   const [analysisAction, setAnalysisAction] = useState<'report' | 'anomaly' | null>(null)
   const [syncing, setSyncing] = useState(false)
@@ -139,27 +144,31 @@ export default function OpsBoard() {
             allowClear={false}
             disabledDate={(d) => d.isAfter(dayjs(), 'day')}
           />
-          <Upload
-            accept=".xlsx"
-            showUploadList={false}
-            beforeUpload={(file) => {
-              void uploadDailyData(file).catch(() => {})
-              return false
-            }}
-          >
-            <Tooltip title="xlsx 列：日期、产品、日活（必填）；新增、次留%（可选）。首行为表头。">
-              <Button loading={uploading}>上传日数据 Excel</Button>
-            </Tooltip>
-          </Upload>
-          <Button onClick={runSync} loading={syncing}>
-            从 ThinkingData 拉取
-          </Button>
-          <Button type="primary" onClick={runReport} loading={analysisAction === 'report'} disabled={analysisAction === 'anomaly'}>
-            生成运营日报
-          </Button>
-          <Button onClick={runAnomaly} loading={analysisAction === 'anomaly'} disabled={analysisAction === 'report'}>
-            异常检测
-          </Button>
+          {canManage && (
+            <>
+              <Upload
+                accept=".xlsx"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void uploadDailyData(file).catch(() => {})
+                  return false
+                }}
+              >
+                <Tooltip title="xlsx 列：日期、产品、日活（必填）；新增、次留%（可选）。首行为表头。">
+                  <Button loading={uploading}>上传日数据 Excel</Button>
+                </Tooltip>
+              </Upload>
+              <Button onClick={runSync} loading={syncing}>
+                从 ThinkingData 拉取
+              </Button>
+              <Button type="primary" onClick={runReport} loading={analysisAction === 'report'} disabled={analysisAction === 'anomaly'}>
+                生成运营日报
+              </Button>
+              <Button onClick={runAnomaly} loading={analysisAction === 'anomaly'} disabled={analysisAction === 'report'}>
+                异常检测
+              </Button>
+            </>
+          )}
         </Space>
       </Card>
 

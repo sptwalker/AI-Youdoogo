@@ -5,7 +5,7 @@ import { Button, Dropdown, Result, Spin } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useMatches, useNavigate } from 'react-router-dom'
 import { fetchMe, ROLE_LABELS, type UserInfo } from '../api/auth'
-import { TOKEN_KEY } from '../api/client'
+import { clearToken } from '../api/http'
 import { routeAllowsRole } from '../auth/authorization'
 
 const BIZ_ROUTES = [
@@ -67,7 +67,7 @@ export default function AppLayout() {
   }, [loadMe])
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY)
+    clearToken()
     navigate('/login', { replace: true })
   }
 

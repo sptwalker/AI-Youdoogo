@@ -13,12 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api import deps
 from app.contexts.business.work_desktop.infrastructure import adapters
-from app.core.database import get_db
 from app.main import app
 from app.models import Base
 from app.models.deliverable import Deliverable
 from app.models.system import SysUser
 from app.models.task import TaskCard
+from app.platform.database import get_db
 
 
 @pytest.fixture

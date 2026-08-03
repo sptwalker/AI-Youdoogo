@@ -12,7 +12,7 @@ from app.contexts.foundations.execution.workflow_runtime.application.ports impor
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     sqlalchemy_projection,
     sqlalchemy_repository,
-    sqlalchemy_state,
+    step_leases,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.step_leases import (
     claim_step_result,
@@ -61,7 +61,7 @@ async def enqueue_ready_steps(
     if run.status in (RUN_SUCCEEDED, RUN_FAILED, RUN_CANCELLED, RUN_WAITING_HUMAN):
         return 0
     steps = await sqlalchemy_repository.list_steps(session, workflow_id)
-    ready = sqlalchemy_state.ready_steps(steps)
+    ready = step_leases.ready_steps(steps)
     settings = get_settings()
     for step in ready:
         # 远端异步分叉（docs/23 §6.3）：skill ∈ allowlist 且有属主 expert →

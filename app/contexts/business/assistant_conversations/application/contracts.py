@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+CONVERSATION_ARCHIVE_NAMESPACE = uuid.UUID("4179ee5b-aa21-45ed-a4a7-81790ca85ccd")
+
 
 @dataclass(frozen=True, slots=True)
 class Principal:
@@ -139,8 +141,20 @@ class AttachmentDownloadResult:
 class ArchiveConversationRequest:
     principal_id: uuid.UUID
     knowledge_base_id: uuid.UUID
+    document_id: uuid.UUID
     title_template: str
     transcript: str
+
+
+def conversation_archive_document_id(
+    principal_id: uuid.UUID,
+    message_ids: tuple[uuid.UUID, ...],
+) -> uuid.UUID:
+    """Identify one exact archive batch so a failed delete can be replayed safely."""
+    if not message_ids:
+        raise ValueError("conversation archive requires at least one message")
+    batch_key = ",".join(str(message_id) for message_id in sorted(message_ids, key=str))
+    return uuid.uuid5(CONVERSATION_ARCHIVE_NAMESPACE, f"{principal_id}:{batch_key}")
 
 
 @dataclass(frozen=True, slots=True)

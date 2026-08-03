@@ -34,7 +34,7 @@ from app.contexts.foundations.governance.system_configuration.ai_provider_manage
     update_provider as update_provider_operation,
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(prefix="/ai-providers", tags=["ai-provider"])

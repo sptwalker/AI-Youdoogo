@@ -10,7 +10,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.contexts.foundations.governance.usage_budget import public as usage
+from app.contexts.foundations.governance.usage_budget.infrastructure import (
+    current_adapters as usage,
+)
 from app.core import shared_state
 from app.models import Base
 from app.models.llm_log import LlmCallLog

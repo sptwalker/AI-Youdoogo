@@ -27,11 +27,11 @@ from app.bootstrap.workflow_events import (
     apply_step_completed,
     enqueue_ready_steps,
 )
+from app.contexts.business.task_management.domain.state_machine import ACCEPTED
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.remote_completion import (
     apply_completed,
 )
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.internal_token import mint_internal_token
 from app.main import app
 from app.models import Base
@@ -44,6 +44,7 @@ from app.models.workflow import (
     OutboxEvent,
     WorkflowStep,
 )
+from app.platform.database import get_db
 from app.platform.eventing.inbox import register_inbox_projector, unregister_inbox_projector
 from app.platform.eventing.relay import EVENTS_SCOPE, StepReadyRelay
 from app.platform.eventing.remote_step import (
@@ -51,9 +52,9 @@ from app.platform.eventing.remote_step import (
     REMOTE_SENTINEL,
     STEP_READY_EVENT,
 )
-from app.services import outbox_service, task_service, workflow_service
-from app.services.orchestration_service import PlanStep, is_red_line
-from app.services.task_flow import ACCEPTED
+from app.platform.outbox.repository import utcnow
+from tests import workflow_testkit as workflow_service
+from tests.workflow_testkit import PlanStep, is_red_line
 
 _REMOTE_SKILL = "data_query"
 _SessionMaker = async_sessionmaker[AsyncSession]
@@ -276,7 +277,7 @@ async def test_expired_lease_degrades_to_local(maker: _SessionMaker) -> None:
         await db.commit()
         step = await _first_step(db, run_id)
         # 手动过期停车租约（模拟 expert 永不回发）
-        step.lease_until = outbox_service.utcnow() - timedelta(seconds=1)
+        step.lease_until = utcnow() - timedelta(seconds=1)
         await db.commit()
         # 关远端 allowlist 后重入 → expired 停车被 ready_steps 视为可重选 → 本地 execute 降级
         get_settings().event_remote_step_skills = ()
@@ -414,7 +415,7 @@ async def test_completed_via_http_inbox_projects(maker: _SessionMaker) -> None:
         async with engine_sessions() as db:
             woken = await _first_step(db, run_id)
             assert woken.status == STEP_SUCCEEDED
-            parent = await task_service.get_task(db, woken.task_card_id)
+            parent = await workflow_service.get_task(db, woken.task_card_id)
             assert parent.status in (ACCEPTED, parent.status)  # 投影已刷新
     finally:
         unregister_inbox_projector(EXPERT_COMPLETED_EVENT)

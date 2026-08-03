@@ -7,16 +7,12 @@ from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
-from app.contexts.foundations.knowledge import storage_gateway as knowledge_storage
-from app.core import database as legacy_database
-from app.knowledge import storage as legacy_storage
-from app.models import base as legacy_model_base
+from app.models import Base
 from app.models import workflow as legacy_workflow_models
 from app.platform import database as platform_database
-from app.platform.object_storage import gateway as object_storage
+from app.platform.database import model as platform_model
 from app.platform.outbox import model as outbox_model
 from app.platform.outbox import repository as outbox_repository
-from app.services import outbox_service
 from scripts.import_graph import (
     ImportGraph,
     build_import_graph,
@@ -308,7 +304,7 @@ def test_application_import_graph_is_acyclic() -> None:
 
 def test_runtime_root_packages_are_side_effect_free() -> None:
     graph = _app_graph()
-    for package in ("app.agents", "app.bootstrap", "app.knowledge"):
+    for package in ("app.agents", "app.bootstrap"):
         assert graph.edges[package] == frozenset()
         tree = ast.parse(graph.modules[package].path.read_text(encoding="utf-8"))
         assert len(tree.body) == 1
@@ -317,8 +313,8 @@ def test_runtime_root_packages_are_side_effect_free() -> None:
         assert isinstance(tree.body[0].value.value, str)
 
 
-def test_runtime_callers_use_agent_and_knowledge_leaf_modules() -> None:
-    package_roots = {"app.agents", "app.knowledge"}
+def test_runtime_callers_use_agent_leaf_modules() -> None:
+    package_roots = {"app.agents"}
     violations = [
         f"{module} -> {dependency}"
         for module, dependencies in sorted(_app_graph().edges.items())
@@ -389,20 +385,9 @@ def test_legacy_to_canonical_facade_edges_are_one_way() -> None:
 
 
 def test_runtime_skips_migrated_capability_projection_and_realtime_facades() -> None:
-    """Production modules use canonical boundaries; old paths remain external shims."""
-    migrated_facades = {
-        "app.services.collab_protocol",
-        "app.services.deliver_service",
-        "app.services.environment_service",
-        "app.services.query_skill",
-        "app.services.realtime_service",
-    }
-    violations = [
-        f"{module} -> {dependency}"
-        for module, dependencies in sorted(_app_graph().edges.items())
-        for dependency in sorted(dependencies & migrated_facades)
-    ]
-    assert violations == []
+    """Retired horizontal facade packages must not be recreated."""
+    assert list((APP / "services").glob("*.py")) == []
+    assert list((APP / "knowledge").glob("*.py")) == []
 
 
 def test_platform_does_not_depend_on_business_code() -> None:
@@ -420,13 +405,17 @@ def test_platform_does_not_depend_on_business_code() -> None:
     assert _violations(APP / "platform", forbidden) == []
 
 
+def test_contexts_do_not_import_legacy_service_facades() -> None:
+    """Bounded contexts collaborate through published APIs, never legacy service shims."""
+    assert _violations(APP / "contexts", ("app.services",)) == []
+
+
 def test_context_application_does_not_import_outer_layers() -> None:
     """Application policy may use pure libraries but not delivery or persistence details."""
     application_roots = [path for path in (APP / "contexts").rglob("application") if path.is_dir()]
     forbidden = (
         "app.api",
         "app.bootstrap",
-        "app.core.database",
         "app.models",
         "app.services",
         "app.agents",
@@ -550,25 +539,22 @@ def test_bootstrap_owns_composition_and_main_is_only_a_facade() -> None:
     assert (APP / "bootstrap" / "wiring.py").exists()
 
 
-def test_legacy_facades_preserve_public_object_identity() -> None:
-    """Incremental migration keeps old imports working without duplicate implementations."""
-    assert legacy_database.engine is platform_database.engine
-    assert legacy_database.async_session_factory is platform_database.async_session_factory
-    assert legacy_model_base.Base is platform_database.Base
+def test_model_and_database_exports_preserve_public_object_identity() -> None:
+    """The formal model and database exports share their Platform-owned objects."""
+    assert Base is platform_database.Base
+    assert Base is platform_model.Base
     assert legacy_workflow_models.OutboxEvent is outbox_model.OutboxEvent
-    assert outbox_service.enqueue is outbox_repository.enqueue
-    assert outbox_service.claim_next is outbox_repository.claim_next
-    assert legacy_storage.put_object is object_storage.put_object
-    assert legacy_storage.get_object_bytes is object_storage.get_object_bytes
-    assert knowledge_storage.put_object is object_storage.put_object
-    assert knowledge_storage.get_object_bytes is object_storage.get_object_bytes
+    assert outbox_model.OutboxEvent is outbox_repository.OutboxEvent
 
 
-def test_proposal_service_uses_context_errors_instead_of_shared_generic_errors() -> None:
-    """The migrated proposal slice must keep its domain-specific failure language."""
-    imports = _imports(APP / "services" / "proposal_service.py")
-    assert "app.contexts.shared_kernel" not in imports
-    assert "app.contexts.business.proposal_management" in imports
+def test_runtime_has_no_retired_horizontal_facade_imports() -> None:
+    forbidden = ("app.services", "app.knowledge")
+    violations = [
+        violation
+        for root in (APP, ROOT / "scripts")
+        for violation in _violations(root, forbidden)
+    ]
+    assert violations == []
 
 
 def test_legacy_error_facades_are_fully_removed() -> None:
@@ -587,6 +573,9 @@ def test_legacy_error_facades_are_fully_removed() -> None:
 
 def test_zero_caller_legacy_facades_are_removed() -> None:
     removed = (
+        APP / "contexts" / "foundations" / "knowledge" / "storage_gateway.py",
+        APP / "agents" / "scheduler.py",
+        APP / "agents" / "workflow_engine.py",
         APP / "knowledge" / "chunk.py",
         APP / "knowledge" / "extract.py",
         APP / "knowledge" / "rerank.py",
@@ -621,249 +610,7 @@ def test_zero_caller_legacy_facades_are_removed() -> None:
         APP / "services" / "td_event_service.py",
         APP / "services" / "tool_execution_service.py",
     )
-    assert [path.relative_to(ROOT) for path in removed if path.exists()] == []
-
-
-# ── model_gateway 接缝守卫（ADR 0001）────────────────────────────────
-_LLM_COMPLETION_NAMES = {"get_llm_for_role", "create_llm", "BaseChatModel"}
-
-# 未迁移的 LLM 完成直连家族：显式挂账，随后续单模块逐个收编而递减（ADR 0001）。
-# Phase 0 已全部收编，白名单清空——任何新增直连都会被守卫直接判为越界。
-_LLM_COMPLETION_MIGRATION_DEBT: set[str] = set()
-
-# 本模块已收编、必须真正脱离直连的家族（不得回到白名单/直连）。
-_LLM_COMPLETION_MIGRATED = {
-    "app/contexts/foundations/knowledge/knowledge_retrieval/infrastructure/sqlalchemy_retrieval.py",
-    "app/contexts/foundations/governance/system_configuration/connectivity/infrastructure/adapters.py",
-    "app/contexts/foundations/execution/agent_execution/infrastructure/composition.py",
-    "app/contexts/foundations/execution/agent_execution/infrastructure/langchain_gateway.py",
-    "app/contexts/foundations/governance/ai_quality/infrastructure/composition.py",
-    "app/contexts/foundations/governance/ai_quality/infrastructure/legacy_execution.py",
-    "app/contexts/foundations/execution/work_planning/infrastructure/langchain_planner.py",
-    "app/contexts/foundations/knowledge/organizational_memory/infrastructure/llm_distillation.py",
-    "app/contexts/business/assistant_conversations/infrastructure/adapters.py",
-    "app/contexts/business/group_messaging/infrastructure/adapters.py",
-}
-
-
-def _touches_llm_completion(path: Path) -> bool:
-    """A file touches the LLM completion seam if it pulls in vendor chat types or the role factory.
-
-    仅针对「完成」语义：langchain*、``get_llm_for_role``/``create_llm``/``BaseChatModel``。
-    ``app.llm.usage``（用量记录，ADR 0001 记为独立债务）与 ``app.llm.factory``/embedding 不计入。
-    """
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(alias.name.startswith("langchain") for alias in node.names):
-                return True
-        elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").startswith("langchain"):
-                return True
-            if any(alias.name in _LLM_COMPLETION_NAMES for alias in node.names):
-                return True
-    return False
-
-
-def test_llm_completion_flows_through_model_gateway_seam() -> None:
-    """所有 LLM 完成调用必须经 model_gateway 接缝；未迁移家族须显式挂账，已迁移家族须真正脱离。"""
-    seam = APP / "contexts" / "foundations" / "model_gateway"
-    touching = {
-        path.relative_to(ROOT).as_posix()
-        for path in (APP / "contexts").rglob("*.py")
-        if _touches_llm_completion(path)
-    }
-    offenders = sorted(
-        rel
-        for rel in touching
-        if not (ROOT / rel).is_relative_to(seam) and rel not in _LLM_COMPLETION_MIGRATION_DEBT
-    )
-    assert offenders == [], f"新增 LLM 完成直连（应经 model_gateway.public）：{offenders}"
-    # 已迁移的家族确实脱离直连。
-    regressed = sorted(_LLM_COMPLETION_MIGRATED & touching)
-    assert regressed == [], f"已收编家族回退为直连：{regressed}"
-    # 债务白名单精确——不留已消除项，避免虚假债务。
-    stale = sorted(_LLM_COMPLETION_MIGRATION_DEBT - touching)
-    assert stale == [], f"债务白名单存在冗余项（已消除应删除）：{stale}"
-
-
-# ── knowledge_retrieval 检索接缝守卫（ADR 0002 · A1）──────────────────
-_KNOWLEDGE_SESSION_ENTRYPOINTS = {
-    "search_knowledge",
-    "answer_knowledge",
-    "diagnose_retrieval_arms",
-}
-_KNOWLEDGE_RETRIEVAL_CTX = (
-    APP / "contexts" / "foundations" / "knowledge" / "knowledge_retrieval"
-)
-
-
-def _imports_knowledge_session_entrypoint(path: Path) -> bool:
-    """文件是否直引会话级知识检索 entrypoint（应改经端口工厂）。"""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.endswith("knowledge_retrieval.public") or module.endswith(
-                "knowledge_retrieval.entrypoints.operations"
-            ):
-                if any(alias.name in _KNOWLEDGE_SESSION_ENTRYPOINTS for alias in node.names):
-                    return True
-    return False
-
-
-def test_knowledge_search_flows_through_port_seam() -> None:
-    """跨 Context 知识检索须经 KnowledgeSearchPort 端口；禁止直引会话级 entrypoint 函数。
-
-    ``knowledge_retrieval`` 自身（public/operations 内部装配）与 ``app/api``、``app/agents``
-    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。
-    """
-    offenders = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (APP / "contexts").rglob("*.py")
-        if not path.is_relative_to(_KNOWLEDGE_RETRIEVAL_CTX)
-        and _imports_knowledge_session_entrypoint(path)
-    )
-    assert offenders == [], (
-        f"跨 Context 直引会话级知识检索 entrypoint（应经端口工厂）：{offenders}"
-    )
-
-
-# ── knowledge_indexing 写侧接缝守卫（ADR 0006）──────────────────
-_KNOWLEDGE_INDEX_WRITE_FUNCS = {
-    "index_text",
-    "remove_document_index",
-    "list_documents",
-}
-_KNOWLEDGE_INDEXING_CTX = (
-    APP / "contexts" / "foundations" / "knowledge" / "knowledge_indexing"
-)
-
-
-def _imports_knowledge_index_write(path: Path) -> bool:
-    """文件是否直引会话级知识写函数（应改经 KnowledgeIndexPort 端口工厂）。"""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.endswith("knowledge_indexing.public") or module.endswith(
-                "knowledge_indexing.entrypoints.operations"
-            ):
-                if any(alias.name in _KNOWLEDGE_INDEX_WRITE_FUNCS for alias in node.names):
-                    return True
-    return False
-
-
-def test_knowledge_index_flows_through_port_seam() -> None:
-    """跨 Context 知识写入须经 KnowledgeIndexPort 端口；禁止直引会话级写 entrypoint 函数。
-
-    ``knowledge_indexing`` 自身（public/operations 内部装配）与 ``app/api``、``app/knowledge``
-    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。``index_file``/
-    ``index_feishu_document``/``move_document`` 仅 app/api 消费，不纳入（ADR 0006 · 只含 3 方法）。
-    """
-    offenders = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (APP / "contexts").rglob("*.py")
-        if not path.is_relative_to(_KNOWLEDGE_INDEXING_CTX)
-        and _imports_knowledge_index_write(path)
-    )
-    assert offenders == [], (
-        f"跨 Context 直引会话级知识写 entrypoint（应经端口工厂）：{offenders}"
-    )
-
-
-# ── expert_management 目录接缝守卫（ADR 0003）──────────────────
-_EXPERT_SESSION_READ_FUNCS = {
-    "get_expert_execution",
-    "get_expert_roster",
-    "list_expert_roster",
-    "list_department_roster",
-    "count_by_department",
-}
-_EXPERT_MANAGEMENT_CTX = (
-    APP / "contexts" / "foundations" / "workforce" / "expert_management"
-)
-
-
-def _imports_expert_session_read(path: Path) -> bool:
-    """文件是否直引会话级专家目录只读函数（应改经端口工厂）。写函数不纳入（ADR 0003 · ② 待收）。"""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.endswith("expert_management.public") or module.endswith(
-                "expert_management.entrypoints.operations"
-            ):
-                if any(alias.name in _EXPERT_SESSION_READ_FUNCS for alias in node.names):
-                    return True
-    return False
-
-
-def test_expert_directory_flows_through_port_seam() -> None:
-    """跨 Context 专家目录只读须经 ExpertDirectoryPort 端口；禁止直引会话级只读函数。
-
-    ``expert_management`` 自身（public/entrypoints 内部装配）与 ``app/api``、``app/services``
-    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。写侧（create/update/delete/seed）
-    不纳入本守卫，留 docs/21 §13-B ② 模块处理。
-    """
-    offenders = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (APP / "contexts").rglob("*.py")
-        if not path.is_relative_to(_EXPERT_MANAGEMENT_CTX)
-        and _imports_expert_session_read(path)
-    )
-    assert offenders == [], (
-        f"跨 Context 直引会话级专家目录只读函数（应经端口工厂）：{offenders}"
-    )
-
-
-# ── expert_management 写侧接缝守卫（ADR 0004）──────────────────
-_EXPERT_SESSION_WRITE_FUNCS = {
-    "create_expert",
-    "update_expert",
-    "delete_expert",
-    "seed_expert",
-}
-
-
-def _imports_expert_session_write(path: Path) -> bool:
-    """文件是否直引会话级专家写函数（应改经 ExpertProvisioningPort 端口工厂）。"""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module.endswith("expert_management.public") or module.endswith(
-                "expert_management.entrypoints.operations"
-            ):
-                if any(alias.name in _EXPERT_SESSION_WRITE_FUNCS for alias in node.names):
-                    return True
-    return False
-
-
-def test_expert_provisioning_flows_through_port_seam() -> None:
-    """跨 Context 专家写侧须经 ExpertProvisioningPort 端口；禁止直引会话级写函数。
-
-    ``expert_management`` 自身（public/entrypoints 内部装配）与 ``app/api``、``app/services``
-    等 legacy facade 不在 ``app/contexts`` 扫描面内，故不受约束。
-    """
-    offenders = sorted(
-        path.relative_to(ROOT).as_posix()
-        for path in (APP / "contexts").rglob("*.py")
-        if not path.is_relative_to(_EXPERT_MANAGEMENT_CTX)
-        and _imports_expert_session_write(path)
-    )
-    assert offenders == [], (
-        f"跨 Context 直引会话级专家写函数（应经端口工厂）：{offenders}"
-    )
-
-
-# ── usage_budget 记账接缝守卫（ADR 0002 · A2）────────────────────────
-def test_usage_recording_flows_through_usage_budget_public() -> None:
-    """``app/contexts`` 下 LLM 用量记账一律经 usage_budget.public；禁止引 legacy ``app.llm.usage``。
-
-    ``app/agents``、``app/services`` 等迁移期 facade 仍可用旧路径（不在扫描面内）。
-    """
-    offenders = _violations(APP / "contexts", ("app.llm.usage",))
-    assert offenders == [], (
-        f"新增 legacy app.llm.usage 直引（应经 usage_budget.public）：{offenders}"
-    )
+    remaining = [path.relative_to(ROOT) for path in removed if path.exists()]
+    remaining.extend(path.relative_to(ROOT) for path in (APP / "services").glob("*.py"))
+    remaining.extend(path.relative_to(ROOT) for path in (APP / "knowledge").glob("*.py"))
+    assert remaining == []

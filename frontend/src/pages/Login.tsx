@@ -11,7 +11,7 @@ import { Alert, Button, Divider, Space, Tag, Typography } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { exchangeFeishuLogin, fetchFeishuStatus, login, startFeishuLogin } from '../api/auth'
-import { ApiError, setToken } from '../api/client'
+import { ApiError, setToken } from '../api/http'
 import { normalizeAppPath } from '../auth/paths'
 
 const FEISHU_RETURN_TO_KEY = 'youdoo_feishu_return_to'

@@ -1,8 +1,8 @@
 /** AI 模型卡片 API（对应后端 app/api/v1/ai_providers.py）。密钥仅回显 hint + 状态位。 */
-import { request } from './client'
+import { request } from './http'
 
 export type Tier = 'daily' | 'reasoning'
-export type TestStatus = 'ok' | 'fail' | 'untested' | 'disabled'
+type TestStatus = 'ok' | 'fail' | 'untested' | 'disabled'
 
 export interface AiProvider {
   id: string

@@ -19,7 +19,7 @@ from app.integrations.feishu.oauth import (
 CONFIG = FeishuOAuthConfig(
     app_id="cli_test_app",
     app_secret="test-secret-not-real",
-    redirect_url="https://ai.youdoogo.com/api/v1/auth/feishu/callback",
+    redirect_url="https://app.example.test/api/v1/auth/feishu/callback",
     secure_cookies=True,
 )
 

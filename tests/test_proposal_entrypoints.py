@@ -37,13 +37,8 @@ def test_http_route_no_longer_imports_legacy_proposal_collaborators() -> None:
     assert "app.models.task" not in imports
 
 
-def test_legacy_facade_has_no_transaction_or_query_ownership() -> None:
-    source = (ROOT / "app" / "services" / "proposal_service.py").read_text(encoding="utf-8")
-    assert ".commit(" not in source
-    assert ".rollback(" not in source
-    assert "select(" not in source
-    assert "app.models.proposal" not in source
-    assert "app.services.task_service" not in source
+def test_retired_proposal_facade_is_removed() -> None:
+    assert not (ROOT / "app" / "services" / "proposal_service.py").exists()
 
 
 async def test_create_route_preserves_success_envelope(monkeypatch: pytest.MonkeyPatch) -> None:

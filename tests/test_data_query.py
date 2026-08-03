@@ -8,10 +8,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.integration.governed_data_query.contracts import (
+    GovernedQueryRequest,
+)
+from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+    operations as data_query,
+)
 from app.models import Base
 from app.models.audit_log import AuditLog
 from app.models.sys_config import SysConfig
-from app.services import data_query_service
 
 
 @pytest.fixture
@@ -56,6 +61,26 @@ async def _audits(db: AsyncSession) -> list[AuditLog]:
     )).scalars())
 
 
+async def _query(
+    db: AsyncSession,
+    sql: str,
+    *,
+    actor_id: uuid.UUID | None,
+    actor_role: str | None,
+    max_rows: int = 1000,
+) -> dict[str, object]:
+    result = await data_query.run_query(
+        db,
+        GovernedQueryRequest(
+            sql=sql,
+            actor_id=actor_id,
+            actor_role=actor_role,
+        ),
+        max_rows=max_rows,
+    )
+    return result.to_dict()
+
+
 async def test_query_ok_executes_and_audits(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -65,8 +90,11 @@ async def test_query_ok_executes_and_audits(
     monkeypatch.setattr("app.core.runtime_config._overlay", {"td_api_secret": "s"})
     monkeypatch.setattr("app.integrations.thinkingdata.client.ThinkingDataClient", _FakeTD)
 
-    res = await data_query_service.run_readonly_sql(
-        db, "select ev, cnt from v_event_4", actor_id=uuid.uuid4(), actor_role="admin",
+    res = await _query(
+        db,
+        "select ev, cnt from v_event_4",
+        actor_id=uuid.uuid4(),
+        actor_role="admin",
     )
     assert res["status"] == "ok" and res["row_count"] == 3
     assert res["columns"] == ["ev", "cnt"] and res["truncated"] is False
@@ -88,8 +116,8 @@ async def test_query_rejected_never_hits_td(
         raise AssertionError("rejected SQL 不应触达 TD 客户端")
 
     monkeypatch.setattr("app.integrations.thinkingdata.client.ThinkingDataClient", _boom)
-    res = await data_query_service.run_readonly_sql(
-        db, "DROP TABLE v_event_4", actor_id=None, actor_role=None,
+    res = await _query(
+        db, "DROP TABLE v_event_4", actor_id=None, actor_role=None
     )
     assert res["status"] == "rejected" and "SELECT" in res["reason"]
     assert _FakeTD.last_sql == "SENTINEL"  # 未调用
@@ -104,8 +132,8 @@ async def test_query_unlisted_view_rejected(
     _seed(db)
     await db.commit()
     monkeypatch.setattr("app.core.runtime_config._overlay", {"td_api_secret": "s"})
-    res = await data_query_service.run_readonly_sql(
-        db, "select * from v_event_999", actor_id=None, actor_role=None,
+    res = await _query(
+        db, "select * from v_event_999", actor_id=None, actor_role=None
     )
     assert res["status"] == "rejected"
 
@@ -117,11 +145,10 @@ async def test_query_truncates_rows(
     _seed(db)
     await db.commit()
     monkeypatch.setattr("app.core.runtime_config._overlay", {"td_api_secret": "s"})
-    monkeypatch.setattr(data_query_service, "_MAX_ROWS", 2)
     monkeypatch.setattr(_FakeTD, "n_rows", 5)
     monkeypatch.setattr("app.integrations.thinkingdata.client.ThinkingDataClient", _FakeTD)
-    res = await data_query_service.run_readonly_sql(
-        db, "select ev from v_event_4", actor_id=None, actor_role=None,
+    res = await _query(
+        db, "select ev from v_event_4", actor_id=None, actor_role=None, max_rows=2
     )
     assert res["row_count"] == 2 and res["truncated"] is True
     monkeypatch.setattr(_FakeTD, "n_rows", 3)  # 复原
@@ -132,7 +159,7 @@ async def test_query_not_configured(db: AsyncSession, monkeypatch: pytest.Monkey
     _seed(db)
     await db.commit()
     monkeypatch.setattr("app.core.runtime_config._overlay", {})  # 无密钥
-    res = await data_query_service.run_readonly_sql(
-        db, "select ev from v_event_4", actor_id=None, actor_role=None,
+    res = await _query(
+        db, "select ev from v_event_4", actor_id=None, actor_role=None
     )
     assert res["status"] == "fail"

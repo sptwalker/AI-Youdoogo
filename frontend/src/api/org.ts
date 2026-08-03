@@ -1,5 +1,5 @@
 /** 组织架构 API（对应后端 app/api/v1/org.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface OrgNode {
   id: string

@@ -60,10 +60,10 @@ async def _run() -> dict[str, object]:
     from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
         CAPABILITY_DEFINITIONS,
     )
-    from app.core.database import async_session_factory
     from app.models.agent import AgentRole
     from app.models.sys_config import CAT_PROMPT, SysConfig
     from app.models.workflow import ToolExecution, WorkflowRun, WorkflowStep
+    from app.platform.database import async_session_factory
 
     def _active(model: type) -> object:
         return model.is_delete == False  # noqa: E712 - SQL 列比较，非 Python 布尔

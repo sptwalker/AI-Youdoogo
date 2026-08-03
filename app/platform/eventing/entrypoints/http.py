@@ -14,8 +14,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.internal_token import verify_internal_token
+from app.platform.database import get_db
 from app.platform.eventing.inbox import EventEnvelope, get_inbox_projector, receive_event
 from app.platform.eventing.relay import EVENTS_SCOPE
 from app.platform.http_runtime import ok

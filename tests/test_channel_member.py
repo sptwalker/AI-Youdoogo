@@ -6,8 +6,8 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.group_messaging.entrypoints import operations as discussion_service
 from app.models import Base
-from app.services import discussion_service
 
 
 @pytest.fixture

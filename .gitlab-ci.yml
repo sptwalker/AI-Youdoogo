@@ -39,6 +39,13 @@ variables:
   # npm cache must live inside the workspace so GitLab can archive it (paths outside
   # $CI_PROJECT_DIR are not cacheable). node_modules stays uncached; only the tarball cache is.
   NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+  # Project-owned, non-secret delivery constants. Operators do not configure these
+  # in the protected group variable contract.
+  PUBLIC_HOST: ai.youdoogo.com
+  CCE_ELB_ID: abab7533-a1c6-4138-a4bc-59d53e3446e2
+  CCE_LISTENER_MASTER_INGRESS: nexus-prod/nexus-studio
+  CCE_TLS_CERTIFICATE_IDS: 56de20421757445ea53f5af51ecb4e10
+  FEISHU_OPS_CHAT_ID: oc_52174c913e452fa712e77439a07300ac
 
 .verify_rules:
   rules:
@@ -219,8 +226,6 @@ bootstrap_deploy_tools:
   extends: .deploy_tools_build
   rules:
     - if: '$CI_COMMIT_BRANCH == "dev" && $CI_PIPELINE_SOURCE != "merge_request_event"'
-      when: manual
-      allow_failure: true
     - when: never
 
 build_backend:
@@ -320,7 +325,7 @@ deploy_cce:
   resource_group: youdoogo-cce-production
   environment:
     name: cce-production
-    url: https://ai.youdoogo.com/
+    url: https://$PUBLIC_HOST/
   before_script:
     - command -v bash && command -v curl && command -v python3 && command -v kubectl
     - python3 -c 'import yaml; print(f"PyYAML {yaml.__version__}")'
@@ -340,7 +345,7 @@ deploy_cce:
   after_script:
     - rm -f "/tmp/youdoogo-kubeconfig-${CI_JOB_ID}"
 
-# Feishu credentials come from the `ai` group; notify.py owns the shared fixed destination.
+# Feishu credentials come from the `ai` group; the non-secret destination is repo-owned above.
 notify_success:
   stage: notify
   image:

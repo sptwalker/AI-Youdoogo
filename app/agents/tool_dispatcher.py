@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import ExecutionContext, SkillExecutor, SkillRequest, SkillResult
+from app.agents.directive_dispatch import merge_execution_context
 from app.agents.skill_registry import REGISTRY, Skill, enabled_skills, flag_on
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
     CapabilityDefinition,
@@ -185,12 +187,19 @@ class ToolDispatcher:
         db: AsyncSession,
         role: AgentRole,
         output: str,
-        context: ExecutionContext,
+        context: ExecutionContext | None = None,
         *,
+        user_id: uuid.UUID | None = None,
+        user_intent: str | None = None,
         exclude: set[str] | None = None,
     ) -> SkillResult:
+        context = merge_execution_context(
+            context,
+            user_id=user_id,
+            user_intent=user_intent,
+            exclude=exclude,
+        )
         excluded = set(context.excluded_skills)
-        excluded.update(exclude or set())
         merged = SkillResult()
         active_context = context.model_copy(
             update={

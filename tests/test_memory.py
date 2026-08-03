@@ -13,18 +13,20 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 from app.contexts.business.assistant_conversations.entrypoints import (
     operations as assistant_conversations,
 )
-from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.sqlalchemy_gateway import (  # noqa: E501
-    SqlAlchemyDocumentIndexGateway,
-)
+from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
 from app.contexts.foundations.knowledge.organizational_memory import (
     public as organizational_memory,
 )
-from app.contexts.foundations.knowledge.organizational_memory.contracts import MemoryDraft
-from app.contexts.foundations.model_gateway import public as _mg_public
+from app.contexts.foundations.knowledge.organizational_memory.contracts import (
+    DistillConversationCommand,
+    MemoryDraft,
+)
+from app.contexts.foundations.knowledge.organizational_memory.domain.policies import (
+    build_distillation_input,
+)
 from app.models import Base
 from app.models.desktop import SPEAKER_USER, DesktopMessage
 from app.models.system import SysUser
-from app.services import memory_service
 
 
 @pytest.fixture
@@ -40,12 +42,19 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 
 # ── 纯函数 + 提炼 ───────────────────────────────────────
 def test_build_distill_input_truncates() -> None:
-    out = memory_service.build_distill_input("对" * 10000)
+    out = build_distillation_input("对" * 10000)
     assert out.startswith("请提炼") and len(out) < 8100
 
 
 async def test_distill_empty_returns_none(db: AsyncSession) -> None:
-    assert await memory_service.distill_conversation(db, "   ") is None
+    assert (
+        await organizational_memory.distill_conversation(
+            db,
+            DistillConversationCommand(transcript="   "),
+            llm_factory=lambda *args, **kwargs: None,
+        )
+        is None
+    )
 
 
 async def test_distill_success(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,9 +69,12 @@ async def test_distill_success(db: AsyncSession, monkeypatch: pytest.MonkeyPatch
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
             return _Reply()
 
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
-    out = await memory_service.distill_conversation(db, "用户：查下A5\n助理：好的")
-    assert out is not None and "摘要" in out and "盒子A5" in out
+    draft = await organizational_memory.distill_conversation(
+        db,
+        DistillConversationCommand(transcript="用户：查下A5\n助理：好的"),
+        llm_factory=lambda *args, **kwargs: _LLM(),
+    )
+    assert draft is not None and "摘要" in draft.content and "盒子A5" in draft.content
 
 
 async def test_distill_failure_returns_none(
@@ -74,8 +86,14 @@ async def test_distill_failure_returns_none(
         async def ainvoke(self, *a: Any, **k: Any) -> Any:
             raise RuntimeError("模型不可用")
 
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *a, **k: _LLM())
-    assert await memory_service.distill_conversation(db, "内容") is None
+    assert (
+        await organizational_memory.distill_conversation(
+            db,
+            DistillConversationCommand(transcript="内容"),
+            llm_factory=lambda *args, **kwargs: _LLM(),
+        )
+        is None
+    )
 
 
 # ── archive_old 集成：存提炼版 / 兜底原文 ────────────────
@@ -123,7 +141,7 @@ async def test_archive_stores_distilled(db: AsyncSession, monkeypatch: pytest.Mo
         captured["text"] = command.text
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _fake_distill)
-    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
+    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
     n = await assistant_conversations.archive_old(db, _principal(user), days=10)
     assert n == 3
     assert "记忆" in captured["title"] and "提炼后的记忆" in captured["text"]
@@ -145,6 +163,6 @@ async def test_archive_falls_back_to_raw(db: AsyncSession, monkeypatch: pytest.M
         captured["text"] = command.text
 
     monkeypatch.setattr(organizational_memory, "distill_conversation", _fail_distill)
-    monkeypatch.setattr(SqlAlchemyDocumentIndexGateway, "index_text", _fake_ingest)
+    monkeypatch.setattr(knowledge_indexing, "index_text", _fake_ingest)
     await assistant_conversations.archive_old(db, _principal(user), days=10)
     assert "存档" in captured["title"] and "消息0" in captured["text"]  # 原文保底

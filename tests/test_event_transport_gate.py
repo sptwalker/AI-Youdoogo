@@ -20,11 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.internal_token import mint_internal_token
 from app.main import app
 from app.models import Base
 from app.platform import eventing, outbox
+from app.platform.database import get_db
 from app.platform.eventing.relay import EVENTS_SCOPE, HttpInboxRelay
 
 _EVENT_TYPE = "expert.step.ready"

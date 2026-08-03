@@ -2,9 +2,9 @@
 
 import pytest
 
+from app.contexts.foundations.identity import browser_login as feishu_login
 from app.core.config import Settings
 from app.integrations.feishu.oauth import FeishuOAuthConfig
-from app.services import feishu_login
 
 
 def test_prod_rejects_default_secret() -> None:
@@ -50,7 +50,7 @@ def test_capability_callback_ok_with_provider() -> None:
     assert s.capability_callback_url == "http://ai-youdoogo:8000"
 
 
-def test_production_oauth_requires_exact_standalone_redirect(
+def test_production_oauth_requires_https_callback_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = feishu_login.get_settings()
@@ -59,7 +59,7 @@ def test_production_oauth_requires_exact_standalone_redirect(
         "feishu_oauth_enabled": True,
         "feishu_app_id": "cli_test_app",
         "feishu_app_secret": "test-secret-not-real",
-        "feishu_redirect_url": "https://ai.youdoogo.com/api/v1/auth/feishu/callback",
+        "feishu_redirect_url": "https://app.example.test/api/v1/auth/feishu/callback",
     }
     monkeypatch.setattr(
         feishu_login.runtime_config,
@@ -68,9 +68,13 @@ def test_production_oauth_requires_exact_standalone_redirect(
     )
     config = feishu_login.load_oauth_config()
     assert isinstance(config, FeishuOAuthConfig)
-    assert config.redirect_url == feishu_login.PRODUCTION_REDIRECT_URL
+    assert config.redirect_url == values["feishu_redirect_url"]
 
-    values["feishu_redirect_url"] = "https://ai.youdoogo.com/lodge/feishu-callback"
+    values["feishu_redirect_url"] = "https://app.example.test/lodge/feishu-callback"
+    with pytest.raises(feishu_login.OAuthUnavailable):
+        feishu_login.load_oauth_config()
+
+    values["feishu_redirect_url"] = "http://app.example.test/api/v1/auth/feishu/callback"
     with pytest.raises(feishu_login.OAuthUnavailable):
         feishu_login.load_oauth_config()
 

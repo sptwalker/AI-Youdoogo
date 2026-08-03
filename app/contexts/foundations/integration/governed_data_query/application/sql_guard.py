@@ -7,6 +7,8 @@ and clamps the outer LIMIT. It has no database or network dependency.
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlglot import exp, parse
 from sqlglot.errors import SqlglotError
 
@@ -19,53 +21,50 @@ class SqlRejected(Exception):
     """Raised when a query violates the governed read-only policy."""
 
 
-def _tables(node: exp.Expression) -> list[str]:
-    """Return external table names while excluding CTE aliases."""
+def _external_tables(node: exp.Expression) -> list[exp.Table]:
+    """Return physical tables while excluding CTE aliases."""
     cte_names = {cte.alias.lower() for cte in node.find_all(exp.CTE) if cte.alias}
     return [
-        table.name.lower()
+        table
         for table in node.find_all(exp.Table)
         if table.name and table.name.lower() not in cte_names
     ]
 
 
-def _inject_partition(node: exp.Expression, allowed_views: set[str]) -> None:
-    """Add a safe partition floor to each allowed event-table SELECT when absent."""
-    seen: set[int] = set()
-    for table in node.find_all(exp.Table):
-        if not table.name or table.name.lower() not in allowed_views:
-            continue
+def _partition_floor(table: exp.Table) -> exp.GTE:
+    """Build a qualified partition condition for an allowed table reference."""
+    return exp.GTE(
+        this=exp.Column(
+            this=exp.Identifier(this=_PARTITION_COL, quoted=True),
+            table=exp.Identifier(this=table.alias_or_name, quoted=True),
+        ),
+        expression=exp.Literal.string(_PARTITION_FLOOR),
+    )
+
+
+def _inject_partition(node: exp.Expression, tables: list[exp.Table]) -> None:
+    """Require the partition floor for every governed table in its SELECT scope."""
+    for table in tables:
         select_node = table.find_ancestor(exp.Select)
-        if select_node is None or id(select_node) in seen:
+        if select_node is None:
             continue
-        seen.add(id(select_node))
-        where = select_node.args.get("where")
-        has_partition = where is not None and any(
-            column.name == _PARTITION_COL for column in where.find_all(exp.Column)
-        )
-        if not has_partition:
-            select_node.where(
-                f"\"{_PARTITION_COL}\" >= '{_PARTITION_FLOOR}'",
-                append=True,
-                dialect=_DIALECT,
-                copy=False,
-            )
+        select_node.where(_partition_floor(table), append=True, copy=False)
 
 
-def check_sql(sql: str, *, allowed_views: set[str], max_limit: int = 1000) -> str:
-    """Validate a read-only query and return normalized, bounded SQL."""
-    sql = (sql or "").strip()
-    if not sql:
+def _parse_one(sql: str) -> exp.Expression:
+    normalized = (sql or "").strip()
+    if not normalized:
         raise SqlRejected("SQL 为空")
-
     try:
-        statements = [statement for statement in parse(sql, read=_DIALECT) if statement]
+        statements = [statement for statement in parse(normalized, read=_DIALECT) if statement]
     except SqlglotError as exc:
         raise SqlRejected(f"SQL 无法解析:{str(exc)[:120]}") from exc
     if len(statements) != 1:
         raise SqlRejected("只允许单条语句(检测到多语句或分号注入)")
-    statement = statements[0]
+    return cast(exp.Expression, statements[0])
 
+
+def _read_query(statement: exp.Expression) -> exp.Select | exp.Union:
     inner = statement.unnest() if isinstance(statement, exp.Subquery) else statement
     if not isinstance(inner, (exp.Select, exp.Union)):
         raise SqlRejected("只允许 SELECT 查询(禁止写入/建表/删除/调用等操作)")
@@ -81,19 +80,29 @@ def check_sql(sql: str, *, allowed_views: set[str], max_limit: int = 1000) -> st
     )
     if any(inner.find(node_type) for node_type in forbidden):
         raise SqlRejected("SQL 含被禁止的写/命令操作")
+    return inner
 
+
+def _allowed_tables(inner: exp.Expression, allowed_views: set[str]) -> list[exp.Table]:
     allowed = {view.lower() for view in allowed_views}
-    used = _tables(inner)
-    if not used:
+    tables = _external_tables(inner)
+    if not tables:
         raise SqlRejected("SQL 未引用任何数据表")
+    qualified = sorted(
+        table.sql(dialect=_DIALECT) for table in tables if table.db or table.catalog
+    )
+    if qualified:
+        raise SqlRejected(f"禁止使用带 schema/catalog 的限定表:{', '.join(qualified)}")
+    used = [table.name.lower() for table in tables if table.name]
     illegal = sorted(set(used) - allowed)
     if illegal:
         raise SqlRejected(
             f"引用了未登记的表:{', '.join(illegal)}(仅允许:{', '.join(sorted(allowed))})"
         )
+    return tables
 
-    _inject_partition(inner, allowed)
 
+def _bounded_select(inner: exp.Select | exp.Union, max_limit: int) -> exp.Select:
     if isinstance(inner, exp.Union):
         inner = exp.select("*").from_(inner.subquery("_u"))
     limit = inner.args.get("limit")
@@ -105,4 +114,13 @@ def check_sql(sql: str, *, allowed_views: set[str], max_limit: int = 1000) -> st
                 inner = inner.limit(max_limit)
         except (AttributeError, ValueError):
             inner = inner.limit(max_limit)
+    return inner
+
+
+def check_sql(sql: str, *, allowed_views: set[str], max_limit: int = 1000) -> str:
+    """Validate a read-only query and return normalized, bounded SQL."""
+    inner = _read_query(_parse_one(sql))
+    tables = _allowed_tables(inner, allowed_views)
+    _inject_partition(inner, tables)
+    inner = _bounded_select(inner, max_limit)
     return inner.sql(dialect=_DIALECT)

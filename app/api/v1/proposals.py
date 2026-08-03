@@ -14,7 +14,7 @@ from app.api.deps import CurrentUser, require_roles
 from app.contexts.business.proposal_management.application.contracts import ProposalViewer
 from app.contexts.business.proposal_management.entrypoints import operations
 from app.contexts.foundations.identity.application.contracts import IdentityUserResult
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.proposal import (
     ConvertRequest,

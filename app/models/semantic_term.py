@@ -12,7 +12,7 @@ from sqlalchemy import JSON, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 _JSONB = JSON().with_variant(JSONB(), "postgresql")
 _ACTIVE = text("is_delete = false")  # 部分唯一索引条件（软删后可重建同名）

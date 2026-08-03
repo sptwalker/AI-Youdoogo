@@ -1,5 +1,5 @@
 /** 资源授权 API（对应后端 app/api/v1/grants.py）。grant 只授内容访问权，不授生效权。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface ResourceGrant {
   id: string

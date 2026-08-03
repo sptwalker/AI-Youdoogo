@@ -6,14 +6,14 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.business.collaboration_requests.entrypoints import operations as collab_service
+from app.contexts.business.task_management.domain.state_machine import ACCEPTED, REPORTED
 from app.contexts.business.work_desktop import public as work_desktop
 from app.models import Base
 from app.models.meeting import MeetingResolution
 from app.models.proposal import APPROVED, REVIEWED, ProposalCard
 from app.models.system import SysDepartment, SysUser
 from app.models.task import TaskCard
-from app.services import collab_service
-from app.services.task_flow import ACCEPTED, REPORTED
 
 
 @pytest.fixture

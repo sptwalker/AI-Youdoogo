@@ -1,5 +1,5 @@
 /** 数据接口 API（对应后端 app/api/v1/data_sources.py）。密钥仅回显状态位。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface DataSource {
   id: string

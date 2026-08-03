@@ -9,11 +9,13 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import ops
 from app.contexts.business.operational_analytics.application import (
     agent_use_cases as operational_agent_use_cases,
 )
-from app.contexts.foundations.model_gateway import public as _mg_public
+from app.contexts.business.operational_analytics.entrypoints import (
+    agent_operations as ops,
+)
+from app.contexts.foundations.model_gateway import public as model_gateway
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -72,15 +74,19 @@ async def test_generate_daily_report_success(
     db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        _mg_public,
+        model_gateway,
         "get_llm_for_role",
         lambda *a, **k: _FakeLLM(
             text="【核心指标概览】...", metadata={"model_name": "deepseek-chat"}
         ),
     )
     operator = uuid.uuid4()
-    record = await ops.generate_daily_report(
-        db, stat_date="2026-07-11", rows=_ROWS, operator_id=operator
+    record = await ops.create_daily_report(
+        db,
+        stat_date="2026-07-11",
+        rows=_ROWS,
+        operator_id=operator,
+        notify=False,
     )
     assert record.status == "success"
     assert record.output_content is not None and "核心指标" in record.output_content
@@ -101,9 +107,17 @@ async def test_run_agent_failure_is_recorded(
 ) -> None:
     """LLM 抛异常 → 转 status=failed 留痕，不向上抛。"""
     monkeypatch.setattr(
-        _mg_public, "get_llm_for_role", lambda *a, **k: _FakeLLM(exc=TimeoutError("boom"))
+        model_gateway,
+        "get_llm_for_role",
+        lambda *a, **k: _FakeLLM(exc=TimeoutError("boom")),
     )
-    record = await ops.generate_daily_report(db, stat_date="2026-07-11", rows=_ROWS)
+    record = await ops.create_daily_report(
+        db,
+        stat_date="2026-07-11",
+        rows=_ROWS,
+        operator_id=None,
+        notify=False,
+    )
     assert record.status == "failed"
     assert record.output_content is None
     assert record.error_msg and "boom" in record.error_msg
@@ -111,7 +125,13 @@ async def test_run_agent_failure_is_recorded(
 
 async def test_empty_rows_rejected(db: AsyncSession) -> None:
     with pytest.raises(ApplicationError, match="为空"):
-        await ops.generate_daily_report(db, stat_date="2026-07-11", rows=[])
+        await ops.create_daily_report(
+            db,
+            stat_date="2026-07-11",
+            rows=[],
+            operator_id=None,
+            notify=False,
+        )
 
 
 async def test_missing_role_rejected(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,15 +141,26 @@ async def test_missing_role_rejected(db: AsyncSession, monkeypatch: pytest.Monke
         "no_such_code",
     )
     with pytest.raises(ApplicationError, match="未配置"):
-        await ops.generate_daily_report(db, stat_date="2026-07-11", rows=_ROWS)
+        await ops.create_daily_report(
+            db,
+            stat_date="2026-07-11",
+            rows=_ROWS,
+            operator_id=None,
+            notify=False,
+        )
 
 
 async def test_generate_proposal(db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        _mg_public,
+        model_gateway,
         "get_llm_for_role",
         lambda *a, **k: _FakeLLM(text="【背景与问题】...【优先级建议】..."),
     )
-    record = await ops.generate_proposal(db, topic="提升产品B次留", context="次留仅38%")
+    record = await ops.create_operational_proposal(
+        db,
+        topic="提升产品B次留",
+        context="次留仅38%",
+        operator_id=None,
+    )
     assert record.status == "success" and record.task_type == "proposal"
     assert record.output_content and "背景" in record.output_content

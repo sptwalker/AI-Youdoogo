@@ -1,0 +1,175 @@
+{
+  "schema_version": "1.0",
+  "contract": {
+    "version": "lodge_identity_v2",
+    "system_key": "youdoogo",
+    "source": {
+      "repository": "nexus/lodge",
+      "source_base_commit": "51b73fa",
+      "commit_policy": "The fixture is versioned by schema_version and source_base_commit so it does not need to name its own publishing commit."
+    }
+  },
+  "jwt": {
+    "header": {
+      "alg": "RS256",
+      "typ": "at+jwt",
+      "kid": {
+        "required": true
+      }
+    },
+    "claims": {
+      "required": [
+        "contract_ver",
+        "token_use",
+        "token_profile",
+        "iss",
+        "aud",
+        "sub",
+        "sid",
+        "org_id",
+        "identity_ver",
+        "jti",
+        "iat",
+        "nbf",
+        "exp",
+        "entitlements",
+        "scope"
+      ],
+      "contract_ver": "lodge_identity_v2",
+      "token_use": "access",
+      "token_profile": "user",
+      "issuer": {
+        "claim": "iss",
+        "value_source": "Lodge PortalBaseURL"
+      },
+      "audience": {
+        "claim": "aud",
+        "type": "array",
+        "exactly": [
+          "youdoogo"
+        ]
+      },
+      "ttl_seconds_max": 900,
+      "entitlement": {
+        "claim": "entitlements.youdoogo",
+        "required_fields": [
+          "allowed",
+          "system_role",
+          "source",
+          "scopes"
+        ]
+      },
+      "scope": {
+        "claim": "scope",
+        "must_not_exceed": "scope_ceilings"
+      }
+    }
+  },
+  "status": {
+    "method": "POST",
+    "path": "/api/internal/identity/status",
+    "authentication": {
+      "scheme": "Bearer",
+      "credential": "independent configured status bootstrap credential",
+      "must_not_be": [
+        "browser handoff JWT",
+        "Lodge browser session JWT",
+        "resource-server access token"
+      ]
+    },
+    "request": {
+      "required_fields": [
+        "system_key",
+        "subject",
+        "identity_ver",
+        "sid",
+        "jti",
+        "audience",
+        "org_id"
+      ],
+      "optional_fields": [
+        "access_token_id"
+      ],
+      "constraints": {
+        "system_key": "youdoogo",
+        "audience": "youdoogo",
+        "audience_equals_system_key": true,
+        "identity_ver": "positive",
+        "org_id": "configured Lodge org_id",
+        "sid_and_jti": "required unless access_token_id is provided"
+      }
+    },
+    "response": {
+      "active": {
+        "required_fields": [
+          "active",
+          "current_identity_ver",
+          "session_active",
+          "entitlement",
+          "checked_at",
+          "subject",
+          "system_key",
+          "audience",
+          "org_id",
+          "sid",
+          "jti",
+          "scopes"
+        ]
+      },
+      "denied": {
+        "required_fields": [
+          "active",
+          "current_identity_ver",
+          "session_active",
+          "entitlement",
+          "checked_at"
+        ],
+        "absent_fields": [
+          "subject",
+          "system_key",
+          "audience",
+          "org_id",
+          "sid",
+          "jti",
+          "scopes"
+        ]
+      }
+    }
+  },
+  "cookie": {
+    "name": "lodge_youdoogo_token",
+    "path": "/youdoogo",
+    "host_only": true,
+    "secure": true,
+    "http_only": true,
+    "same_site": "Lax"
+  },
+  "scope_ceilings": {
+    "viewer": [
+      "decision:read"
+    ],
+    "editor": [
+      "decision:read",
+      "decision:proposal:draft",
+      "decision:proposal:submit"
+    ],
+    "system_admin": [
+      "decision:read",
+      "decision:proposal:draft",
+      "decision:proposal:submit",
+      "decision:config:read",
+      "decision:config:write"
+    ]
+  },
+  "role_mapping": {
+    "viewer": "viewer",
+    "editor": "editor",
+    "admin": "system_admin",
+    "superadmin": "system_admin"
+  },
+  "forbidden_scopes": [
+    "decision:proposal:approve",
+    "decision:proposal:reject",
+    "decision:proposal:publish"
+  ]
+}

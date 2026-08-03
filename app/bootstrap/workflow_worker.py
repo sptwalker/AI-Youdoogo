@@ -10,20 +10,22 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import run_agent
 from app.agents.contracts import AgentRunner
 from app.bootstrap import workflow_events
 from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter import (
     SQLAlchemyTaskManagementAdapter,
+)
+from app.contexts.foundations.execution.agent_execution.public import (
+    run_agent,
+)
+from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
+    failure_propagation,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     worker as worker_runtime,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_recovery import (
     requeue_expired_steps,
-)
-from app.contexts.foundations.execution.workflow_runtime.infrastructure.sqlalchemy_state import (
-    fail_from_outbox,
 )
 from app.core.config import get_settings
 from app.models.workflow import OutboxEvent
@@ -79,7 +81,7 @@ async def _handle_terminal_failure(
     error: str,
 ) -> None:
     if event.aggregate_type in {"workflow", "workflow_step"}:
-        await fail_from_outbox(
+        await failure_propagation.fail_from_outbox(
             session,
             event,
             error=error,

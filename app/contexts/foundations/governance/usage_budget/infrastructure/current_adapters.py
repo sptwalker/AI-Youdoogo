@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,13 +23,72 @@ from app.contexts.foundations.governance.usage_budget.contracts.usage import (
     UsageRecordCommand,
 )
 from app.core import shared_state
+from app.core.config import get_settings
 from app.integrations.feishu import notify
 from app.models.llm_log import LlmCallLog
+
+logger = logging.getLogger(__name__)
 
 
 class BudgetSettings(Protocol):
     llm_daily_token_budget: int
     llm_budget_hard_limit: bool
+
+
+def _operations(session: AsyncSession) -> SQLAlchemyUsageBudget:
+    return SQLAlchemyUsageBudget(session, settings_provider=get_settings, logger=logger)
+
+
+def budget_exceeded() -> bool:
+    return not authorize_current_usage(get_settings).allowed
+
+
+def extract_usage(reply: object) -> tuple[int, int, int]:
+    metadata: dict[str, Any] = getattr(reply, "usage_metadata", None) or {}
+    prompt_tokens = int(metadata.get("input_tokens", 0) or 0)
+    completion_tokens = int(metadata.get("output_tokens", 0) or 0)
+    total_tokens = int(metadata.get("total_tokens", 0) or 0) or (
+        prompt_tokens + completion_tokens
+    )
+    return prompt_tokens, completion_tokens, total_tokens
+
+
+async def record_usage(
+    session: AsyncSession,
+    *,
+    role: str,
+    model: str | None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    duration_ms: int | None = None,
+    status: str = "success",
+    user_id: uuid.UUID | None = None,
+    task_id: uuid.UUID | None = None,
+    department_id: uuid.UUID | None = None,
+    workflow_run_id: uuid.UUID | None = None,
+    workflow_step_id: uuid.UUID | None = None,
+    attempt_no: int | None = None,
+    trace_id: uuid.UUID | None = None,
+) -> None:
+    await _operations(session).record(
+        UsageRecordCommand(
+            role=role,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            duration_ms=duration_ms,
+            status=status,
+            user_id=user_id,
+            task_id=task_id,
+            department_id=department_id,
+            workflow_run_id=workflow_run_id,
+            workflow_step_id=workflow_step_id,
+            attempt_no=attempt_no,
+            trace_id=trace_id,
+        )
+    )
 
 
 class SQLAlchemyUsageRepository:

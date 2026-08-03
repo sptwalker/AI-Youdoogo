@@ -10,7 +10,7 @@ from app.contexts.foundations.governance.audit_trail.infrastructure.sqlalchemy_a
     SQLAlchemyAuditTrail,
 )
 
-logger = logging.getLogger("app.services.audit_service")
+logger = logging.getLogger(__name__)
 
 
 def build_audit_trail(session: AsyncSession) -> SQLAlchemyAuditTrail:

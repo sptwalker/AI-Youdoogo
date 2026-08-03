@@ -14,7 +14,7 @@ from app.contexts.business.meeting_management.domain.models import parse_vote_ch
 from app.contexts.business.meeting_management.entrypoints import operations
 from app.contexts.business.meeting_management.infrastructure import adapters as meeting_adapters
 from app.contexts.foundations.identity.contracts import Principal, PrincipalType
-from app.contexts.foundations.model_gateway import public as _mg_public
+from app.contexts.foundations.model_gateway import public as model_gateway
 from app.contexts.shared_kernel import ApplicationError
 from app.models import Base
 from app.models.agent import AgentRole, AgentTaskRecord
@@ -86,7 +86,7 @@ def _human_principal(user_id: uuid.UUID) -> Principal:
 async def test_full_meeting_flow(ctx, monkeypatch: pytest.MonkeyPatch) -> None:
     session, uid = ctx
     monkeypatch.setattr(
-        _mg_public,
+        model_gateway,
         "get_llm_for_role",
         lambda *a, **k: _FakeLLM("approve\n方案可行，收益明确。"),
     )
@@ -264,13 +264,19 @@ async def test_ai_consultant_reply_keeps_sse_shape_and_persists_each_message(
         status="success",
     )
 
-    async def fake_execute_all(*args: object, **kwargs: object) -> SkillResult:
+    async def fake_dispatch_text(*args: object, **kwargs: object) -> SkillResult:
         return SkillResult(consult_replies=[(consultant, consult_record)])
 
-    monkeypatch.setattr(_mg_public, "get_llm_for_role",
+    monkeypatch.setattr(
+        model_gateway,
+        "get_llm_for_role",
         lambda *a, **k: _FakeLLM("主专家意见"),
     )
-    monkeypatch.setattr(meeting_adapters, "execute_all", fake_execute_all)
+    monkeypatch.setattr(
+        meeting_adapters.ToolDispatcher,
+        "dispatch_text",
+        fake_dispatch_text,
+    )
 
     events = [
         event
@@ -305,7 +311,11 @@ async def test_task_conversion_failure_does_not_mark_resolution_converted(
     async def fail_create_task(*args: object, **kwargs: object) -> None:
         raise RuntimeError("task creation failed")
 
-    monkeypatch.setattr(meeting_adapters.task_service, "create_task", fail_create_task)
+    monkeypatch.setattr(
+        meeting_adapters.task_management,
+        "create_task_in_transaction",
+        fail_create_task,
+    )
     with pytest.raises(RuntimeError, match="task creation failed"):
         await operations.resolution_to_task(session, resolution.id, creator_id=uid)
 

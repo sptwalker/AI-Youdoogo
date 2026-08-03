@@ -5,14 +5,13 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import ExecutionContext
-from app.agents.skills import execute_all, fold_notes
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.business.assistant_conversations.application.contracts import (
     AgentExecutionEvent,
     AgentExecutionRequest,
@@ -22,24 +21,24 @@ from app.contexts.business.assistant_conversations.application.contracts import 
     Principal,
 )
 from app.contexts.business.assistant_conversations.domain.models import Assistant, Participant
-from app.contexts.foundations.knowledge.knowledge_indexing.contracts import IndexTextCommand
-from app.contexts.foundations.knowledge.knowledge_indexing.public import (
-    build_local_knowledge_index_port,
+from app.contexts.business.task_management import public as task_management
+from app.contexts.foundations.execution.work_planning import public as work_planning
+from app.contexts.foundations.execution.workflow_runtime import public as workflow_runtime
+from app.contexts.foundations.governance.system_configuration import (
+    public as system_configuration,
 )
+from app.contexts.foundations.knowledge.knowledge_indexing import public as knowledge_indexing
+from app.contexts.foundations.knowledge.knowledge_indexing.contracts import IndexTextCommand
 from app.contexts.foundations.knowledge.organizational_memory import public as organizational_memory
 from app.contexts.foundations.knowledge.organizational_memory.contracts import (
     DistillConversationCommand,
 )
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
-from app.contexts.foundations.workforce.expert_management.public import (
-    build_local_expert_directory_port,
-    build_local_expert_provisioning_port,
-)
+from app.contexts.foundations.workforce.expert_management import public as expert_management
 from app.contexts.shared_kernel import ResourceNotFound
 from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.platform.object_storage import gateway as storage
-from app.services import config_service, orchestration_service
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +58,20 @@ class SQLAlchemyAssistantDirectoryAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._directory = build_local_expert_directory_port(session)
-        self._provisioning = build_local_expert_provisioning_port(session)
 
     async def get_or_create(self, principal: Principal) -> Assistant:
         user_id = principal.id
         display_name = principal.display_name
-        roster = await self._directory.list_roster(include_personal=True)
+        roster = await expert_management.list_expert_roster(
+            self._session,
+            include_personal=True,
+        )
         expert = next((item for item in roster if item.owner_user_id == user_id), None)
         if expert is None:
             base_name = f"{display_name}的助理"
             name_taken = any(item.name == base_name for item in roster)
-            expert = await self._provisioning.create(
+            expert = await expert_management.create_expert(
+                self._session,
                 name=f"{base_name}-{user_id.hex[:4]}" if name_taken else base_name,
                 prompt_template=_ASSISTANT_PROMPT,
                 duty=None,
@@ -133,13 +134,18 @@ class SQLAlchemyAssistantDirectoryAdapter:
         return (await self._session.execute(statement)).scalar_one_or_none()
 
 
-class LegacyConfigurationAdapter:
+class PublishedConfigurationAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def integer(self, key: str, default: int) -> int:
         try:
-            return int(await config_service.resolve(self._session, key, default))
+            resolved = await system_configuration.resolve_configuration(
+                self._session,
+                key,
+                default,
+            )
+            return int(resolved) if isinstance(resolved, (int, float, str)) else default
         except (TypeError, ValueError):
             return default
 
@@ -182,19 +188,19 @@ class LegacyAgentExecutionAdapter:
         if record is None:
             raise RuntimeError("Agent reply completed without an execution record")
         reply = record.output_content or record.error_msg or "（无回应）"
-        result = await execute_all(
+        result = await ToolDispatcher().dispatch_text(
             self._session,
             role,
             reply,
-            user_id=request.principal_id,
-            user_intent=request.original_message,
-            execution_context=ExecutionContext(
+            ExecutionContext(
                 user_id=request.principal_id,
                 user_intent=request.original_message,
                 agent_runner=self._agent_runner,
             ),
+            user_id=request.principal_id,
+            user_intent=request.original_message,
         )
-        reply = fold_notes(reply, result)
+        reply = result.fold_notes(reply)
         consultations = tuple(
             ConsultedReply(
                 participant_id=consulted.id,
@@ -212,7 +218,7 @@ class LegacyAgentExecutionAdapter:
         )
 
 
-class LegacyOrchestrationAdapter:
+class PublishedOrchestrationAdapter:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -223,18 +229,34 @@ class LegacyOrchestrationAdapter:
         assistant_id: uuid.UUID,
         message: str,
     ) -> OrchestrationResult | None:
+        normalized = message.strip()
+        if len(normalized) < 8:
+            return None
         try:
-            snapshot = await orchestration_service.start(
+            planned = await work_planning.plan_work(
+                work_planning.PlanWorkRequest(
+                    work_planning.WorkIntent(
+                        request=normalized,
+                        creator_id=principal_id,
+                        assignee_expert_id=assistant_id,
+                    )
+                )
+            )
+            if planned.plan is None:
+                return None
+            started = await task_management.start_workflow(
                 self._session,
-                message,
-                creator_id=principal_id,
-                assignee_agent_id=assistant_id,
-                operator_id=principal_id,
+                workflow_runtime.planning_to_start_command(planned.plan),
+            )
+            snapshot = await task_management.orchestration_progress(
+                self._session,
+                started.parent_task_id,
             )
         except Exception:  # noqa: BLE001 - orchestration failure falls back to chat
+            await self._session.rollback()
             logger.warning("桌面编排启动失败，退回普通对话", exc_info=True)
             return None
-        return OrchestrationResult(snapshot) if snapshot is not None else None
+        return OrchestrationResult(snapshot)
 
 
 class PublishedConversationArchiveAdapter:
@@ -242,7 +264,6 @@ class PublishedConversationArchiveAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._index = build_local_knowledge_index_port(session)
 
     async def archive(self, request: ArchiveConversationRequest) -> None:
         draft = await organizational_memory.distill_conversation(
@@ -254,13 +275,15 @@ class PublishedConversationArchiveAdapter:
             ),
         )
         title_suffix = "记忆" if draft is not None else "存档"
-        await self._index.index_text(
+        await knowledge_indexing.index_text(
+            self._session,
             IndexTextCommand(
                 title=request.title_template.replace("{title_suffix}", title_suffix),
                 text=draft.content if draft is not None else request.transcript,
                 uploader_id=request.principal_id,
                 knowledge_base_id=request.knowledge_base_id,
                 category="conversation",
+                document_id=request.document_id,
             ),
         )
 
@@ -304,17 +327,6 @@ class KnowledgeAttachmentStorageAdapter:
         return await storage.get_object_bytes(object_name)
 
 
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()
-
-    def new_object_token(self) -> str:
-        return uuid.uuid4().hex
 
 
 async def legacy_try_orchestrate(
@@ -324,7 +336,7 @@ async def legacy_try_orchestrate(
     assistant_id: uuid.UUID,
     message: str,
 ) -> dict[str, Any] | None:
-    result = await LegacyOrchestrationAdapter(session).try_start(
+    result = await PublishedOrchestrationAdapter(session).try_start(
         principal_id=principal_id,
         assistant_id=assistant_id,
         message=message,

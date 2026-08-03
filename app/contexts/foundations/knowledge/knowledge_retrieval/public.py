@@ -1,11 +1,19 @@
 """Stable Knowledge Retrieval application facade for outer adapters."""
 
 import secrets
+from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
+    KnowledgeRetrievalPort as KnowledgeRetrievalPort,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
     KnowledgeSearchPort as KnowledgeSearchPort,
+)
+from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
+    SearchKnowledgeQuery,
+    SearchKnowledgeResult,
 )
 from app.contexts.foundations.knowledge.knowledge_retrieval.entrypoints.operations import (
     answer_knowledge as answer_knowledge,
@@ -16,8 +24,8 @@ from app.contexts.foundations.knowledge.knowledge_retrieval.entrypoints.operatio
 from app.contexts.foundations.knowledge.knowledge_retrieval.entrypoints.operations import (
     search_knowledge as search_knowledge,
 )
-from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.local_adapter import (
-    LocalKnowledgeSearchAdapter,
+from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.composition import (
+    build_local_knowledge_retrieval,
 )
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.remote_adapter import (
     RemoteKnowledgeSearchAdapter,
@@ -25,12 +33,18 @@ from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure.remot
 from app.core.config import get_settings
 
 
+class _RoutedKnowledgeSearchPort(Protocol):
+    """Narrow boundary implemented by both the local facade and search-only remote adapter."""
+
+    async def search(self, query: SearchKnowledgeQuery) -> SearchKnowledgeResult: ...
+
+
 def build_local_knowledge_search_port(session: AsyncSession) -> KnowledgeSearchPort:
     """Build the in-process knowledge search port bound to the caller's session."""
-    return LocalKnowledgeSearchAdapter(session)
+    return build_local_knowledge_retrieval(session)
 
 
-def build_remote_knowledge_search_port() -> KnowledgeSearchPort:
+def build_remote_knowledge_search_port() -> _RoutedKnowledgeSearchPort:
     """Build the knowledge search port that speaks to the remote knowledge service over HTTP."""
     return RemoteKnowledgeSearchAdapter(base_url=get_settings().knowledge_gateway_url)
 
@@ -48,7 +62,7 @@ def _route_remote(percent: int) -> bool:
     return secrets.randbelow(100) < percent
 
 
-def build_knowledge_search_port(session: AsyncSession) -> KnowledgeSearchPort:
+def build_knowledge_search_port(session: AsyncSession) -> _RoutedKnowledgeSearchPort:
     """选择器（Phase 2 唯一切换点）：mode=remote 且配了地址时按 canary 抽样路由 Remote / Local。
 
     默认 local（percent=0 或 mode=local，无服务时安全）；回滚=percent 归 0。
@@ -64,4 +78,3 @@ def build_knowledge_search_port(session: AsyncSession) -> KnowledgeSearchPort:
     ):
         return build_remote_knowledge_search_port()
     return build_local_knowledge_search_port(session)
-

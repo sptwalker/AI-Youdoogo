@@ -11,7 +11,6 @@ from app.core import runtime_config
 from app.core.config import get_settings
 from app.integrations.feishu.oauth import FeishuOAuthConfig
 
-PRODUCTION_REDIRECT_URL = "https://ai.youdoogo.com/api/v1/auth/feishu/callback"
 CALLBACK_PATH = "/api/v1/auth/feishu/callback"
 SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_-]+$")
 VISIBLE_OAUTH_VALUE = re.compile(r"^[\x21-\x7e]+$")
@@ -71,7 +70,7 @@ def load_oauth_config() -> FeishuOAuthConfig:
     ):
         raise OAuthUnavailable
     if settings.app_env != "local":
-        if redirect_url != PRODUCTION_REDIRECT_URL:
+        if parsed.scheme != "https":
             raise OAuthUnavailable
     else:
         local_http = parsed.scheme == "http" and parsed.hostname in {

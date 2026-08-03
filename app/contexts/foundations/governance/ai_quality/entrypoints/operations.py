@@ -12,6 +12,8 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
     EvaluationResult,
     FeedbackResult,
     LowScoreSample,
+    OutputReviewRequest,
+    OutputReviewResult,
     PromptImprovementSuggestion,
     RecordFeedbackCommand,
     ShadowComparisonResult,
@@ -113,3 +115,10 @@ async def compare_candidate_prompt(
         candidate_prompt,
         user_id=user_id,
     )
+
+
+async def review_output(
+    session: AsyncSession,
+    request: OutputReviewRequest,
+) -> OutputReviewResult:
+    return await build_ai_quality(session).review_output.execute(request)

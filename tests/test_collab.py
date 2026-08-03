@@ -6,10 +6,13 @@ from collections.abc import AsyncGenerator
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.contexts.shared_kernel import ApplicationError
+from app.contexts.business.collaboration_requests.domain.errors import (
+    CollaborationReviewNotAllowed,
+)
+from app.contexts.business.collaboration_requests.domain.models import classify_risk
+from app.contexts.business.collaboration_requests.entrypoints import operations as collab_service
 from app.models import Base
 from app.models.system import SysDepartment
-from app.services import collab_service
 
 
 @pytest.fixture
@@ -24,10 +27,10 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def test_classify_risk() -> None:
-    assert collab_service.classify_risk("finance") == "high"
-    assert collab_service.classify_risk("hr") == "high"
-    assert collab_service.classify_risk("analysis") == "low"
-    assert collab_service.classify_risk(None) == "low"
+    assert classify_risk("finance") == "high"
+    assert classify_risk("hr") == "high"
+    assert classify_risk("analysis") == "low"
+    assert classify_risk(None) == "low"
 
 
 async def test_authorize_and_has_authorization(db: AsyncSession) -> None:
@@ -71,7 +74,7 @@ async def test_review_queue_filters_by_supervisor(db: AsyncSession) -> None:
     await collab_service.create_request(db, target_department_id=dept_b.id, title="给B")
 
     q = await collab_service.review_queue(db, supervisor_user_id=boss)
-    assert len(q) == 1 and q[0]["title"] == "给A"
+    assert len(q) == 1 and q[0].title == "给A"
     # admin 见全部 pending
     q_admin = await collab_service.review_queue(db, supervisor_user_id=uuid.uuid4(), is_admin=True)
     assert len(q_admin) == 2
@@ -86,5 +89,5 @@ async def test_review_request(db: AsyncSession) -> None:
     )
     assert approved.status == "approved" and approved.reviewed_by == reviewer
     # 已复核不可再复核
-    with pytest.raises(ApplicationError, match="不可复核"):
+    with pytest.raises(CollaborationReviewNotAllowed, match="不可复核"):
         await collab_service.review_request(db, r.id, decision="reject", reviewer_id=reviewer)

@@ -12,11 +12,17 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.agents import base, skills
 from app.agents.contracts import ExecutionContext, SkillRequest
 from app.agents.skill_registry import REGISTRY
+from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.business.collaboration_requests.entrypoints.agent_capability import (
     CollabSkillExecutor,
+)
+from app.contexts.foundations.execution.agent_execution.entrypoints import (
+    operations as agent_execution,
+)
+from app.contexts.foundations.execution.deliverable_management.entrypoints import (
+    agent_capability as deliver_service,
 )
 from app.contexts.foundations.execution.deliverable_management.entrypoints.agent_capability import (
     DeliverySkillExecutor,
@@ -24,7 +30,7 @@ from app.contexts.foundations.execution.deliverable_management.entrypoints.agent
 from app.contexts.foundations.integration.governed_data_query.entrypoints.agent_capability import (
     DataQuerySkillExecutor,
 )
-from app.contexts.foundations.model_gateway import public as _mg_public
+from app.contexts.foundations.model_gateway import public as model_gateway
 from app.models import Base
 from app.models.agent import AgentRole
 from app.models.collab import CollabRequest
@@ -32,8 +38,8 @@ from app.models.deliverable import Deliverable
 from app.models.llm_log import LlmCallLog
 from app.models.system import DEPT_L1, SysDepartment, SysUser
 from app.models.workflow import TOOL_FAILED, ToolExecution
-from app.services import deliver_service, workflow_service
-from app.services.orchestration_service import PlanStep, is_red_line
+from tests import workflow_testkit as workflow_service
+from tests.workflow_testkit import PlanStep, is_red_line
 
 
 @pytest.fixture
@@ -78,15 +84,15 @@ async def test_delivery_replay_reuses_record_and_object(
         uploads.append(object_name)
         return f"bucket/{object_name}"
 
-    monkeypatch.setattr(deliver_service.storage, "put_object", _put)
+    monkeypatch.setattr(deliver_service.object_storage, "put_object", _put)
     context = ExecutionContext(
         user_id=user.id,
         trace_id=uuid.uuid4(),
         attempt=1,
         idempotency_prefix="workflow:step:logical",
     )
-    first = await skills.execute_all(db, role, _DELIVERY, execution_context=context)
-    second = await skills.execute_all(db, role, _DELIVERY, execution_context=context)
+    first = await ToolDispatcher().dispatch_text(db, role, _DELIVERY, context)
+    second = await ToolDispatcher().dispatch_text(db, role, _DELIVERY, context)
     assert len(uploads) == 1
     assert uploads[0].startswith("deliverables/idempotent/")
     assert first.artifacts == second.artifacts
@@ -119,8 +125,8 @@ async def test_collab_replay_creates_one_review_request(db: AsyncSession) -> Non
         attempt=1,
         idempotency_prefix="workflow:collab-step:logical",
     )
-    first = await skills.execute_all(db, role, text, execution_context=context)
-    second = await skills.execute_all(db, role, text, execution_context=context)
+    first = await ToolDispatcher().dispatch_text(db, role, text, context)
+    second = await ToolDispatcher().dispatch_text(db, role, text, context)
     count = (await db.execute(select(func.count()).select_from(CollabRequest))).scalar_one()
     execution_count = (
         await db.execute(select(func.count()).select_from(ToolExecution))
@@ -137,7 +143,7 @@ async def test_invalid_or_unregistered_action_never_executes_side_effect(
     db: AsyncSession,
 ) -> None:
     user, role = await _identity(db, tools=["deliver"])
-    dispatcher = skills.ToolDispatcher()
+    dispatcher = ToolDispatcher()
     context = ExecutionContext(
         user_id=user.id,
         trace_id=uuid.uuid4(),
@@ -197,7 +203,9 @@ async def test_agent_and_llm_records_keep_workflow_trace(
                 usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
             )
 
-    monkeypatch.setattr(_mg_public, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM())
+    monkeypatch.setattr(
+        model_gateway, "get_llm_for_role", lambda *args, **kwargs: _FakeLLM()
+    )
     context = ExecutionContext(
         workflow_run_id=run.id,
         workflow_step_id=step.id,
@@ -205,7 +213,7 @@ async def test_agent_and_llm_records_keep_workflow_trace(
         trace_id=run.trace_id,
         user_id=user.id,
     )
-    record = await base.run_agent(
+    record = await agent_execution.run_agent(
         db,
         role,
         task_type="trace_test",
@@ -224,15 +232,14 @@ async def test_agent_and_llm_records_keep_workflow_trace(
         assert item.trace_id == run.trace_id
 
 
-def test_skill_services_do_not_import_agent_base() -> None:
+def test_retired_skill_service_facades_are_absent() -> None:
     root = Path(__file__).resolve().parents[1]
     for relative in (
         "app/services/collab_protocol.py",
         "app/services/query_skill.py",
         "app/services/deliver_service.py",
     ):
-        source = (root / relative).read_text(encoding="utf-8")
-        assert "app.agents.base" not in source
+        assert not (root / relative).exists()
 
 
 def test_data_query_registry_uses_canonical_capability_adapter() -> None:

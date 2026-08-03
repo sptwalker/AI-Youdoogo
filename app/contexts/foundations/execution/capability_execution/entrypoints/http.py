@@ -48,7 +48,7 @@ from app.contexts.foundations.execution.capability_execution.infrastructure.curr
 from app.contexts.foundations.execution.capability_execution.infrastructure.sqlalchemy_uow import (
     SQLAlchemyCapabilityExecutionUnitOfWork,
 )
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.eventing.remote_step import CAPABILITIES_EXECUTE_SCOPE
 from app.platform.http_runtime import ok
 

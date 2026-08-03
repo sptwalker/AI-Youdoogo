@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,13 +53,3 @@ class SQLAlchemySourceChangeAdapter:
             source_id=identity_id,
             affected_scopes=("identity",),
         )
-
-
-class SystemClock:
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-class UUIDIdentifier:
-    def new_id(self) -> uuid.UUID:
-        return uuid.uuid4()

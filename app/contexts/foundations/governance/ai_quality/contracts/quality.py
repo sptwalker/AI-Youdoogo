@@ -77,3 +77,29 @@ class PromptImprovementSuggestion:
     current_prompt: str
     suggested_prompt: str
     based_on_samples: int
+
+
+@dataclass(frozen=True, slots=True)
+class OutputReviewRequest:
+    expert_id: uuid.UUID
+    output: str
+    task_context: str
+    rubric: str
+    user_id: uuid.UUID | None = None
+    threshold: int = 4
+
+
+@dataclass(frozen=True, slots=True)
+class OutputReviewResult:
+    final_output: str
+    critic_score: int
+    issues: str
+    revised: bool
+    original_output: str = ""
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "critic_score": self.critic_score,
+            "issues": self.issues,
+            "revised": self.revised,
+        }

@@ -1,7 +1,7 @@
 /** 桌面助理对话状态拥有者：拉取历史、附件上传、乐观发送、流式回写与失败恢复。 */
 import { message } from 'antd'
 import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
-import { parseStreamEvent } from '../../api/client'
+import { parseStreamEvent } from '../../api/http'
 import {
   downloadDesktopAttachment,
   getDesktopChat,

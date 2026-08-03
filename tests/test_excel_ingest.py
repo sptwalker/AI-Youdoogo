@@ -6,7 +6,7 @@ from io import BytesIO
 import pytest
 from openpyxl import Workbook
 
-from app.services.excel_ingest import (
+from app.contexts.business.operational_analytics.infrastructure.workbook import (
     ColumnSpec,
     ExcelParseError,
     TemplateSpec,

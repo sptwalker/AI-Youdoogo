@@ -79,7 +79,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/health/ready
               port: http
             periodSeconds: 10
             timeoutSeconds: 3
@@ -236,14 +236,14 @@ metadata:
   # production ELB. Keep this listener binding aligned with its owner.
   annotations:
     kubernetes.io/elb.class: performance
-    kubernetes.io/elb.id: abab7533-a1c6-4138-a4bc-59d53e3446e2
+    kubernetes.io/elb.id: __CCE_ELB_ID__
     kubernetes.io/elb.listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    kubernetes.io/elb.listener-master-ingress: nexus-prod/nexus-studio
-    kubernetes.io/elb.tls-certificate-ids: 56de20421757445ea53f5af51ecb4e10
+    kubernetes.io/elb.listener-master-ingress: __CCE_LISTENER_MASTER_INGRESS__
+    kubernetes.io/elb.tls-certificate-ids: __CCE_TLS_CERTIFICATE_IDS__
 spec:
   ingressClassName: __INGRESS_CLASS_NAME__
   rules:
-    - host: ai.youdoogo.com
+    - host: __PUBLIC_HOST__
       http:
         paths:
           - path: /

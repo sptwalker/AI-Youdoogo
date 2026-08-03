@@ -107,20 +107,6 @@ class SQLAlchemyConversationRepository:
         self._messages[row.id] = row
         return message_to_domain(row)
 
-    async def list_pinned(self, owner_user_id: uuid.UUID) -> list[ConversationMessage]:
-        statement = (
-            select(DesktopMessage)
-            .where(
-                DesktopMessage.owner_user_id == owner_user_id,
-                DesktopMessage.is_pinned.is_(True),
-                DesktopMessage.is_delete.is_(False),
-            )
-            .order_by(DesktopMessage.pinned_at.desc(), DesktopMessage.create_time.desc())
-        )
-        rows = list((await self._session.execute(statement)).scalars())
-        self._messages.update({row.id: row for row in rows})
-        return [message_to_domain(row) for row in rows]
-
     async def add(self, message: ConversationMessage) -> None:
         row = DesktopMessage(
             id=message.id,

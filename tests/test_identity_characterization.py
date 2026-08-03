@@ -7,11 +7,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.identity.entrypoints import operations as identity
 from app.models import Base
 from app.models.system import SysUser
 from app.platform.outbox.model import OutboxEvent
-from app.schemas.auth import UserCreate, UserUpdate
-from app.services import auth_service
 
 
 @pytest.fixture
@@ -28,14 +27,14 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
 async def test_create_user_commits_identity_and_source_change_together(
     db: AsyncSession,
 ) -> None:
-    user = await auth_service.create_user(
+    user = await identity.create_user(
         db,
-        UserCreate(
-            username="identity01",
-            password="identity-pass-88",
-            real_name="身份用户",
-            role_code="member",
-        ),
+        username="identity01",
+        password="identity-pass-88",
+        real_name="身份用户",
+        role_code="member",
+        department_id=None,
+        feishu_open_id=None,
     )
 
     persisted = await db.get(SysUser, user.id)
@@ -70,8 +69,8 @@ async def test_resolve_user_includes_inactive_but_excludes_soft_deleted(
     db.add_all([inactive, deleted])
     await db.commit()
 
-    assert await auth_service.get_user_by_id(db, inactive.id) is not None
-    assert await auth_service.get_user_by_id(db, deleted.id) is None
+    assert await identity.get_user_by_id(db, user_id=inactive.id) is not None
+    assert await identity.get_user_by_id(db, user_id=deleted.id) is None
 
 
 async def test_partial_update_preserves_department_but_explicitly_unbinds_feishu(
@@ -88,10 +87,16 @@ async def test_partial_update_preserves_department_but_explicitly_unbinds_feishu
     db.add(user)
     await db.commit()
 
-    updated = await auth_service.update_user(
+    updated = await identity.update_user(
         db,
-        user.id,
-        UserUpdate(department_id=None, feishu_open_id=None),
+        user_id=user.id,
+        password=None,
+        real_name=None,
+        role_code=None,
+        department_id=None,
+        is_active=None,
+        feishu_open_id=None,
+        feishu_binding_changed=True,
     )
 
     assert updated.department_id == department_id

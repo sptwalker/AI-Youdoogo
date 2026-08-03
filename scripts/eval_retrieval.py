@@ -106,20 +106,23 @@ async def _run(golden_path: Path, min_recall: float, min_ndcg: float) -> int:
 
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # Windows 控制台
 
+    from app.contexts.foundations.governance.system_configuration.public import (
+        list_configurations,
+    )
     from app.contexts.foundations.knowledge.knowledge_retrieval.contracts import (
         SearchKnowledgeQuery,
     )
     from app.contexts.foundations.knowledge.knowledge_retrieval.public import search_knowledge
     from app.core import runtime_config
-    from app.core.database import async_session_factory
-    from app.services import config_service
+    from app.platform.database import async_session_factory
 
     golden = load_golden(golden_path)
     print(f"golden 集 {golden_path.name}：{len(golden)} 条查询\n")
 
     retrieved_per_query: list[list[str]] = []
     async with async_session_factory() as db:
-        runtime_config.load(await config_service.all_values(db))  # 载 embedding 端点/密钥
+        configurations = await list_configurations(db)
+        runtime_config.load({item.key: item.value for item in configurations})
         for item in golden:
             t0 = time.perf_counter()
             result = await search_knowledge(

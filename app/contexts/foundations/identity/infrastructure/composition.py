@@ -6,12 +6,11 @@ from app.contexts.foundations.identity.application.use_cases import IdentityAppl
 from app.contexts.foundations.identity.infrastructure.adapters import (
     BcryptPasswordAdapter,
     FeishuOAuthAdapter,
-    SystemClock,
-    UUIDIdentifier,
 )
 from app.contexts.foundations.identity.infrastructure.sqlalchemy_uow import (
     SQLAlchemyIdentityUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_identity_application(session: AsyncSession) -> IdentityApplication:

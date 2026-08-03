@@ -8,13 +8,12 @@ from app.contexts.business.meeting_management.application.use_cases import (
 from app.contexts.business.meeting_management.infrastructure.adapters import (
     AccessControlMeetingVisibilityPolicy,
     LegacyMeetingAdvisoryAdapter,
-    SystemClock,
     TaskManagementCreationAdapter,
-    UUIDIdentifier,
 )
 from app.contexts.business.meeting_management.infrastructure.sqlalchemy_uow import (
     SQLAlchemyMeetingUnitOfWork,
 )
+from app.platform.deterministic import SystemClock, UUIDIdentifier
 
 
 def build_meeting_application(session: AsyncSession) -> MeetingApplication:

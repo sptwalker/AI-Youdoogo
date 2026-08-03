@@ -1,11 +1,16 @@
 """应用统一配置入口：所有环境变量经由 Settings 读取，禁止散落 os.getenv。"""
 
 from functools import lru_cache
+from urllib.parse import unquote, urlsplit
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_JWT_SECRET = "local-only-jwt-secret-change-in-production"
+_MAX_LODGE_HTTP_TIMEOUT_SECONDS = 30.0
+_MAX_LODGE_JWKS_CACHE_TTL_SECONDS = 3_600
+_MAX_LODGE_STATUS_CACHE_TTL_SECONDS = 300
+_MAX_LODGE_RESPONSE_BYTES = 1_048_576
 
 
 class Settings(BaseSettings):
@@ -42,7 +47,36 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "youdoo"
-    minio_secure: bool = False  # 生产置 True 走 TLS；本地/compose MinIO 明文默认 False
+    # 迁移期对象存储能力。secure=False 保持现有本地 MinIO 行为；生产切换 TLS
+    # 时只需改变配置，不改变 gateway 的旧 put/get API。
+    minio_secure: bool = False
+    # 逗号分隔的资源权限 allowlist。空 bucket 列表仅允许 minio_bucket，空 prefix
+    # 列表表示当前 bucket 下保持兼容的全路径访问。
+    minio_allowed_buckets: str = ""
+    minio_allowed_prefixes: str = ""
+    minio_presign_expire_seconds: int = 900
+
+    # 跨服务身份（默认关闭，不影响用户 JWT 或当前部署拓扑）。私钥只从配置读取，
+    # 不在应用内生成，也不在仓库保存。平台 service_identity 使用 RS256；旧的
+    # app.core.internal_token 使用 ES256。两套实现迁移期间共存，但不能混用启用路径。
+    internal_jwt_enabled: bool = False
+    internal_jwt_audience: str = ""
+    internal_jwt_service_id: str = ""
+    internal_jwt_ttl_seconds: int = 300
+
+    # Lodge resource-server（默认关闭；独立于现有 HS256 用户登录）。仅验证 Lodge
+    # 发给 youdoogo 的浏览器 target token，绝不将该 token 转发给下游服务。
+    lodge_identity_enabled: bool = False
+    lodge_issuer: str = ""
+    lodge_jwks_url: str = ""
+    lodge_audience: str = "youdoogo"
+    lodge_status_url: str = ""
+    lodge_status_service_token: SecretStr = SecretStr("")
+    lodge_http_timeout_seconds: float = 3.0
+    lodge_jwks_cache_ttl_seconds: int = 300
+    lodge_status_cache_ttl_seconds: int = 60
+    lodge_status_cache_max_entries: int = 10_000
+    lodge_response_max_bytes: int = 65_536
 
     # 大模型密钥（国产为主，DeepSeek 主力）
     deepseek_api_key: str = ""
@@ -161,17 +195,46 @@ class Settings(BaseSettings):
                 "生产环境 JWT_SECRET 必须覆盖默认值且长度≥32；"
                 '可用 python -c "import secrets;print(secrets.token_urlsafe(48))" 生成'
             )
+        if self.lodge_identity_enabled:
+            required = {
+                "LODGE_ISSUER": self.lodge_issuer,
+                "LODGE_JWKS_URL": self.lodge_jwks_url,
+                "LODGE_STATUS_URL": self.lodge_status_url,
+                "LODGE_STATUS_SERVICE_TOKEN": self.lodge_status_service_token.get_secret_value(),
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing:
+                raise ValueError(f"Lodge enabled but missing: {', '.join(missing)}")
+            if self.lodge_audience != "youdoogo":
+                raise ValueError("LODGE_AUDIENCE must be exactly youdoogo")
+            _validate_lodge_url(self.lodge_issuer, "LODGE_ISSUER")
+            _validate_lodge_url(self.lodge_jwks_url, "LODGE_JWKS_URL", require_path=True)
+            _validate_lodge_url(self.lodge_status_url, "LODGE_STATUS_URL", require_path=True)
+            if not 0 < self.lodge_http_timeout_seconds <= _MAX_LODGE_HTTP_TIMEOUT_SECONDS:
+                raise ValueError("LODGE_HTTP_TIMEOUT_SECONDS must be between 0 and 30")
+            if not 0 < self.lodge_jwks_cache_ttl_seconds <= _MAX_LODGE_JWKS_CACHE_TTL_SECONDS:
+                raise ValueError("LODGE_JWKS_CACHE_TTL_SECONDS must be between 1 and 3600")
+            if not 0 < self.lodge_status_cache_ttl_seconds <= _MAX_LODGE_STATUS_CACHE_TTL_SECONDS:
+                raise ValueError("LODGE_STATUS_CACHE_TTL_SECONDS must be between 1 and 300")
+            if self.lodge_status_cache_max_entries <= 0:
+                raise ValueError("LODGE_STATUS_CACHE_MAX_ENTRIES must be greater than zero")
+            if not 0 < self.lodge_response_max_bytes <= _MAX_LODGE_RESPONSE_BYTES:
+                raise ValueError("LODGE_RESPONSE_MAX_BYTES must be between 1 and 1048576")
         return self
 
     @model_validator(mode="after")
     def _enforce_internal_jwt(self) -> "Settings":
-        """Internal JWT 约束：exp≤5min（文档硬上限）；配了私钥则须能解析为 EC 私钥（启动即校验）。
+        """Validate both internal-token generations during the migration window.
 
-        私钥留空允许（本地无出站时不签发）；Phase 1 RemoteLlmAdapter 上线时另在其任务转生产必填。
+        ``internal_jwt_enabled`` selects the new RS256 service-identity component,
+        which performs its own RSA validation.  With the flag disabled, existing
+        remote adapters continue to use the legacy ES256 token implementation.
         """
         if not (1 <= self.internal_jwt_expire_seconds <= 300):
             raise ValueError("INTERNAL_JWT_EXPIRE_SECONDS 必须在 1..300（文档硬上限 exp≤5min）")
-        if self.internal_jwt_private_key:
+        if not (1 <= self.internal_jwt_ttl_seconds <= 300):
+            raise ValueError("INTERNAL_JWT_TTL_SECONDS must be between 1 and 300")
+        if self.internal_jwt_private_key and not self.internal_jwt_enabled:
             # 尽早校验 PEM 合法，避免运行时首次签发才 500；仅在配了私钥时校验。
             from cryptography.hazmat.primitives.asymmetric import ec
             from cryptography.hazmat.primitives.serialization import load_pem_private_key
@@ -256,6 +319,36 @@ class Settings(BaseSettings):
                 "（回调打回本端 /internal/capabilities/execute，Provider 关则 404）"
             )
         return self
+
+
+def _validate_lodge_url(raw_url: str, setting_name: str, *, require_path: bool = False) -> None:
+    """Reject ambiguous remote endpoints before a client can be constructed."""
+    try:
+        parsed = urlsplit(raw_url)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{setting_name} must be a valid HTTPS URL") from exc
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.query
+    ):
+        raise ValueError(
+            f"{setting_name} must be a fixed HTTPS URL without userinfo, query, or fragment"
+        )
+    if require_path and not _is_safe_fixed_path(parsed.path):
+        raise ValueError(f"{setting_name} must include a safe, non-root path")
+
+
+def _is_safe_fixed_path(path: str) -> bool:
+    decoded_path = unquote(path)
+    if not decoded_path.startswith("/") or decoded_path.rstrip("/") == "" or "//" in decoded_path:
+        return False
+    return all(segment not in {".", ".."} for segment in decoded_path.split("/") if segment)
 
 
 @lru_cache

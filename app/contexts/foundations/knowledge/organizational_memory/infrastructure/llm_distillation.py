@@ -1,4 +1,4 @@
-"""LLM-backed memory distillation adapter (over the model_gateway completion port)."""
+"""LLM-backed memory distillation adapter over the model gateway."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class LlmMemoryDistillation:
 
     async def distill(self, command: DistillConversationCommand) -> MemoryDraft | None:
         started = time.monotonic()
-        resp = await self._port.invoke(
+        response = await self._port.invoke(
             LlmCompletionRequest(
                 model_role="default",
                 system_prompt=_DISTILL_SYSTEM,
@@ -48,14 +48,14 @@ class LlmMemoryDistillation:
         await record_usage(
             self._session,
             role="memory_distill",
-            model=resp.model or "default",
-            prompt_tokens=resp.usage.prompt_tokens,
-            completion_tokens=resp.usage.completion_tokens,
-            total_tokens=resp.usage.total_tokens,
+            model=response.model or "default",
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens,
             duration_ms=int((time.monotonic() - started) * 1000),
             user_id=command.principal_id,
         )
-        normalized = resp.content.strip()
+        normalized = response.content.strip()
         if not normalized:
             return None
         return MemoryDraft(

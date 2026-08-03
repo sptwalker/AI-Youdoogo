@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 # JSONB 主类型；sqlite 单测下降级为通用 JSON，仅为 metadata.create_all 可跑
 _JSONB = JSON().with_variant(JSONB(), "postgresql")

@@ -23,8 +23,8 @@ from app.contexts.business.assistant_conversations.entrypoints import (
 )
 from app.contexts.business.work_desktop import public as work_desktop
 from app.contexts.foundations.identity.application.contracts import IdentityUserResult
-from app.core.database import get_db
 from app.core.sse import sse_response
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])

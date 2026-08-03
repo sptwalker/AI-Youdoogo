@@ -42,14 +42,9 @@ def test_org_route_has_no_legacy_service_or_orm_imports() -> None:
     }
 
 
-def test_org_facades_do_not_own_queries_transactions_or_models() -> None:
-    for name in ("org_service.py", "org_sync_service.py"):
-        source = (ROOT / "app" / "services" / name).read_text(encoding="utf-8")
-        assert ".commit(" not in source
-        assert ".rollback(" not in source
-        assert "select(" not in source
-        assert "app.models" not in source
-    assert not (ROOT / "app" / "services" / "org_template.py").exists()
+def test_retired_org_facades_are_removed_and_context_adapters_stay_decoupled() -> None:
+    for name in ("org_service.py", "org_sync_service.py", "org_template.py"):
+        assert not (ROOT / "app" / "services" / name).exists()
 
     adapters = (
         ROOT

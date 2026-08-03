@@ -20,7 +20,7 @@ import {
   type DiscussionRequestOptions,
   type Message,
 } from '../../api/discussion'
-import type { SseHandler, SseRequestOptions } from '../../api/client'
+import type { SseHandler, SseRequestOptions } from '../../api/http'
 
 export type { AgentRole, Attachment, Colleague, Message }
 export type { ChannelWithUnread }

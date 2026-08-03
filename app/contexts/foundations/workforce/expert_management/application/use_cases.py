@@ -5,11 +5,6 @@ from __future__ import annotations
 import logging
 import uuid
 
-from app.contexts.foundations.workforce.expert_management.application.contracts import (
-    CreateExpertCommand,
-    SeedExpertCommand,
-    UpdateExpertCommand,
-)
 from app.contexts.foundations.workforce.expert_management.application.errors import (
     ExpertWriteConflict,
 )
@@ -27,6 +22,11 @@ from app.contexts.foundations.workforce.expert_management.application.release_pu
 )
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertReleaseView,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.management import (
+    CreateExpertCommand,
+    SeedExpertCommand,
+    UpdateExpertCommand,
 )
 from app.contexts.foundations.workforce.expert_management.contracts.roster import (
     DepartmentExpertCount,

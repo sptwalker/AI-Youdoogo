@@ -18,6 +18,11 @@ FULL_SHA = "a" * 40
 IMAGE_TAG = f"ci-{FULL_SHA}"
 DEPLOY_TOOLS_TAG = "alpine3.22.1-kubectl1.31.5-r1"
 KUBECTL_VERSION = "v1.31.5"
+PUBLIC_HOST = "app.example.test"
+CCE_ELB_ID = "11111111-1111-4111-8111-111111111111"
+CCE_LISTENER_MASTER_INGRESS = "platform/shared-listener"
+CCE_TLS_CERTIFICATE_IDS = "certificate123"
+FEISHU_OPS_CHAT_ID = "oc_123abc"
 KUBECTL_SHA256 = (
     "fbecbfd375b3686002c2e81d51c390172f5ffba3d6b47920d55342cb03f557af"
 )
@@ -44,6 +49,10 @@ def rendered_objects(tmp_path: Path) -> list[dict]:
         "RUNTIME_SECRET_NAME": "youdoogo-runtime",
         "RUNTIME_CONFIGMAP_NAME": "youdoogo-runtime-config",
         "INGRESS_CLASS_NAME": "cce-public",
+        "PUBLIC_HOST": PUBLIC_HOST,
+        "CCE_ELB_ID": CCE_ELB_ID,
+        "CCE_LISTENER_MASTER_INGRESS": CCE_LISTENER_MASTER_INGRESS,
+        "CCE_TLS_CERTIFICATE_IDS": CCE_TLS_CERTIFICATE_IDS,
         "IMAGE_TAG": IMAGE_TAG,
         "BACKEND_IMAGE": f"swr.example.com/approved/youdoogo-backend:{IMAGE_TAG}",
         "FRONTEND_IMAGE": f"swr.example.com/approved/youdoogo-frontend:{IMAGE_TAG}",
@@ -113,6 +122,15 @@ def test_gitlab_pipeline_policy_and_mechanics() -> None:
     assert "node:20-alpine" in text
     assert "${SWR_REGION}@${SWR_AK}" in text
     assert "ci-${CI_COMMIT_SHA}" in text
+    delivery_defaults = {
+        "PUBLIC_HOST": "ai.youdoogo.com",
+        "CCE_ELB_ID": "abab7533-a1c6-4138-a4bc-59d53e3446e2",
+        "CCE_LISTENER_MASTER_INGRESS": "nexus-prod/nexus-studio",
+        "CCE_TLS_CERTIFICATE_IDS": "56de20421757445ea53f5af51ecb4e10",
+        "FEISHU_OPS_CHAT_ID": "oc_52174c913e452fa712e77439a07300ac",
+    }
+    for name, value in delivery_defaults.items():
+        assert pipeline["variables"][name] == value
 
     backend_verify = pipeline["verify_backend"]
     assert backend_verify["services"] == [
@@ -328,8 +346,8 @@ def test_deploy_tools_image_and_bootstrap_contract() -> None:
     assert 'CI_PIPELINE_SOURCE == "push"' in automatic["rules"][0]["if"]
     recovery = pipeline["bootstrap_deploy_tools"]
     assert recovery["extends"] == ".deploy_tools_build"
-    assert recovery["rules"][0]["when"] == "manual"
-    assert recovery["rules"][0]["allow_failure"] is True
+    assert "when" not in recovery["rules"][0]
+    assert "allow_failure" not in recovery["rules"][0]
 
     docs = (ROOT / "ops/first-release-preflight.md").read_text(encoding="utf-8")
     for required_text in (
@@ -349,14 +367,14 @@ def test_manifests_are_host_safe_and_reference_only(tmp_path: Path) -> None:
     ingress = object_by(objects, "Ingress", "youdoogo")
     assert ingress["metadata"]["annotations"] == {
         "kubernetes.io/elb.class": "performance",
-        "kubernetes.io/elb.id": "abab7533-a1c6-4138-a4bc-59d53e3446e2",
+        "kubernetes.io/elb.id": CCE_ELB_ID,
         "kubernetes.io/elb.listen-ports": '[{"HTTP":80},{"HTTPS":443}]',
-        "kubernetes.io/elb.listener-master-ingress": "nexus-prod/nexus-studio",
-        "kubernetes.io/elb.tls-certificate-ids": "56de20421757445ea53f5af51ecb4e10",
+        "kubernetes.io/elb.listener-master-ingress": CCE_LISTENER_MASTER_INGRESS,
+        "kubernetes.io/elb.tls-certificate-ids": CCE_TLS_CERTIFICATE_IDS,
     }
     assert ingress["spec"]["ingressClassName"] == "cce-public"
     assert "tls" not in ingress["spec"]
-    assert ingress["spec"]["rules"][0]["host"] == "ai.youdoogo.com"
+    assert ingress["spec"]["rules"][0]["host"] == PUBLIC_HOST
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
     assert paths == [
         {
@@ -385,8 +403,13 @@ def test_backend_serve_and_probe_contract(tmp_path: Path) -> None:
     container = backend["spec"]["template"]["spec"]["containers"][0]
     assert container["args"] == ["serve"]
     assert container["image"].endswith(f":{IMAGE_TAG}")
-    for probe_name in ("startupProbe", "readinessProbe", "livenessProbe"):
-        assert container[probe_name]["httpGet"]["path"] == "/api/v1/health"
+    expected_probe_paths = {
+        "startupProbe": "/api/v1/health",
+        "readinessProbe": "/api/v1/health/ready",
+        "livenessProbe": "/api/v1/health",
+    }
+    for probe_name, expected_path in expected_probe_paths.items():
+        assert container[probe_name]["httpGet"]["path"] == expected_path
     assert container["envFrom"] == [
         {"configMapRef": {"name": "youdoogo-runtime-config"}},
         {"secretRef": {"name": "youdoogo-runtime"}},
@@ -445,7 +468,7 @@ def test_frontend_same_origin_proxy_and_spa() -> None:
     assert "access_log off;" in callback
     assert "proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};" in callback
     assert "proxy_set_header X-Forwarded-Proto $upstream_forwarded_proto;" in callback
-    client = (ROOT / "frontend/src/api/client.ts").read_text(encoding="utf-8")
+    client = (ROOT / "frontend/src/api/http.ts").read_text(encoding="utf-8")
     assert "baseURL: '/api/v1'" in client
 
 
@@ -532,6 +555,8 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
         "CI_COMMIT_SHORT_SHA": "1234abcd",
         "CI_COMMIT_TITLE": "Correct notification contract",
         "GITLAB_USER_NAME": "Delivery Owner",
+        "PUBLIC_HOST": PUBLIC_HOST,
+        "FEISHU_OPS_CHAT_ID": FEISHU_OPS_CHAT_ID,
     }
     for name, value in notification_env.items():
         monkeypatch.setenv(name, value)
@@ -540,7 +565,7 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    payload = module.card("success")
+    payload = module.card("success", public_url=f"https://{PUBLIC_HOST}/")
     title = payload["header"]["title"]["content"]
     content = payload["elements"][0]["content"]
     assert title == "✅ YOUDOOGO 流水线成功 #42"
@@ -553,10 +578,8 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
         "**完成时间**",
         "**地址**",
     ]
-    assert lines[-1] == "**地址**：[YOUDOOGO](https://ai.youdoogo.com/)"
+    assert lines[-1] == f"**地址**：[YOUDOOGO](https://{PUBLIC_HOST}/)"
 
-    canonical_chat_id = "oc_52174c913e452fa712e77439a07300ac"
-    assert module.CHAT_ID == canonical_chat_id
     requests = []
 
     def fake_urlopen(request, timeout):
@@ -571,7 +594,7 @@ def test_variable_contract_and_notification_card(monkeypatch) -> None:
     assert module.main() == 0
     assert len(requests) == 2
     message_payload = json.loads(requests[1][0].data.decode())
-    assert message_payload["receive_id"] == canonical_chat_id
+    assert message_payload["receive_id"] == FEISHU_OPS_CHAT_ID
     assert message_payload["msg_type"] == "interactive"
 
 

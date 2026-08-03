@@ -27,7 +27,6 @@ from .task_decisions import (
     task_decision_from_payload,
     task_decision_to_payload,
 )
-from .transaction import SQLAlchemyTaskTransaction
 from .workflow_projection import SQLAlchemyWorkflowTaskProjection
 
 if TYPE_CHECKING:
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SQLAlchemyTaskManagementAdapter",
-    "SQLAlchemyTaskTransaction",
     "task_decision_from_payload",
     "task_decision_to_payload",
 ]

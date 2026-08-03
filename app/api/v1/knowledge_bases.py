@@ -13,7 +13,7 @@ from app.contexts.foundations.knowledge.wiki_management.public import (
     list_knowledge_bases,
     update_knowledge_base,
 )
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.knowledge import KnowledgeBaseCreate, KnowledgeBaseUpdate
 

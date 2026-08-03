@@ -27,7 +27,7 @@ from app.contexts.business.collaboration_requests.domain.errors import (
 from app.contexts.business.collaboration_requests.entrypoints import operations
 from app.contexts.foundations.identity.application.contracts import IdentityUserResult
 from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound, RuleViolation
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(tags=["collab"])

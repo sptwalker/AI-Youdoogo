@@ -22,6 +22,9 @@ from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
 from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
     event_handler,
 )
+from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
+    sqlalchemy_index as ingest,
+)
 from app.contexts.foundations.knowledge.knowledge_retrieval.application.use_cases import (
     KnowledgeRetrieval,
 )
@@ -61,7 +64,6 @@ from app.contexts.foundations.knowledge.wiki_management.contracts import (
 )
 from app.contexts.foundations.knowledge.wiki_management.domain.models import KnowledgeBase
 from app.contexts.shared_kernel import RuleViolation
-from app.knowledge import ingest
 from app.models import Base
 from app.models.knowledge import KnowledgeBase as KnowledgeBaseRow
 from app.models.system import SysUser

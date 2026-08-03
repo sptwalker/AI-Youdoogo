@@ -16,9 +16,9 @@ from app.contexts.foundations.identity.contracts import Principal, PrincipalType
 from app.contexts.foundations.identity.public import get_user_by_id
 from app.contexts.shared_kernel import AuthenticationFailed, PermissionDenied
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.internal_token import InternalClaims, verify_internal_token
 from app.core.security import decode_access_token
+from app.platform.database import get_db
 
 _bearer = HTTPBearer(auto_error=False)
 

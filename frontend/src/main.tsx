@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { RouterProvider } from 'react-router-dom'
-import { ApiError } from './api/client'
+import { ApiError } from './api/http'
 import { router } from './router'
 import './index.css'
 

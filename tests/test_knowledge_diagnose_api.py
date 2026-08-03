@@ -19,11 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.contexts.foundations.knowledge.knowledge_retrieval.infrastructure import (
     sqlalchemy_retrieval,
 )
-from app.core.database import get_db
 from app.core.security import create_access_token
 from app.main import app
 from app.models import Base
 from app.models.system import SysUser
+from app.platform.database import get_db
 
 
 @pytest.fixture

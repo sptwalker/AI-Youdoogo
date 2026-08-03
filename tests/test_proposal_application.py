@@ -242,6 +242,27 @@ async def test_create_commits_a_draft(
     assert tracker.commits == 1
 
 
+async def test_create_reuses_proposal_for_the_same_source_message(
+    application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
+) -> None:
+    app, repository, tracker, _ = application
+    source_message_id = uuid.uuid4()
+    command = CreateProposalCommand(
+        title="从群聊升格",
+        background="讨论内容",
+        plan="待补充",
+        creator_id=uuid.uuid4(),
+        source_message_id=source_message_id,
+    )
+
+    first = await app.create(command)
+    second = await app.create(command)
+
+    assert second.id == first.id
+    assert list(repository.proposals) == [first.id]
+    assert tracker.commits == 1
+
+
 async def test_research_commits_pending_state_before_external_call(
     application: tuple[ProposalApplication, _Repository, _UowTracker, _AuditPort],
 ) -> None:

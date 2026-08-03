@@ -14,7 +14,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.agents.workflow_engine import get_workflow_engine
+from app.contexts.foundations.execution.workflow_runtime.application.runtime_routing import (
+    RuntimeRoutingPolicy,
+)
+from app.contexts.foundations.execution.workflow_runtime.contracts.runtime_v2 import (
+    RuntimeEngine,
+)
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     sqlalchemy_repository,
 )
@@ -23,8 +28,8 @@ from app.models import Base
 from app.models.agent import AgentRole
 from app.models.system import SysUser
 from app.models.workflow import RUN_SUCCEEDED
-from app.services import workflow_service
-from app.services.orchestration_service import PlanStep, is_red_line
+from tests import workflow_testkit as workflow_service
+from tests.workflow_testkit import PlanStep, is_red_line
 
 
 @pytest.fixture
@@ -99,14 +104,10 @@ async def test_drain_counts_active_by_engine_excludes_terminal(db: AsyncSession)
     assert await sqlalchemy_repository.count_active_runs_by_engine(db) == {}  # 已排空
 
 
-def test_get_workflow_engine_config_driven_fail_closed() -> None:
-    """缺省读 config.workflow_engine 选引擎；未知名拒绝（fail-closed），不静默回落。"""
-    s = get_settings()
-    saved = s.workflow_engine
-    try:
-        s.workflow_engine = "database"
-        assert get_workflow_engine() is get_workflow_engine("database")  # 同一单例
-        with pytest.raises(ValueError):
-            get_workflow_engine("nope")  # 未知引擎名 → 拒绝
-    finally:
-        s.workflow_engine = saved
+def test_runtime_routing_is_creation_time_and_fail_closed() -> None:
+    """Runtime v2 只在创建期选路；空 workflow type 拒绝而非静默回落。"""
+    policy = RuntimeRoutingPolicy({"remote-task": RuntimeEngine.REMOTE})
+    assert policy.resolve_new("default-task") is RuntimeEngine.LOCAL
+    assert policy.resolve_new("remote-task") is RuntimeEngine.REMOTE
+    with pytest.raises(ValueError):
+        policy.resolve_new("  ")

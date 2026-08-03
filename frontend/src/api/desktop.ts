@@ -3,12 +3,12 @@ import { message } from 'antd'
 import {
   ApiError,
   clearSessionAndRedirectToLogin,
+  getToken,
   request,
   sseRequest,
-  TOKEN_KEY,
   type SseHandler,
   type SseRequestOptions,
-} from './client'
+} from './http'
 import type { Attachment } from './discussion'
 
 export type { Attachment } from './discussion'
@@ -120,7 +120,7 @@ function desktopAttachmentUrl(att: Attachment): string {
 }
 
 async function fetchProtectedBlob(url: string, defaultErrorMessage = '下载失败'): Promise<Blob> {
-  const token = localStorage.getItem(TOKEN_KEY)
+  const token = getToken()
   const resp = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })

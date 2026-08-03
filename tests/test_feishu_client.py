@@ -9,7 +9,7 @@ import respx
 
 from app.core.config import get_settings
 from app.integrations.feishu import notify
-from app.integrations.feishu.client import FeishuClient
+from app.integrations.feishu.client import FeishuAPIError, FeishuAuthError, FeishuClient
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 MSG_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
@@ -151,3 +151,74 @@ async def test_document_raw_content(feishu_settings: None) -> None:
     text = await client.get_document_raw_content("doc1")
     assert text == "第一段\n第二段"
     await client.close()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, content=b"not-json"),
+        httpx.Response(200, json=[]),
+        httpx.Response(200, json={"code": 0, "expire": 7200}),
+        httpx.Response(
+            200,
+            json={"code": 0, "tenant_access_token": "token", "expire": "later"},
+        ),
+    ],
+)
+@respx.mock
+async def test_invalid_tenant_token_response_is_auth_error(
+    feishu_settings: None,
+    response: httpx.Response,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=response)
+    async with FeishuClient() as client:
+        with pytest.raises(FeishuAuthError):
+            await client.get_tenant_access_token()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, content=b"not-json"),
+        httpx.Response(200, json=[]),
+        httpx.Response(200, json={"code": 0, "data": []}),
+    ],
+)
+@respx.mock
+async def test_invalid_authed_response_is_api_error(
+    feishu_settings: None,
+    response: httpx.Response,
+) -> None:
+    _mock_token()
+    respx.post(MSG_URL).mock(return_value=response)
+    async with FeishuClient() as client:
+        with pytest.raises(FeishuAPIError):
+            await client.send_text("u1", "hello")
+
+
+@respx.mock
+async def test_bitable_update_uses_shared_response_validation(
+    feishu_settings: None,
+) -> None:
+    _mock_token()
+    update_url = f"{BITABLE_URL}/r1"
+    route = respx.put(update_url).mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"record_id": "r1"}})
+    )
+    async with FeishuClient() as client:
+        result = await client.bitable_update_record("app1", "tbl1", "r1", {"A": 1})
+    assert result == {"record_id": "r1"}
+    assert json.loads(route.calls.last.request.content) == {"fields": {"A": 1}}
+
+
+@respx.mock
+async def test_context_manager_closes_http_client(feishu_settings: None) -> None:
+    _mock_token()
+    client = FeishuClient()
+    async with client:
+        await client.get_tenant_access_token()
+        http_client = client._client
+        assert http_client is not None
+        assert not http_client.is_closed
+    assert http_client.is_closed
+    assert client._client is None

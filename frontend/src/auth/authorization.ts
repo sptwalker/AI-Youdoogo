@@ -2,7 +2,7 @@ import type { UserInfo } from '../api/auth'
 
 export type RoleCode = UserInfo['role_code']
 
-export interface RouteAccessHandle {
+interface RouteAccessHandle {
   roles?: readonly RoleCode[]
 }
 

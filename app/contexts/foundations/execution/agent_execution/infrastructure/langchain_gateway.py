@@ -1,8 +1,4 @@
-"""Current usage-gate adapter behind a pure Agent port.
-
-历史文件名保留；LLM 完成适配器已迁至 ``model_gateway.infrastructure.local_adapter``，
-本文件不再依赖 langchain，仅保留与 LLM 无关的用量授权闸门。
-"""
+"""Current usage-gate adapter behind a pure Agent port."""
 
 from __future__ import annotations
 

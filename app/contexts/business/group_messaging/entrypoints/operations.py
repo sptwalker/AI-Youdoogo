@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.contexts.business.group_messaging.application.contracts import (
     AttachmentDownloadResult,
@@ -39,6 +39,15 @@ def _members(values: list[dict[str, Any]] | None) -> tuple[MemberInput, ...]:
             )
         )
     return tuple(result)
+
+
+def _isolated_session_factory(
+    session: AsyncSession,
+) -> async_sessionmaker[AsyncSession]:
+    bind = session.bind
+    if bind is None:
+        raise RuntimeError("Streaming Group Messaging requires a bound database session")
+    return async_sessionmaker(bind, expire_on_commit=False)
 
 
 async def create_channel(
@@ -197,27 +206,31 @@ async def post_message_stream(
     attachments: list[dict[str, Any]] | None = None,
     require_member_id: uuid.UUID | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    application = build_group_messaging_application(session)
-    async for event in application.post_message_stream(
-        PostMessageCommand(
-            channel_id=channel_id,
-            speaker_id=speaker_id,
-            speaker_name=speaker_name,
-            content=content,
-            mentioned_agent_ids=tuple(mentioned_agent_ids),
-            attachments=tuple(dict(value) for value in (attachments or [])),
-            require_member_id=require_member_id,
-        )
-    ):
-        yield event.name, event.data
+    factory = _isolated_session_factory(session)
+    async with factory() as stream_session:
+        application = build_group_messaging_application(stream_session)
+        async for event in application.post_message_stream(
+            PostMessageCommand(
+                channel_id=channel_id,
+                speaker_id=speaker_id,
+                speaker_name=speaker_name,
+                content=content,
+                mentioned_agent_ids=tuple(mentioned_agent_ids),
+                attachments=tuple(dict(value) for value in (attachments or [])),
+                require_member_id=require_member_id,
+            )
+        ):
+            yield event.name, event.data
 
 
 async def subscribe_user_messages(
     session: AsyncSession, user_id: uuid.UUID
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    application = build_group_messaging_application(session)
-    async for event in application.subscribe_user_messages(user_id):
-        yield event.name, event.data
+    factory = _isolated_session_factory(session)
+    async with factory() as stream_session:
+        application = build_group_messaging_application(stream_session)
+        async for event in application.subscribe_user_messages(user_id):
+            yield event.name, event.data
 
 
 async def upload_attachment(

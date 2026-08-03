@@ -20,7 +20,7 @@ from app.contexts.foundations.governance.ai_quality.public import (
     run_evaluation,
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(prefix="/eval", tags=["eval"])

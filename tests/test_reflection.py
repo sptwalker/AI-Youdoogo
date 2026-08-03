@@ -7,9 +7,12 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.governance.ai_quality import public as ai_quality
+from app.contexts.foundations.governance.ai_quality.infrastructure import (
+    output_review as reflection_service,
+)
 from app.models import Base
 from app.models.agent import AgentRole
-from app.services import reflection_service
 
 
 @pytest.fixture
@@ -51,9 +54,16 @@ async def test_reflect_high_score_no_rewrite(
     async def _critique(*a: Any, **k: Any) -> tuple[int, str]:
         return 5, "无"
 
-    monkeypatch.setattr(reflection_service, "_critique", _critique)
-    res = await reflection_service.reflect(
-        db, _role(), output="很好的产出", task_context="任务", rubric="r",
+    monkeypatch.setattr(reflection_service.LangChainOutputCritic, "critique", _critique)
+    role = _role()
+    res = await ai_quality.review_output(
+        db,
+        ai_quality.OutputReviewRequest(
+            expert_id=role.id,
+            output="很好的产出",
+            task_context="任务",
+            rubric="r",
+        ),
     )
     assert res.revised is False and res.final_output == "很好的产出"
     assert res.critic_score == 5
@@ -69,10 +79,17 @@ async def test_reflect_low_score_rewrites(
     async def _revise(*a: Any, **k: Any) -> str:
         return "补充了风险分析的修订版产出"
 
-    monkeypatch.setattr(reflection_service, "_critique", _critique)
-    monkeypatch.setattr(reflection_service, "_revise", _revise)
-    res = await reflection_service.reflect(
-        db, _role(), output="初稿", task_context="任务", rubric="r",
+    monkeypatch.setattr(reflection_service.LangChainOutputCritic, "critique", _critique)
+    monkeypatch.setattr(reflection_service.AgentOutputRevision, "revise", _revise)
+    role = _role()
+    res = await ai_quality.review_output(
+        db,
+        ai_quality.OutputReviewRequest(
+            expert_id=role.id,
+            output="初稿",
+            task_context="任务",
+            rubric="r",
+        ),
     )
     assert res.revised is True
     assert res.final_output == "补充了风险分析的修订版产出"
@@ -81,8 +98,15 @@ async def test_reflect_low_score_rewrites(
 
 async def test_reflect_empty_output(db: AsyncSession) -> None:
     """空产出 → 直接返回，不触发 critic。"""
-    res = await reflection_service.reflect(
-        db, _role(), output="   ", task_context="t", rubric="r",
+    role = _role()
+    res = await ai_quality.review_output(
+        db,
+        ai_quality.OutputReviewRequest(
+            expert_id=role.id,
+            output="   ",
+            task_context="t",
+            rubric="r",
+        ),
     )
     assert res.revised is False and res.critic_score == 0
 
@@ -94,9 +118,16 @@ async def test_reflect_degrades_on_error(
     async def _boom(*a: Any, **k: Any) -> tuple[int, str]:
         raise RuntimeError("critic 模型不可用")
 
-    monkeypatch.setattr(reflection_service, "_critique", _boom)
-    res = await reflection_service.reflect(
-        db, _role(), output="初稿", task_context="t", rubric="r",
+    monkeypatch.setattr(reflection_service.LangChainOutputCritic, "critique", _boom)
+    role = _role()
+    res = await ai_quality.review_output(
+        db,
+        ai_quality.OutputReviewRequest(
+            expert_id=role.id,
+            output="初稿",
+            task_context="t",
+            rubric="r",
+        ),
     )
     assert res.revised is False and res.final_output == "初稿"
 
@@ -111,17 +142,24 @@ async def test_reflect_rewrite_empty_falls_back(
     async def _revise(*a: Any, **k: Any) -> str:
         return ""
 
-    monkeypatch.setattr(reflection_service, "_critique", _critique)
-    monkeypatch.setattr(reflection_service, "_revise", _revise)
-    res = await reflection_service.reflect(
-        db, _role(), output="初稿", task_context="t", rubric="r",
+    monkeypatch.setattr(reflection_service.LangChainOutputCritic, "critique", _critique)
+    monkeypatch.setattr(reflection_service.AgentOutputRevision, "revise", _revise)
+    role = _role()
+    res = await ai_quality.review_output(
+        db,
+        ai_quality.OutputReviewRequest(
+            expert_id=role.id,
+            output="初稿",
+            task_context="t",
+            rubric="r",
+        ),
     )
     assert res.revised is False and res.final_output == "初稿"
 
 
 def test_metadata_excludes_body() -> None:
     """as_metadata 只含分数/问题/重写标记，不含正文。"""
-    r = reflection_service.ReflectionResult(
+    r = ai_quality.OutputReviewResult(
         final_output="正文", critic_score=3, issues="x", revised=True,
     )
     meta = r.as_metadata()

@@ -38,6 +38,7 @@ from app.contexts.business.proposal_management.application.ports import (
 from app.contexts.business.proposal_management.domain.models import Proposal, ProposalReview
 
 EXPERT_NAME = "会商AI专家"
+PROMOTED_MESSAGE_PROPOSAL_NAMESPACE = uuid.UUID("2d7b0842-e5e7-4f14-b6e8-1fd66aa6854f")
 
 
 def _proposal_result(proposal: Proposal) -> ProposalResult:
@@ -92,22 +93,32 @@ class ProposalApplication:
         self._identifiers = identifiers
 
     async def create(self, command: CreateProposalCommand) -> ProposalResult:
-        proposal = Proposal(
-            id=self._identifiers.new_id(),
-            code=self._identifiers.new_proposal_code(),
-            title=command.title,
-            background=command.background,
-            plan=command.plan,
-            benefit_risk=command.benefit_risk,
-            priority=command.priority,
-            creator_id=command.creator_id,
-            department_id=command.department_id,
-            create_time=self._clock.now(),
-        )
+        proposal_id = self._proposal_id(command)
         async with self._uow_factory() as uow:
+            if command.source_message_id is not None:
+                existing = await uow.proposals.get(proposal_id)
+                if existing is not None:
+                    return _proposal_result(existing)
+            proposal = Proposal(
+                id=proposal_id,
+                code=self._identifiers.new_proposal_code(),
+                title=command.title,
+                background=command.background,
+                plan=command.plan,
+                benefit_risk=command.benefit_risk,
+                priority=command.priority,
+                creator_id=command.creator_id,
+                department_id=command.department_id,
+                create_time=self._clock.now(),
+            )
             await uow.proposals.add(proposal)
             await uow.commit()
         return _proposal_result(proposal)
+
+    def _proposal_id(self, command: CreateProposalCommand) -> uuid.UUID:
+        if command.source_message_id is None:
+            return self._identifiers.new_id()
+        return uuid.uuid5(PROMOTED_MESSAGE_PROPOSAL_NAMESPACE, str(command.source_message_id))
 
     async def edit(self, command: EditProposalCommand) -> ProposalResult:
         async with self._uow_factory() as uow:

@@ -17,8 +17,8 @@ from app.contexts.foundations.governance.audit_trail.public import (
     AppendAuditRecordCommand,
     append_audit_record,
 )
-from app.core.database import get_db
 from app.core.sse import sse_response
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.meeting import (
     AiSpeakRequest,

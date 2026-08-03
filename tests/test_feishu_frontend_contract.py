@@ -20,11 +20,11 @@ def test_login_keeps_default_password_submit_and_separate_feishu_entry() -> None
 
 def test_auth_guard_preserves_the_intended_same_origin_path() -> None:
     guard = (ROOT / "frontend/src/components/RequireAuth.tsx").read_text(encoding="utf-8")
-    client = (ROOT / "frontend/src/api/client.ts").read_text(encoding="utf-8")
+    http = (ROOT / "frontend/src/api/http.ts").read_text(encoding="utf-8")
     paths = (ROOT / "frontend/src/auth/paths.ts").read_text(encoding="utf-8")
     assert "loginRedirectPath(location)" in guard
-    assert "location.pathname" in client and "location.search" in client
-    assert "return_to" in client
+    assert "location.pathname" in http and "location.search" in http
+    assert "return_to" in http
     assert "parsed.origin !== window.location.origin" in paths
     assert "decoded.startsWith('//')" in paths
 

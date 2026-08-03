@@ -56,17 +56,19 @@ def test_partition_injected_when_missing() -> None:
     assert "\"$part_date\" >= '2020-01-01'" in out
 
 
-def test_partition_not_duplicated_when_present() -> None:
+def test_partition_floor_is_added_even_when_partition_filter_is_present() -> None:
     out = _ok("select count(*) c from v_event_4 where \"$part_date\"='2026-07-16'")
-    assert out.count("$part_date") == 1  # 已带分区不叠加
+    assert '"$part_date" = \'2026-07-16\'' in out
+    assert '"v_event_4"."$part_date" >= \'2020-01-01\'' in out
 
 
-def test_partition_kept_for_range_filter() -> None:
+def test_partition_floor_is_added_even_when_a_range_filter_is_present() -> None:
     out = _ok(
         "select count(*) c from v_event_4 "
         "where \"$part_date\" between '2026-07-01' and '2026-07-16'"
     )
-    assert out.count("$part_date") == 1 and "2020-01-01" not in out
+    assert '"$part_date" BETWEEN \'2026-07-01\' AND \'2026-07-16\'' in out
+    assert '"v_event_4"."$part_date" >= \'2020-01-01\'' in out
 
 
 def test_partition_injected_with_existing_event_filter() -> None:
@@ -77,6 +79,33 @@ def test_partition_injected_with_existing_event_filter() -> None:
     )
     assert "\"$part_event\" = 'new_device'" in out
     assert "\"$part_date\" >= '2020-01-01'" in out
+
+
+def test_partition_floor_cannot_be_weakened_by_an_old_lower_bound() -> None:
+    out = _ok("SELECT * FROM v_event_4 WHERE \"$part_date\" >= '1900-01-01'")
+    assert '"$part_date" >= \'1900-01-01\'' in out
+    assert '"v_event_4"."$part_date" >= \'2020-01-01\'' in out
+
+
+def test_partition_floor_cannot_be_weakened_by_or_condition() -> None:
+    out = _ok("SELECT * FROM v_event_4 WHERE \"$part_date\" >= '2026-01-01' OR x = 1")
+    assert '"$part_date" >= \'2026-01-01\' OR x = 1' in out
+    assert '"v_event_4"."$part_date" >= \'2020-01-01\'' in out
+
+
+def test_partition_floor_is_added_to_outer_table_not_just_subquery() -> None:
+    out = _ok(
+        "SELECT * FROM v_event_4 "
+        "WHERE x IN (SELECT x FROM v_event_5 WHERE \"$part_date\" >= '2026-01-01')"
+    )
+    assert '"v_event_4"."$part_date" >= \'2020-01-01\'' in out
+    assert '"v_event_5"."$part_date" >= \'2020-01-01\'' in out
+
+
+def test_partition_floor_is_added_for_each_joined_table_by_alias() -> None:
+    out = _ok("SELECT * FROM v_event_4 AS events JOIN v_event_5 AS users ON events.id = users.id")
+    assert '"events"."$part_date" >= \'2020-01-01\'' in out
+    assert '"users"."$part_date" >= \'2020-01-01\'' in out
 
 
 # ── 拒绝:写/命令 ────────────────────────────────────────
@@ -106,6 +135,17 @@ def test_multi_statement_rejected() -> None:
 def test_unlisted_table_rejected() -> None:
     r = _rejected("SELECT * FROM secret_table")
     assert "未登记" in r or "secret_table" in r
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM secret_schema.v_event_4",
+        "SELECT * FROM catalog.secret_schema.v_event_4",
+    ],
+)
+def test_qualified_allowed_table_rejected(sql: str) -> None:
+    assert "限定" in _rejected(sql)
 
 
 def test_union_to_unlisted_rejected() -> None:

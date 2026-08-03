@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_roles
 from app.contexts.business.group_messaging.entrypoints import operations
-from app.core.database import get_db
 from app.core.sse import sse_response
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.discussion import ChannelCreate, MessagePost, PromoteRequest
 
@@ -98,6 +98,9 @@ async def realtime_stream(db: DB, user: CurrentUser) -> StreamingResponse:
 
     这是"服务端主动推送"——A 发言 B/C 不刷新即收到（Redis pub/sub 跨 worker 广播）。
     """
+    # Authentication has completed and ``user`` is an immutable result. Release
+    # its read transaction before the long-lived subscription starts.
+    await db.rollback()
     return sse_response(operations.subscribe_user_messages(db, user.id))
 
 
@@ -185,6 +188,7 @@ async def post_message(
 ) -> StreamingResponse:
     """发言（@ 的 AI 顾问逐个逐字流式回复，SSE）。"""
     await operations.ensure_member_access(db, channel_id, user.id)
+    await db.rollback()
     return sse_response(
         operations.post_message_stream(
             db,

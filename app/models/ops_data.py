@@ -11,7 +11,7 @@ from datetime import date
 from sqlalchemy import Date, Float, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CommonMixin
+from app.platform.database.model import Base, CommonMixin
 
 
 class OpsDailyMetric(CommonMixin, Base):

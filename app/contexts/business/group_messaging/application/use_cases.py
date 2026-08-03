@@ -1,4 +1,4 @@
-"""Group Messaging use cases and transaction ownership."""
+"""Group messaging application boundary and its transactional use cases."""
 
 from __future__ import annotations
 
@@ -59,38 +59,8 @@ _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 logger = logging.getLogger(__name__)
 
 
-def _channel_result(channel: Channel, *, unread: int | None = None) -> ChannelResult:
-    return ChannelResult(
-        id=channel.id,
-        name=channel.name,
-        department_id=channel.department_id,
-        default_agent_id=channel.default_agent_id,
-        creator_id=channel.creator_id,
-        is_archived=channel.is_archived,
-        create_time=channel.create_time,
-        unread=unread,
-    )
-
-
-def _message_result(message: Message) -> MessageResult:
-    return MessageResult(
-        id=message.id,
-        channel_id=message.channel_id,
-        speaker_type=message.speaker_type,
-        speaker_id=message.speaker_id,
-        speaker_name=message.speaker_name,
-        content=message.content,
-        mentioned_agent_ids=message.mentioned_agent_ids,
-        ai_source_record_id=message.ai_source_record_id,
-        ref_type=message.ref_type,
-        ref_id=message.ref_id,
-        attachments=message.attachments,
-        create_time=message.create_time,
-    )
-
-
 class GroupMessagingApplication:
-    """Deep application boundary for membership, messages, delivery, and archive."""
+    """Own group lifecycle, messages, artifacts, and their transactional policy."""
 
     def __init__(
         self,
@@ -137,12 +107,12 @@ class GroupMessagingApplication:
             if members:
                 await uow.messages.add_members(channel.id, tuple(members))
             await uow.commit()
-        return _channel_result(channel)
+        return self._channel_result(channel)
 
     async def get_channel(self, channel_id: uuid.UUID) -> ChannelResult:
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
-        return _channel_result(channel)
+            channel = await self._require_channel(uow.messages, channel_id)
+        return self._channel_result(channel)
 
     async def list_channels(
         self,
@@ -155,7 +125,7 @@ class GroupMessagingApplication:
             if principal is not None and not principal.is_manager:
                 visible_ids = set(await uow.messages.channel_ids_for_user(principal.id))
                 channels = [channel for channel in channels if channel.id in visible_ids]
-        return tuple(_channel_result(channel) for channel in channels)
+        return tuple(self._channel_result(channel) for channel in channels)
 
     async def all_channel_ids(self) -> tuple[str, ...]:
         async with self._uow_factory() as uow:
@@ -175,7 +145,7 @@ class GroupMessagingApplication:
             if value.member_type in {"human", "ai"}
         )
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
+            channel = await self._require_channel(uow.messages, channel_id)
             if owner_id is not None:
                 self._require_owner(channel, owner_id, "仅群主可添加成员")
             added = await uow.messages.add_members(channel_id, drafts)
@@ -191,7 +161,7 @@ class GroupMessagingApplication:
         owner_id: uuid.UUID | None = None,
     ) -> None:
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
+            channel = await self._require_channel(uow.messages, channel_id)
             if owner_id is not None:
                 self._require_owner(channel, owner_id, "仅群主可踢出成员")
             channel.ensure_owner_is_not_removed(member_type=member_type, member_id=member_id)
@@ -202,7 +172,7 @@ class GroupMessagingApplication:
         self, channel_id: uuid.UUID, *, member_id: uuid.UUID | None = None
     ) -> tuple[MemberResult, ...]:
         async with self._uow_factory() as uow:
-            await self._get_required(uow.messages, channel_id)
+            await self._require_channel(uow.messages, channel_id)
             if member_id is not None:
                 await self._require_member(uow.messages, channel_id, member_id)
             members = await uow.messages.list_members(channel_id)
@@ -221,19 +191,19 @@ class GroupMessagingApplication:
 
     async def is_owner(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
+            channel = await self._require_channel(uow.messages, channel_id)
         return channel.is_owner(user_id)
 
     async def ensure_member_access(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
         async with self._uow_factory() as uow:
-            await self._get_required(uow.messages, channel_id)
+            await self._require_channel(uow.messages, channel_id)
             await self._require_member(uow.messages, channel_id, user_id)
 
     async def disband_channel(
         self, channel_id: uuid.UUID, *, owner_id: uuid.UUID | None = None
     ) -> None:
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
+            channel = await self._require_channel(uow.messages, channel_id)
             if owner_id is not None:
                 self._require_owner(channel, owner_id, "仅群主可解散讨论群")
             channel.disband()
@@ -244,7 +214,7 @@ class GroupMessagingApplication:
 
     async def mark_read(self, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
         async with self._uow_factory() as uow:
-            await self._get_required(uow.messages, channel_id)
+            await self._require_channel(uow.messages, channel_id)
             await self._require_member(uow.messages, channel_id, user_id)
             await uow.messages.mark_read(channel_id, user_id, self._clock.now())
             await uow.commit()
@@ -252,21 +222,7 @@ class GroupMessagingApplication:
     async def channels_with_unread(self, user_id: uuid.UUID) -> tuple[ChannelResult, ...]:
         async with self._uow_factory() as uow:
             rows = await uow.messages.channels_with_unread(user_id)
-        return tuple(_channel_result(channel, unread=unread) for channel, unread in rows)
-
-    async def archive_channel(self, channel_id: uuid.UUID) -> ChannelResult:
-        async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id)
-            channel.archive()
-            await uow.messages.save_channel(channel)
-            await uow.commit()
-        await self._archive(channel, strict=False)
-        return _channel_result(channel)
-
-    async def archive_disbanded_channel(self, channel_id: uuid.UUID) -> None:
-        async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, channel_id, include_deleted=True)
-        await self._archive(channel, strict=True)
+        return tuple(self._channel_result(channel, unread=unread) for channel, unread in rows)
 
     async def list_messages(
         self,
@@ -276,35 +232,112 @@ class GroupMessagingApplication:
         member_id: uuid.UUID | None = None,
     ) -> tuple[MessageResult, ...]:
         async with self._uow_factory() as uow:
-            await self._get_required(uow.messages, channel_id)
+            await self._require_channel(uow.messages, channel_id)
             if member_id is not None:
                 await self._require_member(uow.messages, channel_id, member_id)
             messages = await uow.messages.list_messages(channel_id, limit=limit)
-        return tuple(_message_result(message) for message in messages)
+        return tuple(self._message_result(message) for message in messages)
 
     async def post_message_stream(
         self, command: PostMessageCommand
     ) -> AsyncIterator[MessageStreamEvent]:
         channel, human = await self._save_human_message(command)
-        human_result = _message_result(human)
-        human_data = human_result.as_dict()
+        human_result = self._message_result(human)
         yield MessageStreamEvent.message_persisted(human_result)
-        await self._realtime_delivery.publish(command.channel_id, "message", human_data)
-
+        await self._realtime_delivery.publish(command.channel_id, "message", human_result.as_dict())
         targets = deduplicate_mentions(command.mentioned_agent_ids)
         recent_context = await self._recent_context(command.channel_id, targets=targets)
         for agent_id in targets:
             async for event in self._stream_agent_reply(
-                command,
-                agent_id=agent_id,
-                channel_name=channel.name,
-                recent_context=recent_context,
+                command, agent_id=agent_id, channel_name=channel.name, recent_context=recent_context
             ):
                 yield event
 
+    async def subscribe_user_messages(
+        self, user_id: uuid.UUID
+    ) -> AsyncIterator[MessageStreamEvent]:
+        async with self._uow_factory() as uow:
+            channel_ids = tuple(await uow.messages.channel_ids_for_user(user_id))
+            # Redis pub/sub can remain open indefinitely. End the short
+            # authorization read transaction before entering that wait.
+            await uow.rollback()
+        async for event in self._realtime_subscription.subscribe_user(
+            user_id=user_id, channel_ids=channel_ids
+        ):
+            yield event
+
+    async def archive_channel(self, channel_id: uuid.UUID) -> ChannelResult:
+        async with self._uow_factory() as uow:
+            channel = await self._require_channel(uow.messages, channel_id)
+            channel.archive()
+            await uow.messages.save_channel(channel)
+            await uow.commit()
+        await self._archive(channel, strict=False)
+        return self._channel_result(channel)
+
+    async def archive_disbanded_channel(self, channel_id: uuid.UUID) -> None:
+        async with self._uow_factory() as uow:
+            channel = await self._require_channel(uow.messages, channel_id, include_deleted=True)
+        await self._archive(channel, strict=True)
+
+    async def upload_attachment(self, command: UploadAttachmentCommand) -> AttachmentResult:
+        if len(command.content) > MAX_ATTACHMENT_BYTES:
+            raise RuleViolation(f"文件过大（>{MAX_ATTACHMENT_BYTES // 1024 // 1024}MB）")
+        name = command.name or "未命名"
+        storage_path = await self._attachment_storage.put(
+            object_name=f"chat/{self._identifiers.new_object_token()}/{name}",
+            content=command.content,
+            content_type=command.content_type or "application/octet-stream",
+        )
+        return AttachmentResult(
+            attachment_type="image" if name.lower().endswith(_IMAGE_EXTENSIONS) else "file",
+            name=name,
+            storage_path=storage_path,
+            size=len(command.content),
+        )
+
+    async def download_attachment(
+        self, *, storage_path: str, name: str, user_id: uuid.UUID
+    ) -> AttachmentDownloadResult:
+        _, _, object_name = storage_path.partition("/")
+        if not object_name.startswith("chat/"):
+            raise InvalidInput("非法附件路径")
+        async with self._uow_factory() as uow:
+            visible = await uow.messages.attachment_visible_to_user(
+                storage_path=storage_path, user_id=user_id
+            )
+        if not visible:
+            raise PermissionDenied("无权访问该附件")
+        return AttachmentDownloadResult(
+            name=name, content=await self._attachment_storage.get(object_name=object_name)
+        )
+
+    async def promote_message(
+        self, message_id: uuid.UUID, *, target: str, creator_id: uuid.UUID
+    ) -> dict[str, str]:
+        async with self._uow_factory() as uow:
+            message = await uow.messages.get_message(message_id)
+        if message is None or message.is_deleted:
+            raise ResourceNotFound("消息不存在")
+        message.assert_promotable(target)
+        ref_id = await self._promotion_port.promote(
+            PromotionRequest(
+                target=target,
+                title=message.content[:60] or "讨论升格",
+                content=message.content,
+                creator_id=creator_id,
+                source_message_id=message.id,
+            )
+        )
+        message.record_promotion(target=target, ref_id=ref_id)
+        async with self._uow_factory() as uow:
+            await uow.messages.save_message(message)
+            await uow.commit()
+        return {"ref_type": target, "ref_id": str(ref_id)}
+
     async def _save_human_message(self, command: PostMessageCommand) -> tuple[Channel, Message]:
         async with self._uow_factory() as uow:
-            channel = await self._get_required(uow.messages, command.channel_id)
+            channel = await self._require_channel(uow.messages, command.channel_id)
             if command.require_member_id is not None:
                 await self._require_member(
                     uow.messages, command.channel_id, command.require_member_id
@@ -326,14 +359,17 @@ class GroupMessagingApplication:
         return channel, human
 
     async def _recent_context(
-        self,
-        channel_id: uuid.UUID,
-        *,
-        targets: tuple[uuid.UUID, ...],
+        self, channel_id: uuid.UUID, *, targets: tuple[uuid.UUID, ...]
     ) -> str:
         if not targets:
             return "（暂无发言）"
-        history = await self.list_messages(channel_id, limit=_CONTEXT_N)
+        async with self._uow_factory() as uow:
+            await self._require_channel(uow.messages, channel_id)
+            messages = await uow.messages.list_messages(channel_id, limit=_CONTEXT_N)
+            history = tuple(self._message_result(message) for message in messages)
+            # Release the context read before the model stream takes over this
+            # isolated session and potentially waits on an external service.
+            await uow.rollback()
         transcript = "\n".join(f"{item.speaker_name}：{item.content}" for item in history)
         return transcript or "（暂无发言）"
 
@@ -360,29 +396,23 @@ class GroupMessagingApplication:
             if reply_event.name != "complete" or reply_event.speaker_agent_id is None:
                 continue
             ai_message = await self._save_ai_message(command.channel_id, reply_event)
-            ai_result = _message_result(ai_message)
-            ai_data = ai_result.as_dict()
+            ai_result = self._message_result(ai_message)
             yield MessageStreamEvent.message_persisted(ai_result)
             if reply_event.publish_realtime:
-                await self._realtime_delivery.publish(command.channel_id, "message", ai_data)
+                await self._realtime_delivery.publish(
+                    command.channel_id, "message", ai_result.as_dict()
+                )
 
     @staticmethod
-    def _transient_reply_event(
-        reply_event: AgentReplyStreamEvent,
-    ) -> MessageStreamEvent | None:
+    def _transient_reply_event(reply_event: AgentReplyStreamEvent) -> MessageStreamEvent | None:
         if reply_event.name == "start":
             return MessageStreamEvent.turn_started(
-                speaker_agent_id=reply_event.speaker_agent_id,
-                speaker_name=reply_event.speaker_name,
+                speaker_agent_id=reply_event.speaker_agent_id, speaker_name=reply_event.speaker_name
             )
-        if reply_event.name == "delta":
-            return MessageStreamEvent.delta(reply_event.text)
-        return None
+        return MessageStreamEvent.delta(reply_event.text) if reply_event.name == "delta" else None
 
     async def _save_ai_message(
-        self,
-        channel_id: uuid.UUID,
-        reply_event: AgentReplyStreamEvent,
+        self, channel_id: uuid.UUID, reply_event: AgentReplyStreamEvent
     ) -> Message:
         if reply_event.speaker_agent_id is None:
             raise RuntimeError("Completed Agent reply has no speaker id")
@@ -401,75 +431,6 @@ class GroupMessagingApplication:
             await uow.commit()
         return message
 
-    async def subscribe_user_messages(
-        self, user_id: uuid.UUID
-    ) -> AsyncIterator[MessageStreamEvent]:
-        async with self._uow_factory() as uow:
-            channel_ids = tuple(await uow.messages.channel_ids_for_user(user_id))
-        async for event in self._realtime_subscription.subscribe_user(
-            user_id=user_id, channel_ids=channel_ids
-        ):
-            yield event
-
-    async def upload_attachment(self, command: UploadAttachmentCommand) -> AttachmentResult:
-        if len(command.content) > MAX_ATTACHMENT_BYTES:
-            raise RuleViolation(f"文件过大（>{MAX_ATTACHMENT_BYTES // 1024 // 1024}MB）")
-        name = command.name or "未命名"
-        object_name = f"chat/{self._identifiers.new_object_token()}/{name}"
-        storage_path = await self._attachment_storage.put(
-            object_name=object_name,
-            content=command.content,
-            content_type=command.content_type or "application/octet-stream",
-        )
-        return AttachmentResult(
-            attachment_type=("image" if name.lower().endswith(_IMAGE_EXTENSIONS) else "file"),
-            name=name,
-            storage_path=storage_path,
-            size=len(command.content),
-        )
-
-    async def download_attachment(
-        self, *, storage_path: str, name: str, user_id: uuid.UUID
-    ) -> AttachmentDownloadResult:
-        _, _, object_name = storage_path.partition("/")
-        if not object_name.startswith("chat/"):
-            raise InvalidInput("非法附件路径")
-        async with self._uow_factory() as uow:
-            visible = await uow.messages.attachment_visible_to_user(
-                storage_path=storage_path, user_id=user_id
-            )
-        if not visible:
-            raise PermissionDenied("无权访问该附件")
-        content = await self._attachment_storage.get(object_name=object_name)
-        return AttachmentDownloadResult(name=name, content=content)
-
-    async def promote_message(
-        self,
-        message_id: uuid.UUID,
-        *,
-        target: str,
-        creator_id: uuid.UUID,
-    ) -> dict[str, str]:
-        async with self._uow_factory() as uow:
-            message = await uow.messages.get_message(message_id)
-        if message is None or message.is_deleted:
-            raise ResourceNotFound("消息不存在")
-        message.assert_promotable(target)
-        ref_id = await self._promotion_port.promote(
-            PromotionRequest(
-                target=target,
-                title=message.content[:60] or "讨论升格",
-                content=message.content,
-                creator_id=creator_id,
-                source_message_id=message.id,
-            )
-        )
-        message.record_promotion(target=target, ref_id=ref_id)
-        async with self._uow_factory() as uow:
-            await uow.messages.save_message(message)
-            await uow.commit()
-        return {"ref_type": target, "ref_id": str(ref_id)}
-
     async def _archive(self, channel: Channel, *, strict: bool) -> None:
         if channel.creator_id is None:
             return
@@ -477,12 +438,13 @@ class GroupMessagingApplication:
             messages = await uow.messages.list_messages(channel.id, limit=500)
         if not messages:
             return
-        transcript = "\n".join(f"{message.speaker_name}：{message.content}" for message in messages)
         request = ArchiveRequest(
             channel_id=channel.id,
             channel_name=channel.name,
             creator_id=channel.creator_id,
-            transcript=transcript,
+            transcript="\n".join(
+                f"{message.speaker_name}：{message.content}" for message in messages
+            ),
             file_id=archive_file_id(channel.id),
         )
         try:
@@ -493,7 +455,37 @@ class GroupMessagingApplication:
             logger.warning("群聊归档入库失败 channel=%s", channel.id, exc_info=True)
 
     @staticmethod
-    async def _get_required(
+    def _channel_result(channel: Channel, *, unread: int | None = None) -> ChannelResult:
+        return ChannelResult(
+            id=channel.id,
+            name=channel.name,
+            department_id=channel.department_id,
+            default_agent_id=channel.default_agent_id,
+            creator_id=channel.creator_id,
+            is_archived=channel.is_archived,
+            create_time=channel.create_time,
+            unread=unread,
+        )
+
+    @staticmethod
+    def _message_result(message: Message) -> MessageResult:
+        return MessageResult(
+            id=message.id,
+            channel_id=message.channel_id,
+            speaker_type=message.speaker_type,
+            speaker_id=message.speaker_id,
+            speaker_name=message.speaker_name,
+            content=message.content,
+            mentioned_agent_ids=message.mentioned_agent_ids,
+            ai_source_record_id=message.ai_source_record_id,
+            ref_type=message.ref_type,
+            ref_id=message.ref_id,
+            attachments=message.attachments,
+            create_time=message.create_time,
+        )
+
+    @staticmethod
+    async def _require_channel(
         repository: GroupMessagingRepository,
         channel_id: uuid.UUID,
         *,
@@ -506,9 +498,7 @@ class GroupMessagingApplication:
 
     @staticmethod
     async def _require_member(
-        repository: GroupMessagingRepository,
-        channel_id: uuid.UUID,
-        user_id: uuid.UUID,
+        repository: GroupMessagingRepository, channel_id: uuid.UUID, user_id: uuid.UUID
     ) -> None:
         if not await repository.is_member(channel_id, user_id):
             raise PermissionDenied("仅群成员可访问")

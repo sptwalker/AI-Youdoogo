@@ -9,8 +9,11 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.contexts.foundations.governance.usage_budget.infrastructure.current_adapters import (
+    extract_usage,
+    record_usage,
+)
 from app.core.config import get_settings
-from app.llm.usage import extract_usage, record_usage
 from app.models import Base
 from app.models.llm_log import LlmCallLog
 

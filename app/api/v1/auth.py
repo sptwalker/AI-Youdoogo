@@ -27,8 +27,8 @@ from app.contexts.foundations.identity.browser_login import (
 )
 from app.contexts.shared_kernel import InvalidInput, PermissionDenied
 from app.core.config import get_settings
-from app.core.database import get_db
 from app.core.security import create_access_token
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.auth import FeishuExchangeResponse, LoginRequest, TokenResponse, UserOut
 

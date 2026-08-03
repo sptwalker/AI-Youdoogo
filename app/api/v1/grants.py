@@ -18,7 +18,7 @@ from app.contexts.foundations.governance.audit_trail.public import (
     append_audit_record,
 )
 from app.contexts.foundations.identity.public import IdentityUserResult
-from app.core.database import get_db
+from app.platform.database import get_db
 from app.platform.http_runtime import ok
 
 router = APIRouter(prefix="/resource-grants", tags=["permission"])

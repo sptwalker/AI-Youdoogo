@@ -1,5 +1,5 @@
 /** 任务卡 API（对应后端 app/api/v1/tasks.py）。 */
-import { request } from './client'
+import { request } from './http'
 
 export interface TaskCard {
   id: string
@@ -24,15 +24,6 @@ export type TaskStatus =
   | 'rejected'
   | 'cancelled'
 
-export interface TaskLog {
-  id: string
-  from_status: string | null
-  to_status: string
-  operator_id: string | null
-  note: string | null
-  create_time: string
-}
-
 export const STATUS_LABEL: Record<string, string> = {
   created: '已创建',
   dispatched: '已分发',
@@ -45,10 +36,6 @@ export const STATUS_LABEL: Record<string, string> = {
 
 export function listTasks(status?: string): Promise<TaskCard[]> {
   return request({ method: 'GET', url: '/tasks', params: status ? { status } : undefined })
-}
-
-export function getTask(id: string): Promise<{ task: TaskCard; logs: TaskLog[] }> {
-  return request({ method: 'GET', url: `/tasks/${id}` })
 }
 
 export function createTask(payload: {
@@ -82,7 +69,7 @@ export function editTask(
 }
 
 // ── 任务编排进度（docs/14 阶段B）──────────────────────────
-export interface OrchStep {
+interface OrchStep {
   id: string
   step_no: number
   title: string

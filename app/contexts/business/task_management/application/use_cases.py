@@ -45,9 +45,13 @@ class TaskManagementApplication:
         self._executor = executor
 
     async def create(self, request: CreateTaskRequest) -> TaskView:
-        task = await self._tasks.create_view(request)
+        task = await self.stage(request)
         await self._transaction.commit()
         return await self._tasks.get_view(task.id)
+
+    async def stage(self, request: CreateTaskRequest) -> TaskView:
+        """Create within an existing caller-owned transaction without committing it."""
+        return await self._tasks.create_view(request)
 
     async def edit(self, request: EditTaskRequest) -> TaskView:
         # 补指派/改标题优先级；仅未开跑状态可编辑，状态守卫在 repo（domain assert_editable）。

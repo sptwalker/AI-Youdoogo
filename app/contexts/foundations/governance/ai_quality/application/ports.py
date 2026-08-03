@@ -79,3 +79,30 @@ class PromptSuggestionPort(Protocol):
         samples: tuple[LowScoreSample, ...],
         user_id: uuid.UUID | None,
     ) -> str: ...
+
+
+class OutputCriticPort(Protocol):
+    async def critique(
+        self,
+        *,
+        rubric: str,
+        task_context: str,
+        output: str,
+        user_id: uuid.UUID | None,
+    ) -> tuple[int, str]: ...
+
+
+class OutputRevisionPort(Protocol):
+    async def revise(
+        self,
+        *,
+        expert_id: uuid.UUID,
+        task_context: str,
+        output: str,
+        issues: str,
+        user_id: uuid.UUID | None,
+    ) -> str: ...
+
+
+class OutputReviewFailureReporterPort(Protocol):
+    def record_failure(self, expert_id: uuid.UUID) -> None: ...
