@@ -13,13 +13,21 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import AgentRunner, ExecutionContext, SkillRequest, SkillResult
+from app.agents.contracts import (
+    AgentRunner,
+    AgentSubject,
+    ExecutionContext,
+    SkillRequest,
+    SkillResult,
+    agent_execution_result,
+    agent_subject,
+)
 from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.business.collaboration_requests.application.contracts import (
     CollaborationRequestResult,
 )
 from app.contexts.business.collaboration_requests.entrypoints import operations
-from app.models.agent import AgentRole
+from app.contexts.foundations.workforce.expert_management import public as expert_management
 from app.models.system import SysDepartment
 
 logger = logging.getLogger(__name__)
@@ -79,7 +87,7 @@ class FeatureFlagResolver(Protocol):
 RunnerProvider = Callable[[], AgentRunner | None]
 RequestCreator = Callable[..., Awaitable[CollaborationRequestResult]]
 FallbackExecutor = Callable[
-    [AsyncSession, AgentRole, str, ExecutionContext, str],
+    [AsyncSession, AgentSubject, str, ExecutionContext, str],
     Awaitable[SkillResult],
 ]
 ExecutorFactory = Callable[[], "CollabSkillExecutor"]
@@ -142,17 +150,18 @@ class CollabSkillExecutor:
     async def execute(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject | object,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult:
+        subject = agent_subject(role)
         kind = request.arguments.get("kind")
         if kind == "consult":
             consult_args = ConsultArgs.model_validate(request.arguments)
             result = SkillResult()
             await self._run_consult(
                 db,
-                role,
+                subject,
                 consult_args.name,
                 consult_args.question,
                 context,
@@ -164,7 +173,7 @@ class CollabSkillExecutor:
             result = SkillResult()
             await self._run_collab(
                 db,
-                role,
+                subject,
                 collab_args.department,
                 collab_args.category,
                 collab_args.content,
@@ -177,25 +186,17 @@ class CollabSkillExecutor:
     async def _run_consult(
         self,
         db: AsyncSession,
-        initiator: AgentRole,
+        initiator: AgentSubject,
         name: str,
         question: str,
         context: ExecutionContext,
         result: SkillResult,
     ) -> None:
-        target = (
-            await db.execute(
-                select(AgentRole).where(
-                    AgentRole.name == name,
-                    AgentRole.is_active.is_(True),
-                    AgentRole.is_delete.is_(False),
-                )
-            )
-        ).scalar_one_or_none()
+        target = await expert_management.get_expert_execution_by_name(db, name)
         if target is None:
             result.notes.append(f"被咨询的 AI「{name}」不存在，已忽略")
             return
-        if target.id == initiator.id:
+        if target.expert_id == initiator.expert_id:
             result.notes.append("不能咨询自己，已忽略")
             return
         if target.owner_user_id is not None:
@@ -208,6 +209,7 @@ class CollabSkillExecutor:
             result.notes.append(f"咨询「{name}」缺少 AgentRunner，已忽略")
             return
         active_context = context.model_copy(update={"agent_runner": runner})
+        target_subject = agent_subject(target)
         record = await runner(
             db,
             target,
@@ -220,7 +222,7 @@ class CollabSkillExecutor:
             use_knowledge=True,
             execution_context=active_context,
         )
-        result.consult_replies.append((target, record))
+        result.consult_replies.append((target_subject, agent_execution_result(record)))
         reply_text = record.output_content or ""
         if not reply_text:
             return
@@ -235,7 +237,7 @@ class CollabSkillExecutor:
             result.merge(
                 await active_context.dispatcher.dispatch_text(
                     db,
-                    target,
+                    target_subject,
                     reply_text,
                     sub_context,
                     exclude=excluded,
@@ -246,7 +248,7 @@ class CollabSkillExecutor:
             result.merge(
                 await self._fallback_executor(
                     db,
-                    target,
+                    target_subject,
                     reply_text,
                     sub_context,
                     question,
@@ -256,7 +258,7 @@ class CollabSkillExecutor:
     async def _run_collab(
         self,
         db: AsyncSession,
-        initiator: AgentRole,
+        initiator: AgentSubject,
         department_name: str,
         category: str,
         content: str,
@@ -275,9 +277,7 @@ class CollabSkillExecutor:
             ).scalars()
         )
         if len(departments) != 1:
-            result.notes.append(
-                f"目标部门「{department_name}」不存在或名称有歧义，协作请求未提交"
-            )
+            result.notes.append(f"目标部门「{department_name}」不存在或名称有歧义，协作请求未提交")
             return
         title = f"[{initiator.name}] {content[:30]}"
         request = await self._request_creator(
@@ -290,17 +290,13 @@ class CollabSkillExecutor:
             requested_by=initiator.id,
             idempotency_key=idempotency_key,
         )
-        result.artifacts.append(
-            {"collab_request_id": str(request.id), "title": title}
-        )
-        result.notes.append(
-            f"已提交协作请求「{title}」，待{department_name}真人主管复核"
-        )
+        result.artifacts.append({"collab_request_id": str(request.id), "title": title})
+        result.notes.append(f"已提交协作请求「{title}」，待{department_name}真人主管复核")
 
 
 async def execute(
     db: AsyncSession,
-    initiator: AgentRole,
+    initiator: AgentSubject | object,
     output: str,
     *,
     user_id: uuid.UUID | None = None,
@@ -311,6 +307,7 @@ async def execute(
     executor_factory: ExecutorFactory = CollabSkillExecutor,
 ) -> SkillResult:
     """Parse and execute collaboration directives without breaking message flow."""
+    subject = agent_subject(initiator)
     runner = runner_provider() if runner_provider is not None else None
     context = merge_execution_context(
         execution_context,
@@ -350,13 +347,11 @@ async def execute(
                 },
                 raw_text=output,
             )
-            for collab_index, (department, category, content) in enumerate(
-                directives.collabs
-            )
+            for collab_index, (department, category, content) in enumerate(directives.collabs)
         )
         return await dispatch_requests(
             db,
-            initiator,
+            subject,
             requests,
             context,
             executor_factory=executor_factory,

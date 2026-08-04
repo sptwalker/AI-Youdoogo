@@ -55,7 +55,6 @@ from app.contexts.foundations.model_gateway.public import (
     build_llm_completion_port,
 )
 from app.core.config import get_settings
-from app.models.agent import AgentRole
 
 
 def select_agent_execution(
@@ -115,15 +114,14 @@ def select_agent_execution(
 def build_agent_execution_application(
     session: AsyncSession,
     *,
-    role_record: AgentRole | None = None,
     release_before_external_call: bool = True,
 ) -> AgentExecutionPort:
     return select_agent_execution(
         session,
-        prompt_port=CurrentPromptAssemblyAdapter(session, role_record),
+        prompt_port=CurrentPromptAssemblyAdapter(session),
         knowledge_port=CurrentKnowledgeAugmentationAdapter(session),
         usage_authorization=CurrentUsageAuthorizationAdapter(budget_exceeded),
-        recorder=SQLAlchemyAgentExecutionRecorder(session, role_record, record_usage),
+        recorder=SQLAlchemyAgentExecutionRecorder(session, None, record_usage),
         clock=SystemExecutionClock(),
         external_boundary=(
             SQLAlchemyExternalExecutionBoundary(session)

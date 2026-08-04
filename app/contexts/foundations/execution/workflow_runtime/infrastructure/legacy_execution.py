@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import replace
 from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import AgentRunner, ExecutionContext
+from app.agents.contracts import (
+    AgentRunner,
+    ExecutionContext,
+    agent_execution_result,
+)
 from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.foundations.execution.agent_execution.contracts.execution import (
     AgentExecutionRequest,
     AgentExecutionResult,
-    AgentExecutionStatus,
-    ExecutionError,
 )
 from app.contexts.foundations.execution.workflow_runtime.application.ports import (
     ExpertSnapshotPort,
@@ -49,7 +51,6 @@ from app.contexts.foundations.workforce.expert_management.contracts.execution im
     ExpertExecutionSnapshot,
 )
 from app.core.config import get_settings
-from app.models.agent import AgentRole
 from app.models.workflow import OutboxEvent
 from app.platform.database import async_session_factory
 
@@ -130,10 +131,9 @@ class _LegacyAgentExecutionAdapter:
         self._runner = runner
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
-        role = _role_from_snapshot(request.expert)
-        record = await self._runner(
+        legacy_result = await self._runner(
             self._session,
-            role,
+            request.expert,
             task_type=request.task_type,
             input_summary=request.input_summary,
             user_message=request.user_message,
@@ -152,20 +152,7 @@ class _LegacyAgentExecutionAdapter:
                 agent_runner=self._runner,
             ),
         )
-        failed = record.status == "failed"
-        return AgentExecutionResult(
-            status=(AgentExecutionStatus.FAILED if failed else AgentExecutionStatus.SUCCEEDED),
-            trace=request.trace,
-            content=record.output_content,
-            execution_id=record.id,
-            model=record.model_used,
-            duration_ms=record.duration_ms or 0,
-            error=(
-                ExecutionError("execution_failed", record.error_msg or "Agent 执行失败")
-                if failed
-                else None
-            ),
-        )
+        return replace(agent_execution_result(legacy_result), trace=request.trace)
 
 
 class _LegacyCapabilityExecutionAdapter:
@@ -180,11 +167,11 @@ class _LegacyCapabilityExecutionAdapter:
     ) -> ExecuteWorkflowStepResult:
         if prepared.expert is None:
             return ExecuteWorkflowStepResult(False, "步骤无可用执行者", error="步骤无可用执行者")
-        role = _role_from_snapshot(cast(ExpertExecutionSnapshot, prepared.expert))
+        expert = cast(ExpertExecutionSnapshot, prepared.expert)
         text = agent_result.content or "（无产出）"
         result = await ToolDispatcher().dispatch_text(
             self._session,
-            role,
+            expert,
             text,
             ExecutionContext(
                 workflow_run_id=prepared.claim.workflow_id,
@@ -250,32 +237,8 @@ async def execute_step(
     )
 
 
-def _role_from_snapshot(snapshot: ExpertExecutionSnapshot) -> AgentRole:
-    return AgentRole(
-        id=snapshot.expert_id,
-        name=snapshot.name,
-        title=snapshot.title,
-        department_id=snapshot.department_id,
-        prompt_template=snapshot.prompt_template,
-        model_role=snapshot.model_role,
-        tools=list(snapshot.capability_keys),
-        permission_scope={
-            key: _permission_value(value) for key, value in snapshot.permission_entries
-        },
-        owner_user_id=snapshot.owner_user_id,
-        is_active=True,
-    )
-
-
 def _freeze_mapping(value: dict[str, object]) -> tuple[tuple[str, object], ...]:
     return tuple((str(key), item) for key, item in value.items())
-
-
-def _permission_value(value: str) -> object:
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
 
 
 __all__ = [

@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import SkillExecutor
+from app.agents.contracts import AgentSubject, SkillExecutor, agent_subject
 from app.agents.legacy_skill_adapters import (
     LegacyExecutor,
     legacy_collab,
@@ -25,7 +25,6 @@ from app.contexts.foundations.execution.capability_catalog.infrastructure.regist
 from app.contexts.foundations.governance.system_configuration import (
     public as system_configuration,
 )
-from app.models.agent import AgentRole
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +107,11 @@ REGISTRY: dict[str, Skill] = {
 }
 
 
-def enabled_skills(role: AgentRole) -> list[Skill]:
+def enabled_skills(role: AgentSubject | object) -> list[Skill]:
     """Return enabled skills; an empty tools list means all defaults are enabled."""
-    tools = [item for item in (role.tools or []) if isinstance(item, str)]
-    if not (role.tools or []):
+    subject = agent_subject(role)
+    tools = list(subject.capability_keys)
+    if not tools and not subject.capabilities_configured:
         return [skill for skill in REGISTRY.values() if skill.default_on]
     return [REGISTRY[key] for key in tools if key in REGISTRY]
 
@@ -159,7 +159,7 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
 
 async def prompt_sections(
     db: AsyncSession,
-    role: AgentRole,
+    role: AgentSubject | object,
     resolver: ConfigurationResolver | None = None,
 ) -> str:
     """Build enabled prompt sections while isolating individual skill failures."""

@@ -7,12 +7,91 @@ DatabaseWorkflowEngine 共用的稳定边界。
 from __future__ import annotations
 
 import uuid
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionResult,
+    AgentExecutionStatus,
+    ExecutionError,
+    ExecutionTrace,
+)
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertExecutionSnapshot,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSubject:
+    """Pure expert identity and authorization facts used by capability adapters."""
+
+    expert_id: uuid.UUID
+    name: str
+    title: str = ""
+    department_id: uuid.UUID | None = None
+    owner_user_id: uuid.UUID | None = None
+    capability_keys: tuple[str, ...] = ()
+    permission_entries: tuple[tuple[str, str], ...] = ()
+    capabilities_configured: bool = False
+
+    @property
+    def id(self) -> uuid.UUID:
+        """Compatibility alias while legacy capability handlers migrate."""
+        return self.expert_id
+
+
+def agent_subject(value: object) -> AgentSubject:
+    """Normalize snapshots and legacy mapped rows at the outer compatibility seam."""
+    if isinstance(value, AgentSubject):
+        return value
+    if isinstance(value, ExpertExecutionSnapshot):
+        return AgentSubject(
+            expert_id=value.expert_id,
+            name=value.name,
+            title=value.title,
+            department_id=value.department_id,
+            owner_user_id=value.owner_user_id,
+            capability_keys=value.capability_keys,
+            permission_entries=value.permission_entries,
+            capabilities_configured=bool(value.capability_keys),
+        )
+    legacy = cast(Any, value)
+    raw_tools = legacy.tools or ()
+    raw_permissions = legacy.permission_scope or {}
+    return AgentSubject(
+        expert_id=legacy.id,
+        name=str(legacy.name),
+        title=str(legacy.title or ""),
+        department_id=legacy.department_id,
+        owner_user_id=legacy.owner_user_id,
+        capability_keys=tuple(item for item in raw_tools if isinstance(item, str)),
+        permission_entries=tuple((str(key), repr(item)) for key, item in raw_permissions.items()),
+        capabilities_configured=bool(raw_tools),
+    )
+
+
+def agent_execution_result(value: object) -> AgentExecutionResult:
+    """Normalize legacy persisted records into the published execution result."""
+    if isinstance(value, AgentExecutionResult):
+        return value
+    succeeded = str(getattr(value, "status", "success")) == "success"
+    error_message = getattr(value, "error_msg", None)
+    return AgentExecutionResult(
+        status=(AgentExecutionStatus.SUCCEEDED if succeeded else AgentExecutionStatus.FAILED),
+        trace=ExecutionTrace(),
+        content=getattr(value, "output_content", None),
+        execution_id=getattr(value, "id", None),
+        model=getattr(value, "model_used", None),
+        duration_ms=getattr(value, "duration_ms", 0) or 0,
+        error=(
+            ExecutionError("execution_failed", str(error_message or "Agent 执行失败"))
+            if not succeeded
+            else None
+        ),
+    )
 
 
 class AgentRunner(Protocol):
@@ -21,7 +100,7 @@ class AgentRunner(Protocol):
     async def __call__(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: ExpertExecutionSnapshot,
         *,
         task_type: str,
         input_summary: str,
@@ -29,7 +108,7 @@ class AgentRunner(Protocol):
         user_id: uuid.UUID | None = None,
         use_knowledge: bool = False,
         execution_context: ExecutionContext | None = None,
-    ) -> AgentTaskRecord: ...
+    ) -> AgentExecutionResult: ...
 
 
 class SkillDispatcher(Protocol):
@@ -38,7 +117,7 @@ class SkillDispatcher(Protocol):
     async def dispatch(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult: ...
@@ -46,7 +125,7 @@ class SkillDispatcher(Protocol):
     async def dispatch_text(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject,
         output: str,
         context: ExecutionContext,
         *,
@@ -94,10 +173,23 @@ class SkillResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     notes: list[str] = Field(default_factory=list)
-    consult_replies: list[tuple[AgentRole, AgentTaskRecord]] = Field(default_factory=list)
+    consult_replies: list[tuple[AgentSubject, AgentExecutionResult]] = Field(default_factory=list)
     datasets: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
     tool_execution_ids: list[uuid.UUID] = Field(default_factory=list)
+
+    @field_validator("consult_replies", mode="before")
+    @classmethod
+    def _normalize_consult_replies(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        normalized: list[tuple[AgentSubject, AgentExecutionResult]] = []
+        for item in value:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                normalized.append(item)  # type: ignore[arg-type]
+                continue
+            normalized.append((agent_subject(item[0]), agent_execution_result(item[1])))
+        return normalized
 
     def merge(self, other: SkillResult) -> None:
         self.notes.extend(other.notes)
@@ -125,7 +217,7 @@ class SkillExecutor(Protocol):
     async def execute(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult: ...

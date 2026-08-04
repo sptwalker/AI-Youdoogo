@@ -11,13 +11,21 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import AgentRunner, ExecutionContext, SkillRequest, SkillResult
+from app.agents.contracts import (
+    AgentRunner,
+    AgentSubject,
+    ExecutionContext,
+    SkillRequest,
+    SkillResult,
+    agent_execution_result,
+    agent_subject,
+)
 from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.foundations.integration.governed_data_query.contracts import (
     GovernedQueryRequest,
 )
 from app.contexts.foundations.integration.governed_data_query.entrypoints import operations
-from app.models.agent import AgentRole
+from app.contexts.foundations.workforce.expert_management import public as expert_management
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +34,7 @@ _MAX_PREVIEW_ROWS = 50
 _QUERY_RE = re.compile(r"【取数】\s*([^\n]+)")
 
 FallbackExecutor = Callable[
-    [AsyncSession, AgentRole, str, ExecutionContext, set[str]],
+    [AsyncSession, AgentSubject, str, ExecutionContext, set[str]],
     Awaitable[SkillResult],
 ]
 ExecutorFactory = Callable[[], "DataQuerySkillExecutor"]
@@ -105,9 +113,9 @@ def render_table(result: dict[str, Any]) -> str:
         "| " + " | ".join(str(row.get(column, "")) for column in columns) + " |"
         for row in rows[:_MAX_PREVIEW_ROWS]
     ]
-    tail = f"\n（共 {result['row_count']} 行" + (
-        "，已截断" if result.get("truncated") else ""
-    ) + "）"
+    tail = (
+        f"\n（共 {result['row_count']} 行" + ("，已截断" if result.get("truncated") else "") + "）"
+    )
     return "\n".join([head, separator, *body]) + tail
 
 
@@ -143,10 +151,11 @@ class DataQuerySkillExecutor:
     async def execute(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject | object,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult:
+        subject = agent_subject(role)
         args = DataQueryArgs.model_validate(request.arguments)
         result = SkillResult()
         query = self._query_provider() if self._query_provider is not None else run_readonly_sql
@@ -155,18 +164,14 @@ class DataQuerySkillExecutor:
             args.sql,
             actor_id=context.user_id,
             actor_role=None,
-            source=f"agent:{role.name}",
+            source=f"agent:{subject.name}",
         )
         status = query_result.get("status")
         if status == "rejected":
-            result.notes.append(
-                f"取数被拒（{query_result.get('reason', '')}）:{args.sql[:80]}"
-            )
+            result.notes.append(f"取数被拒（{query_result.get('reason', '')}）:{args.sql[:80]}")
             return result
         if status == "fail":
-            result.notes.append(
-                f"取数失败（{query_result.get('msg', '')}）:{args.sql[:80]}"
-            )
+            result.notes.append(f"取数失败（{query_result.get('msg', '')}）:{args.sql[:80]}")
             return result
         result.datasets.append(
             {
@@ -179,7 +184,7 @@ class DataQuerySkillExecutor:
         )
         await self._interpret(
             db,
-            role,
+            subject,
             request.raw_text or args.sql,
             [f"查询:{args.sql}\n结果:\n{render_table(query_result)}"],
             context,
@@ -190,7 +195,7 @@ class DataQuerySkillExecutor:
     async def _interpret(
         self,
         db: AsyncSession,
-        initiator: AgentRole,
+        initiator: AgentSubject,
         original: str,
         blocks: list[str],
         context: ExecutionContext,
@@ -217,9 +222,13 @@ class DataQuerySkillExecutor:
         if runner is None:
             result.notes.append("取数结果已生成，但缺少 AgentRunner，未生成自然语言解读")
             return
+        expert = await expert_management.get_expert_execution(db, initiator.expert_id)
+        if expert is None:
+            result.notes.append("取数结果已生成，但专家执行快照不存在，未生成自然语言解读")
+            return
         record = await runner(
             db,
-            initiator,
+            expert,
             task_type="data_interpret",
             input_summary=f"解读取数结果:{original[:40]}",
             user_message=prompt,
@@ -227,7 +236,7 @@ class DataQuerySkillExecutor:
             use_knowledge=False,
             execution_context=context,
         )
-        result.consult_replies.append((initiator, record))
+        result.consult_replies.append((initiator, agent_execution_result(record)))
         interpret_text = record.output_content or ""
         excluded = set(context.excluded_skills)
         if interpret_text and context.dispatcher is not None:
@@ -239,11 +248,7 @@ class DataQuerySkillExecutor:
                 exclude=excluded | {"data_query"},
             )
             result.merge(sub)
-        elif (
-            interpret_text
-            and self._fallback_executor is not None
-            and "deliver" not in excluded
-        ):
+        elif interpret_text and self._fallback_executor is not None and "deliver" not in excluded:
             result.merge(
                 await self._fallback_executor(
                     db,
@@ -257,7 +262,7 @@ class DataQuerySkillExecutor:
 
 async def execute(
     db: AsyncSession,
-    initiator: AgentRole,
+    initiator: AgentSubject | object,
     output: str,
     *,
     user_id: uuid.UUID | None = None,
@@ -269,6 +274,7 @@ async def execute(
     executor_factory: ExecutorFactory = DataQuerySkillExecutor,
 ) -> SkillResult:
     """Parse and execute governed-query directives without breaking the message flow."""
+    subject = agent_subject(initiator)
     context = merge_execution_context(
         execution_context,
         user_id=user_id,
@@ -295,7 +301,7 @@ async def execute(
         ]
         return await dispatch_requests(
             db,
-            initiator,
+            subject,
             requests,
             context,
             executor_factory=executor_factory,

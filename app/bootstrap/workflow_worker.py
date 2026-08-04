@@ -6,7 +6,7 @@ import asyncio
 import logging
 import socket
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,7 @@ from app.contexts.business.task_management.infrastructure.sqlalchemy_adapter imp
     SQLAlchemyTaskManagementAdapter,
 )
 from app.contexts.foundations.execution.agent_execution.public import (
-    run_agent,
+    run_agent_snapshot,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     failure_propagation,
@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 _worker_task: asyncio.Task[None] | None = None
 _stop_event: asyncio.Event | None = None
+
+# Compatibility name retained for existing worker injection/monkeypatch seams.  It now
+# points at the pure snapshot runner rather than the ORM-shaped legacy entrypoint.
+run_agent = cast(AgentRunner, run_agent_snapshot)
 
 
 def _worker_id() -> str:

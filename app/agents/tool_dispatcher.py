@@ -8,7 +8,14 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import ExecutionContext, SkillExecutor, SkillRequest, SkillResult
+from app.agents.contracts import (
+    AgentSubject,
+    ExecutionContext,
+    SkillExecutor,
+    SkillRequest,
+    SkillResult,
+    agent_subject,
+)
 from app.agents.directive_dispatch import merge_execution_context
 from app.agents.skill_registry import REGISTRY, Skill, enabled_skills, flag_on
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
@@ -36,7 +43,6 @@ from app.contexts.foundations.execution.capability_execution.infrastructure.curr
 from app.contexts.foundations.execution.capability_execution.infrastructure.sqlalchemy_uow import (
     SQLAlchemyCapabilityExecutionUnitOfWork,
 )
-from app.models.agent import AgentRole
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +75,7 @@ class _LegacyHandlerAdapter:
     def __init__(
         self,
         session: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject,
         context: ExecutionContext,
         executor: SkillExecutor | None,
     ) -> None:
@@ -121,13 +127,14 @@ class ToolDispatcher:
     async def dispatch(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject | object,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult:
+        subject = agent_subject(role)
         active_context = context.model_copy(update={"dispatcher": self})
         executor = self._executor(request)
-        handler = _LegacyHandlerAdapter(db, role, active_context, executor)
+        handler = _LegacyHandlerAdapter(db, subject, active_context, executor)
         idempotency_key = None
         if executor is not None and executor.requires_idempotency(request):
             idempotency_key = active_context.action_key(
@@ -142,10 +149,8 @@ class ToolDispatcher:
             raw_text=request.raw_text,
             principal=CapabilityPrincipal(
                 principal_id=active_context.user_id,
-                expert_id=role.id,
-                permission_keys=tuple(
-                    item for item in (role.tools or []) if isinstance(item, str)
-                ),
+                expert_id=subject.expert_id,
+                permission_keys=subject.capability_keys,
             ),
             trace=CapabilityTrace(
                 trace_id=active_context.trace_id,
@@ -185,7 +190,7 @@ class ToolDispatcher:
     async def dispatch_text(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject | object,
         output: str,
         context: ExecutionContext | None = None,
         *,
@@ -193,6 +198,7 @@ class ToolDispatcher:
         user_intent: str | None = None,
         exclude: set[str] | None = None,
     ) -> SkillResult:
+        subject = agent_subject(role)
         context = merge_execution_context(
             context,
             user_id=user_id,
@@ -207,14 +213,14 @@ class ToolDispatcher:
                 "excluded_skills": frozenset(excluded),
             }
         )
-        for skill in enabled_skills(role):
+        for skill in enabled_skills(subject):
             if skill.key in excluded or skill.legacy_executor is None:
                 continue
             try:
                 if not await flag_on(db, skill):
                     continue
                 merged.merge(
-                    await skill.legacy_executor(db, role, output, active_context, excluded)
+                    await skill.legacy_executor(db, subject, output, active_context, excluded)
                 )
             except Exception:  # noqa: BLE001 - legacy protocol isolation is observable behavior
                 logger.warning("技能执行失败 skill=%s", skill.key, exc_info=True)

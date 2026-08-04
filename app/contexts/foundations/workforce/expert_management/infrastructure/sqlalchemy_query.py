@@ -138,18 +138,6 @@ class SQLAlchemyExpertSnapshotQuery:
     async def get_by_code(self, code: str) -> ExpertExecutionSnapshot | None:
         return self._snapshot(await self._find(AgentRole.code == code))
 
-    async def get_record_by_id(self, expert_id: uuid.UUID) -> AgentRole | None:
-        """Compatibility seam for callers that still require the mapped row."""
-        return await self._find(AgentRole.id == expert_id)
-
-    async def get_record_by_name(self, name: str) -> AgentRole | None:
-        """Compatibility seam for the legacy Agent facade."""
-        return await self._find(AgentRole.name == name)
-
-    async def get_record_by_code(self, code: str) -> AgentRole | None:
-        """Compatibility seam for the legacy Agent facade."""
-        return await self._find(AgentRole.code == code)
-
     async def _find(self, criterion: ColumnElement[bool]) -> AgentRole | None:
         statement = select(AgentRole).where(
             criterion,

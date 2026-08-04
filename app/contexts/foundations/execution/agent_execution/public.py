@@ -4,6 +4,7 @@ from app.contexts.foundations.execution.agent_execution.contracts.execution impo
     AgentExecutionRequest,
     AgentExecutionResult,
     AgentExecutionStatus,
+    AgentExecutionStreamEvent,
     ExecutionTrace,
 )
 from app.contexts.foundations.execution.agent_execution.contracts.records import (
@@ -14,7 +15,9 @@ from app.contexts.foundations.execution.agent_execution.entrypoints.operations i
     get_execution_record,
     list_execution_records,
     run_agent,
+    run_agent_snapshot,
     run_agent_stream,
+    stream_agent,
 )
 
 __all__ = [
@@ -22,10 +25,13 @@ __all__ = [
     "AgentExecutionRecordView",
     "AgentExecutionResult",
     "AgentExecutionStatus",
+    "AgentExecutionStreamEvent",
     "ExecutionTrace",
     "execute_agent",
     "get_execution_record",
     "list_execution_records",
     "run_agent",
+    "run_agent_snapshot",
     "run_agent_stream",
+    "stream_agent",
 ]

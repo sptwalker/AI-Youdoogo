@@ -50,9 +50,7 @@ from app.contexts.foundations.workforce.expert_management.infrastructure.directo
 )
 from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalchemy_query import (
     SQLAlchemyExpertSnapshotQuery,
-    snapshot_from_role,
 )
-from app.models.agent import AgentRole
 
 
 async def get_expert_roster(
@@ -69,16 +67,11 @@ async def get_expert_execution(
     return await build_local_expert_management(session).get_execution(expert_id)
 
 
-async def get_active_expert_record_by_name(
+async def get_expert_execution_by_name(
     session: AsyncSession, name: str
-) -> AgentRole | None:
-    """Return the active mapped expert row for execution adapters needing ORM data."""
-    return await SQLAlchemyExpertSnapshotQuery(session).get_record_by_name(name)
-
-
-def execution_snapshot_from_record(role: AgentRole) -> ExpertExecutionSnapshot:
-    """Publish the execution view of an already-resolved mapped expert row."""
-    return snapshot_from_role(role)
+) -> ExpertExecutionSnapshot | None:
+    """Return an immutable execution snapshot without exposing the mapped row."""
+    return await SQLAlchemyExpertSnapshotQuery(session).get_by_name(name)
 
 
 async def list_expert_roster(

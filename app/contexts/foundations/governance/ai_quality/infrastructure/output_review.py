@@ -11,14 +11,19 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.execution.agent_execution.public import run_agent
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionRequest,
+)
+from app.contexts.foundations.execution.agent_execution.public import execute_agent
 from app.contexts.foundations.governance.ai_quality.domain.scoring import judge_score
 from app.contexts.foundations.governance.usage_budget.public import (
     extract_usage,
     record_usage,
 )
+from app.contexts.foundations.workforce.expert_management.public import (
+    get_expert_execution,
+)
 from app.llm import get_llm_for_role
-from app.models.agent import AgentRole
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +36,6 @@ _CRITIC_SYSTEM = (
 
 LLMFactory = Callable[..., Any]
 UsageRecorder = Callable[..., Awaitable[None]]
-AgentRunner = Callable[..., Awaitable[Any]]
 
 
 def parse_critic(critic_output: str) -> tuple[int, str]:
@@ -90,14 +94,8 @@ class LangChainOutputCritic:
 
 
 class AgentOutputRevision:
-    def __init__(
-        self,
-        session: AsyncSession,
-        *,
-        runner: AgentRunner = run_agent,
-    ) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._runner = runner
 
     async def revise(
         self,
@@ -108,23 +106,25 @@ class AgentOutputRevision:
         issues: str,
         user_id: uuid.UUID | None,
     ) -> str:
-        role = await self._session.get(AgentRole, expert_id)
-        if role is None or role.is_delete or not role.is_active:
+        expert = await get_expert_execution(self._session, expert_id)
+        if expert is None:
             raise RuntimeError("output review expert is unavailable")
-        record = await self._runner(
+        result = await execute_agent(
             self._session,
-            role,
-            task_type="reflection_revise",
-            input_summary=f"反思重写:{task_context[:40]}",
-            user_message=(
-                "你之前对以下任务给出了一版产出，审校员指出了一些问题。"
-                "请针对这些问题修订，给出改进后的完整产出（只输出修订后的产出正文）。\n\n"
-                f"【任务】\n{task_context}\n\n【你的初稿】\n{output}\n\n"
-                f"【审校员指出的问题】\n{issues}"
+            AgentExecutionRequest(
+                expert=expert,
+                task_type="reflection_revise",
+                input_summary=f"反思重写:{task_context[:40]}",
+                user_message=(
+                    "你之前对以下任务给出了一版产出，审校员指出了一些问题。"
+                    "请针对这些问题修订，给出改进后的完整产出（只输出修订后的产出正文）。\n\n"
+                    f"【任务】\n{task_context}\n\n【你的初稿】\n{output}\n\n"
+                    f"【审校员指出的问题】\n{issues}"
+                ),
+                user_id=user_id,
             ),
-            user_id=user_id,
         )
-        return record.output_content or ""
+        return result.content or ""
 
 
 class LoggingOutputReviewFailureReporter:

@@ -10,12 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.contracts import (
     AgentRunner,
+    AgentSubject,
     ExecutionContext,
     SkillExecutor,
     SkillRequest,
     SkillResult,
 )
-from app.models.agent import AgentRole
 
 ExecutorFactory = Callable[[], SkillExecutor]
 FailureNote = Callable[[SkillRequest], str]
@@ -50,7 +50,7 @@ def merge_execution_context(
 
 async def dispatch_requests(
     db: AsyncSession,
-    role: AgentRole,
+    role: AgentSubject,
     requests: Iterable[SkillRequest],
     context: ExecutionContext,
     *,

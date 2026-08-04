@@ -32,7 +32,9 @@ from app.contexts.foundations.governance.audit_trail import public as audit_trai
 from app.contexts.foundations.workforce.expert_management import (
     public as expert_management,
 )
-from app.models.agent import AgentRole
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertExecutionSnapshot,
+)
 from app.platform.deterministic import UUIDIdentifier as PlatformUUIDIdentifier
 
 
@@ -74,39 +76,45 @@ class LegacyExpertResearchAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._roles: dict[uuid.UUID, AgentRole] = {}
+        self._experts = expert_management.build_local_expert_directory_port(session)
+        self._snapshots: dict[uuid.UUID, ExpertExecutionSnapshot] = {}
 
     async def find_expert(self, name: str) -> ExpertReference | None:
-        role = await expert_management.get_active_expert_record_by_name(
-            self._session, name
+        snapshot = await expert_management.get_expert_execution_by_name(
+            self._session,
+            name,
         )
-        if role is None:
+        if snapshot is None:
             return None
-        self._roles[role.id] = role
-        return ExpertReference(id=role.id, name=role.name)
+        self._snapshots[snapshot.expert_id] = snapshot
+        return ExpertReference(id=snapshot.expert_id, name=snapshot.name)
 
     async def research(
         self, expert: ExpertReference, request: ExpertResearchRequest
     ) -> ExpertResearchResult:
-        role = self._roles.get(expert.id)
-        if role is None:
-            role = await self._session.get(AgentRole, expert.id)
-        if role is None or role.is_delete or not role.is_active:
+        snapshot = self._snapshots.get(expert.id)
+        if snapshot is None:
+            snapshot = await self._experts.get_execution(expert.id)
+        if snapshot is None:
             raise ProposalExpertUnavailable()
 
-        record = await agent_execution.run_agent(
+        execution = await agent_execution.run_agent_snapshot(
             self._session,
-            role,
+            snapshot,
             task_type=request.task_type,
             input_summary=request.input_summary,
             user_message=request.user_message,
             user_id=request.operator_id,
         )
-        draft = record.output_content or record.error_msg or "（无产出）"
+        draft = (
+            execution.content
+            or (execution.error.message if execution.error is not None else None)
+            or "（无产出）"
+        )
         reflection = await ai_quality.review_output(
             self._session,
             ai_quality.OutputReviewRequest(
-                expert_id=role.id,
+                expert_id=snapshot.expert_id,
                 output=draft,
                 task_context=request.user_message,
                 rubric=self._RUBRIC,

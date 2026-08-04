@@ -15,7 +15,7 @@ from app.contexts.foundations.execution.agent_execution.contracts.execution impo
     AgentExecutionRequest,
     AgentExecutionResult,
 )
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.models.agent import AgentTaskRecord
 
 
 class SQLAlchemyAgentExecutionRecorder:
@@ -24,11 +24,10 @@ class SQLAlchemyAgentExecutionRecorder:
     def __init__(
         self,
         session: AsyncSession,
-        role_record: AgentRole | None,
+        _legacy_role_record: object | None,
         usage_recorder: Callable[..., Any],
     ) -> None:
         self._session = session
-        self._role = role_record
         self._usage_recorder = usage_recorder
 
     async def record(

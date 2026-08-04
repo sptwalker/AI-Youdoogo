@@ -571,6 +571,45 @@ def test_legacy_error_facades_are_fully_removed() -> None:
     assert violations == []
 
 
+def test_agent_role_orm_mapping_stays_behind_explicit_compatibility_seams() -> None:
+    """AgentRole must not cross Context boundaries as runtime collaboration data."""
+    allowed_files = {
+        APP / "models" / "__init__.py",
+        APP
+        / "contexts"
+        / "foundations"
+        / "execution"
+        / "agent_execution"
+        / "entrypoints"
+        / "operations.py",
+    }
+    expert_infrastructure = (
+        APP
+        / "contexts"
+        / "foundations"
+        / "workforce"
+        / "expert_management"
+        / "infrastructure"
+    )
+    violations: list[str] = []
+    for path in sorted(APP.rglob("*.py")):
+        if path in allowed_files or path.is_relative_to(expert_infrastructure):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module in {"app.models", "app.models.agent"}
+                and any(imported.name == "AgentRole" for imported in node.names)
+            ):
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.Import) and any(
+                imported.name == "app.models.agent" for imported in node.names
+            ):
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert violations == []
+
+
 def test_zero_caller_legacy_facades_are_removed() -> None:
     removed = (
         APP / "contexts" / "foundations" / "knowledge" / "storage_gateway.py",

@@ -23,9 +23,10 @@ from app.contexts.business.group_messaging.infrastructure.sqlalchemy_repository 
 )
 from app.contexts.business.proposal_management import public as proposal_management
 from app.contexts.business.task_management import public as task_management
-from app.contexts.foundations.execution.agent_execution.public import (
-    run_agent,
-    run_agent_stream,
+from app.contexts.foundations.execution.agent_execution import public as agent_execution
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionRequest,
+    AgentExecutionResult,
 )
 from app.contexts.foundations.knowledge.knowledge_indexing import (
     public as knowledge_indexing,
@@ -40,7 +41,7 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
     DistillConversationCommand,
 )
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.contexts.foundations.workforce.expert_management import public as expert_management
 from app.platform import outbox, realtime
 
 
@@ -101,71 +102,68 @@ class LegacyAgentReplyAdapter:
     async def _stream_with_session(
         self, session: AsyncSession, request: AgentReplyRequest
     ) -> AsyncIterator[AgentReplyStreamEvent]:
-        role = await session.get(AgentRole, request.agent_id)
-        if role is None or role.is_delete or not role.is_active:
+        experts = expert_management.build_local_expert_directory_port(session)
+        expert = await experts.get_execution(request.agent_id)
+        if expert is None:
             return
         yield AgentReplyStreamEvent(
             name="start",
-            speaker_agent_id=role.id,
-            speaker_name=role.name,
+            speaker_agent_id=expert.expert_id,
+            speaker_name=expert.name,
         )
         user_message = (
             f"你在企业协作频道「{request.channel_name}」中被 @ 点名。\n\n"
             f"频道近期讨论：\n{request.recent_context}\n\n"
             "请以你的角色身份，就上文给出一段简明的参考意见/建议（仅供真人参考）。"
         )
-        record: AgentTaskRecord | None = None
-        async for item in run_agent_stream(
+        execution_result: AgentExecutionResult | None = None
+        async for event in agent_execution.stream_agent(
             session,
-            role,
-            task_type="discussion_reply",
-            input_summary=f"讨论回复：{request.content[:40]}",
-            user_message=user_message,
-            user_id=request.user_id,
+            AgentExecutionRequest(
+                expert=expert,
+                task_type="discussion_reply",
+                input_summary=f"讨论回复：{request.content[:40]}",
+                user_message=user_message,
+                user_id=request.user_id,
+            ),
             release_before_external_call=True,
         ):
-            if isinstance(item, AgentTaskRecord):
-                record = item
-            else:
-                yield AgentReplyStreamEvent(name="delta", text=item)
-        if record is None:
+            if event.delta is not None:
+                yield AgentReplyStreamEvent(name="delta", text=event.delta)
+            elif event.result is not None:
+                execution_result = event.result
+        if execution_result is None:
             raise RuntimeError("Agent reply completed without an execution record")
-        reply = record.output_content or record.error_msg or "（无产出）"
-        # The execution boundary rolls back the read transaction before the
-        # external model call. Refresh the ORM role before capability dispatch
-        # so rollback expiration cannot leak into this adapter.
-        refreshed_role = await session.get(AgentRole, request.agent_id)
-        if refreshed_role is not None:
-            role = refreshed_role
+        reply = execution_result.output_content or execution_result.error_msg or "（无产出）"
         protocol_result = await ToolDispatcher().dispatch_text(
             session,
-            role,
+            expert,
             reply,
             ExecutionContext(
                 user_id=request.user_id,
-                agent_runner=run_agent,
+                agent_runner=agent_execution.run_agent_snapshot,
             ),
             user_id=request.user_id,
         )
         reply = protocol_result.fold_notes(reply)
         yield AgentReplyStreamEvent(
             name="complete",
-            speaker_agent_id=role.id,
-            speaker_name=role.name,
+            speaker_agent_id=expert.expert_id,
+            speaker_name=expert.name,
             content=reply,
-            source_record_id=record.id,
+            source_record_id=execution_result.id,
         )
         for consulted, consulted_record in protocol_result.consult_replies:
             answer = consulted_record.output_content or consulted_record.error_msg or "（无回应）"
             yield AgentReplyStreamEvent(
                 name="start",
-                speaker_agent_id=consulted.id,
+                speaker_agent_id=consulted.expert_id,
                 speaker_name=consulted.name,
             )
             yield AgentReplyStreamEvent(name="delta", text=answer)
             yield AgentReplyStreamEvent(
                 name="complete",
-                speaker_agent_id=consulted.id,
+                speaker_agent_id=consulted.expert_id,
                 speaker_name=consulted.name,
                 content=answer,
                 source_record_id=consulted_record.id,

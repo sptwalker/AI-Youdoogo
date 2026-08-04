@@ -130,6 +130,21 @@ class AgentExecutionResult:
     reflection: ReflectionOutcome | None = None
     error: ExecutionError | None = None
 
+    @property
+    def id(self) -> uuid.UUID | None:
+        """Compatibility alias for callers migrating from AgentTaskRecord."""
+        return self.execution_id
+
+    @property
+    def output_content(self) -> str | None:
+        """Compatibility alias for callers migrating from AgentTaskRecord."""
+        return self.content
+
+    @property
+    def error_msg(self) -> str | None:
+        """Compatibility alias for callers migrating from AgentTaskRecord."""
+        return self.error.message if self.error is not None else None
+
 
 @dataclass(frozen=True, slots=True)
 class AgentExecutionStreamEvent:

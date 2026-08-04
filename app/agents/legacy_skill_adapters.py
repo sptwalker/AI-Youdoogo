@@ -13,15 +13,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import ExecutionContext, SkillResult
+from app.agents.contracts import AgentSubject, ExecutionContext, SkillResult
 from app.agents.directive_dispatch import dispatch_requests as dispatch_requests
 from app.agents.directive_dispatch import (
     merge_execution_context as merge_execution_context,
 )
-from app.models.agent import AgentRole
 
 LegacyExecutor = Callable[
-    [AsyncSession, AgentRole, str, ExecutionContext, set[str]],
+    [AsyncSession, AgentSubject, str, ExecutionContext, set[str]],
     Awaitable[SkillResult],
 ]
 
@@ -39,7 +38,7 @@ def accepted_kwargs(call: Any, values: dict[str, Any]) -> dict[str, Any]:
 
 async def legacy_collab(
     db: AsyncSession,
-    role: AgentRole,
+    role: AgentSubject,
     output: str,
     context: ExecutionContext,
     _exclude: set[str],
@@ -59,7 +58,7 @@ async def legacy_collab(
 
 async def legacy_deliver(
     db: AsyncSession,
-    role: AgentRole,
+    role: AgentSubject,
     output: str,
     context: ExecutionContext,
     _exclude: set[str],
@@ -77,7 +76,7 @@ async def legacy_deliver(
 
 async def legacy_query(
     db: AsyncSession,
-    role: AgentRole,
+    role: AgentSubject,
     output: str,
     context: ExecutionContext,
     exclude: set[str],

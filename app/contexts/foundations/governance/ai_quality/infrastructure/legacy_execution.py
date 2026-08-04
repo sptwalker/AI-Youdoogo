@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.contracts import AgentRunner, agent_execution_result
 from app.contexts.foundations.governance.ai_quality.application.ports import (
     EvaluationJudgePort,
 )
@@ -24,7 +25,6 @@ from app.contexts.foundations.model_gateway.contracts.completion import (
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
-from app.models.agent import AgentRole, AgentTaskRecord
 
 _JUDGE_SYSTEM = (
     "你是严格的 AI 输出评审员。依据给定的【评分标准】，对【AI产出】打 1~5 分整数分"
@@ -39,32 +39,7 @@ _OPTIMIZER_SYSTEM = (
 
 
 UsageRecorder = Callable[..., Awaitable[None]]
-AgentRunner = Callable[..., Awaitable[AgentTaskRecord]]
 JudgeCallable = Callable[[AsyncSession, str, str, uuid.UUID | None], Awaitable[int]]
-
-
-def _permission_value(value: str) -> object:
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return value
-
-
-def role_from_snapshot(snapshot: ExpertExecutionSnapshot, prompt: str) -> AgentRole:
-    return AgentRole(
-        id=snapshot.expert_id,
-        name=snapshot.name,
-        title=snapshot.title,
-        department_id=snapshot.department_id,
-        prompt_template=prompt,
-        model_role=snapshot.model_role,
-        tools=list(snapshot.capability_keys),
-        permission_scope={
-            key: _permission_value(value) for key, value in snapshot.permission_entries
-        },
-        owner_user_id=snapshot.owner_user_id,
-        is_active=True,
-    )
 
 
 class LegacyAgentEvaluationExecutor:
@@ -79,15 +54,17 @@ class LegacyAgentEvaluationExecutor:
         case: EvaluationCaseView,
         user_id: uuid.UUID | None,
     ) -> str:
-        record = await self._runner(
+        candidate = replace(subject, prompt_template=prompt)
+        legacy_result = await self._runner(
             self._session,
-            role_from_snapshot(subject, prompt),
+            candidate,
             task_type="eval_run",
             input_summary=f"评估:{case.name[:40]}",
             user_message=case.input_text,
             user_id=user_id,
         )
-        return record.output_content or record.error_msg or ""
+        result = agent_execution_result(legacy_result)
+        return result.content or (result.error.message if result.error else "")
 
 
 class CallbackEvaluationJudge:

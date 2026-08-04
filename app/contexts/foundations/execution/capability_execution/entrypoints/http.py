@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.contracts import AgentSubject
 from app.api.deps import require_service
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
     CapabilityDefinition,
@@ -88,10 +89,10 @@ class CapabilityExecuteRequest(BaseModel):
 
 
 class _RegistryHandler:
-    """按 capability_key 从 skill REGISTRY 取 executor 跑一次，映回 HandlerExecutionResult。
+    """Resolve a registered executor through the AgentSubject compatibility seam.
 
-    与 ToolDispatcher._LegacyHandlerAdapter 同范式，但走服务身份路径：无 agent 上下文可传。
-    首版可执行 SYNC_LOCAL 仅 data_query（env_context 无 executor）。
+    The provider has no user-facing agent row to load. It supplies only the identity facts
+    required by legacy executors, never constructing or importing the ``AgentRole`` ORM model.
     """
 
     def __init__(self, db: AsyncSession, principal: CapabilityPrincipal) -> None:
@@ -106,16 +107,16 @@ class _RegistryHandler:
         del definition
         from app.agents.contracts import ExecutionContext, SkillRequest
         from app.agents.skill_registry import REGISTRY
-        from app.models.agent import AgentRole
 
         descriptor = REGISTRY.get(request.capability_key)
         if descriptor is None or descriptor.executor_factory is None:
             raise LookupError(f"Capability handler {request.capability_key} is unavailable")
+        executor = descriptor.executor_factory()
         arguments = json.loads(request.arguments_json)
-        # 远端调用方无 agent 上下文：以 expert_id 造最小 role/context 供 executor 取数。
-        role = AgentRole(id=self._principal.expert_id, name="capability-provider")
+        # Compatibility-only path: no ORM record crosses the capability boundary.
+        role = AgentSubject(expert_id=self._principal.expert_id, name="capability-provider")
         context = ExecutionContext(user_id=self._principal.principal_id)
-        legacy = await descriptor.executor_factory().execute(
+        legacy = await executor.execute(
             self._db,
             role,
             SkillRequest(

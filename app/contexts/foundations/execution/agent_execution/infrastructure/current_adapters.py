@@ -33,15 +33,13 @@ from app.contexts.foundations.knowledge.wiki_management.public import (
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
-from app.models.agent import AgentRole
 
 logger = logging.getLogger(__name__)
 
 
 class CurrentPromptAssemblyAdapter:
-    def __init__(self, session: AsyncSession, role_record: AgentRole | None = None) -> None:
+    def __init__(self, session: AsyncSession, _legacy_role_record: object | None = None) -> None:
         self._session = session
-        self._role = role_record
 
     async def build(self, expert: ExpertExecutionSnapshot) -> str:
         try:
@@ -53,14 +51,10 @@ class CurrentPromptAssemblyAdapter:
         except Exception:  # noqa: BLE001 - keep the built-in red line available
             logger.warning("读取 agent_global_prompt 失败，回退内置默认", exc_info=True)
             configured = DEFAULT_GLOBAL_PROMPT
-        skill_sections = (
-            await skill_registry.prompt_sections(
-                self._session,
-                self._role,
-                resolver=resolve_configuration,
-            )
-            if self._role is not None
-            else ""
+        skill_sections = await skill_registry.prompt_sections(
+            self._session,
+            expert,
+            resolver=resolve_configuration,
         )
         terminology = await term_prompt(self._session)
         return f"{configured}\n\n{expert.prompt_template}{skill_sections}{terminology}"

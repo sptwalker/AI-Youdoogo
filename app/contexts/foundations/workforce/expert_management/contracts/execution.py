@@ -22,6 +22,11 @@ class ExpertExecutionSnapshot:
     permission_entries: tuple[tuple[str, str], ...] = ()
     owner_user_id: uuid.UUID | None = None
 
+    @property
+    def id(self) -> uuid.UUID:
+        """Compatibility alias for legacy execution/capability adapters."""
+        return self.expert_id
+
 
 @dataclass(frozen=True, slots=True)
 class ExpertReleaseView:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,14 +25,18 @@ from app.contexts.foundations.access_control.contracts import PolicyDecision
 from app.contexts.foundations.execution.agent_execution import (
     public as agent_execution,
 )
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionRequest,
+    AgentExecutionResult,
+)
 from app.contexts.foundations.identity.contracts import Principal
 from app.contexts.foundations.workforce.expert_management import (
     public as expert_management,
 )
+from app.contexts.foundations.workforce.expert_management.contracts.execution import (
+    ExpertExecutionSnapshot,
+)
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
-
-if TYPE_CHECKING:
-    from app.models.agent import AgentRole
 
 EXPERT_NAME = "会商AI专家"
 
@@ -82,7 +85,7 @@ class LegacyMeetingAdvisoryAdapter:
         self._session = session
 
     async def speak(self, request: SpeechAdvisoryRequest) -> AsyncIterator[AdvisoryStreamEvent]:
-        role = await self._expert_required()
+        expert = await self._expert_required()
         context = "\n".join(f"{name}：{content}" for name, content in request.history)
         context = context or "（暂无发言）"
         user_message = (
@@ -91,72 +94,74 @@ class LegacyMeetingAdvisoryAdapter:
         )
         yield AdvisoryStreamEvent(
             kind=AdvisoryEventKind.STARTED,
-            expert_id=role.id,
-            expert_name=role.name,
+            expert_id=expert.expert_id,
+            expert_name=expert.name,
         )
-        record = None
-        async for item in agent_execution.run_agent_stream(
+        execution_result: AgentExecutionResult | None = None
+        async for event in agent_execution.stream_agent(
             self._session,
-            role,
-            task_type="meeting_discuss",
-            input_summary=f"会议发言：{request.topic[:40]}",
-            user_message=user_message,
-            user_id=request.operator_id,
+            AgentExecutionRequest(
+                expert=expert,
+                task_type="meeting_discuss",
+                input_summary=f"会议发言：{request.topic[:40]}",
+                user_message=user_message,
+                user_id=request.operator_id,
+            ),
         ):
-            if isinstance(item, str):
+            if event.delta is not None:
                 yield AdvisoryStreamEvent(
                     kind=AdvisoryEventKind.DELTA,
-                    expert_id=role.id,
-                    expert_name=role.name,
-                    text=item,
+                    expert_id=expert.expert_id,
+                    expert_name=expert.name,
+                    text=event.delta,
                 )
-            else:
-                record = item
-        if record is None:
+            elif event.result is not None:
+                execution_result = event.result
+        if execution_result is None:
             raise RuntimeError("Agent stream completed without a result")
-        content = record.output_content or record.error_msg or "（无产出）"
+        content = execution_result.output_content or execution_result.error_msg or "（无产出）"
         result = await ToolDispatcher().dispatch_text(
             self._session,
-            role,
+            expert,
             content,
             ExecutionContext(
                 user_id=request.operator_id,
-                agent_runner=agent_execution.run_agent,
+                agent_runner=agent_execution.run_agent_snapshot,
             ),
             user_id=request.operator_id,
         )
         content = result.fold_notes(content)
         yield AdvisoryStreamEvent(
             kind=AdvisoryEventKind.COMPLETED,
-            expert_id=role.id,
-            expert_name=role.name,
+            expert_id=expert.expert_id,
+            expert_name=expert.name,
             text=content,
         )
         for consulted, consult_record in result.consult_replies:
             answer = consult_record.output_content or consult_record.error_msg or "（无回应）"
             yield AdvisoryStreamEvent(
                 kind=AdvisoryEventKind.STARTED,
-                expert_id=consulted.id,
+                expert_id=consulted.expert_id,
                 expert_name=consulted.name,
             )
             yield AdvisoryStreamEvent(
                 kind=AdvisoryEventKind.DELTA,
-                expert_id=consulted.id,
+                expert_id=consulted.expert_id,
                 expert_name=consulted.name,
                 text=answer,
             )
             yield AdvisoryStreamEvent(
                 kind=AdvisoryEventKind.COMPLETED,
-                expert_id=consulted.id,
+                expert_id=consulted.expert_id,
                 expert_name=consulted.name,
                 text=answer,
             )
 
     async def vote(self, request: VoteAdvisoryRequest) -> AdvisoryResult:
-        role = await self._expert_required()
-        record = await agent_execution.run_agent(
+        expert = await self._expert_required()
+        execution = await agent_execution.run_agent_snapshot(
             self._session,
-            role,
+            expert,
             task_type="meeting_vote",
             input_summary=f"AI参考票：{request.subject[:40]}",
             user_message=(
@@ -166,21 +171,21 @@ class LegacyMeetingAdvisoryAdapter:
             user_id=request.operator_id,
         )
         return AdvisoryResult(
-            expert_id=role.id,
-            expert_name=role.name,
-            content=record.output_content or "",
-            comment=record.output_content,
+            expert_id=expert.expert_id,
+            expert_name=expert.name,
+            content=execution.output_content or "",
+            comment=execution.output_content,
         )
 
     async def minutes(self, request: MinutesAdvisoryRequest) -> AdvisoryResult:
-        role = await self._expert_required()
+        expert = await self._expert_required()
         body = "\n".join(
             f"{name}（{speaker_type}）：{content}"
             for name, speaker_type, content in request.discussions
         )
-        record = await agent_execution.run_agent(
+        execution = await agent_execution.run_agent_snapshot(
             self._session,
-            role,
+            expert,
             task_type="meeting_minutes",
             input_summary=f"会议纪要：{request.title[:40]}",
             user_message=(
@@ -190,18 +195,19 @@ class LegacyMeetingAdvisoryAdapter:
             user_id=request.operator_id,
         )
         return AdvisoryResult(
-            expert_id=role.id,
-            expert_name=role.name,
-            content=record.output_content or record.error_msg or "（无产出）",
+            expert_id=expert.expert_id,
+            expert_name=expert.name,
+            content=execution.output_content or execution.error_msg or "（无产出）",
         )
 
-    async def _expert_required(self) -> AgentRole:
-        role = await expert_management.get_active_expert_record_by_name(
-            self._session, EXPERT_NAME
+    async def _expert_required(self) -> ExpertExecutionSnapshot:
+        expert = await expert_management.get_expert_execution_by_name(
+            self._session,
+            EXPERT_NAME,
         )
-        if role is None:
+        if expert is None:
             raise RuleViolation("未配置会商AI专家角色，请先执行数据库迁移（alembic upgrade head）")
-        return role
+        return expert
 
 
 class TaskManagementCreationAdapter:

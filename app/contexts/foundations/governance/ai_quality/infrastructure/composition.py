@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.contexts.foundations.execution.agent_execution.public import run_agent
+from app.agents.contracts import AgentRunner
+from app.contexts.foundations.execution.agent_execution.public import (
+    run_agent_snapshot as run_agent,
+)
 from app.contexts.foundations.governance.ai_quality.application.use_cases import (
     CompareCandidatePrompt,
     CreateEvaluationCase,
@@ -46,7 +51,7 @@ class AIQualityOperations:
         evaluator = RunEvaluation(
             unit,
             SQLAlchemyEvaluationSubject(session),
-            LegacyAgentEvaluationExecutor(session, run_agent),
+            LegacyAgentEvaluationExecutor(session, cast(AgentRunner, run_agent)),
             LangChainEvaluationJudge(
                 session,
                 port=build_llm_completion_port(),

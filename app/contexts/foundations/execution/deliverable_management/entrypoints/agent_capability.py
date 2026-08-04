@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.platform.object_storage.gateway as object_storage
-from app.agents.contracts import ExecutionContext, SkillRequest, SkillResult
+from app.agents.contracts import (
+    AgentSubject,
+    ExecutionContext,
+    SkillRequest,
+    SkillResult,
+    agent_subject,
+)
 from app.agents.directive_dispatch import dispatch_requests, merge_execution_context
 from app.contexts.foundations.execution.deliverable_management.contracts.delivery import (
     DeliverableFormat,
@@ -22,7 +28,6 @@ from app.contexts.foundations.execution.deliverable_management.entrypoints impor
 from app.contexts.foundations.execution.deliverable_management.infrastructure.adapters import (
     ObjectPut,
 )
-from app.models.agent import AgentRole
 
 logger = logging.getLogger(__name__)
 
@@ -94,21 +99,20 @@ class DeliverySkillExecutor:
     async def execute(
         self,
         db: AsyncSession,
-        role: AgentRole,
+        role: AgentSubject | object,
         request: SkillRequest,
         context: ExecutionContext,
     ) -> SkillResult:
+        subject = agent_subject(role)
         args = DeliveryArgs.model_validate(request.arguments)
         if context.user_id is None:
-            return SkillResult(
-                notes=["交付需指定接收人，自动任务无桌面归属，已跳过文件交付"]
-            )
+            return SkillResult(notes=["交付需指定接收人，自动任务无桌面归属，已跳过文件交付"])
         artifact = await operations.publish_deliverable(
             db,
             PublishDeliverableCommand(
                 owner_user_id=context.user_id,
-                agent_id=role.id,
-                agent_name=role.name,
+                agent_id=subject.expert_id,
+                agent_name=subject.name,
                 name=args.name,
                 file_format=DeliverableFormat(args.format),
                 body=args.body,
@@ -139,7 +143,7 @@ def _delivery_failure_note(request: SkillRequest) -> str:
 
 async def execute(
     db: AsyncSession,
-    initiator: AgentRole,
+    initiator: AgentSubject | object,
     output: str,
     *,
     user_id: uuid.UUID | None = None,
@@ -148,6 +152,7 @@ async def execute(
     executor_factory: ExecutorFactory = DeliverySkillExecutor,
 ) -> SkillResult:
     """Execute delivery directives without allowing protocol failures to escape."""
+    subject = agent_subject(initiator)
     context = merge_execution_context(execution_context, user_id=user_id)
     result = SkillResult()
     try:
@@ -155,9 +160,7 @@ async def execute(
         if not items or not await _enabled(db, feature_flag_resolver):
             return result
         if context.user_id is None:
-            result.notes.append(
-                "交付需指定接收人，自动任务无桌面归属，已跳过文件交付"
-            )
+            result.notes.append("交付需指定接收人，自动任务无桌面归属，已跳过文件交付")
             return result
         requests = [
             SkillRequest(
@@ -174,7 +177,7 @@ async def execute(
         ]
         return await dispatch_requests(
             db,
-            initiator,
+            subject,
             requests,
             context,
             executor_factory=executor_factory,

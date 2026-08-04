@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 
 from sqlalchemy import or_, select
@@ -22,8 +21,11 @@ from app.contexts.foundations.governance.ai_quality.contracts.quality import (
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
 )
+from app.contexts.foundations.workforce.expert_management.public import (
+    build_local_expert_directory_port,
+)
 from app.contexts.shared_kernel import ResourceNotFound
-from app.models.agent import AgentRole, AgentTaskRecord
+from app.models.agent import AgentTaskRecord
 from app.models.eval_case import EvalCase
 from app.models.feedback import AgentFeedback
 
@@ -150,28 +152,10 @@ class SQLAlchemyFeedbackRepository:
 
 class SQLAlchemyEvaluationSubject:
     def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+        self._experts = build_local_expert_directory_port(session)
 
     async def get(self, role_id: uuid.UUID) -> ExpertExecutionSnapshot | None:
-        role = await self._session.get(AgentRole, role_id)
-        if role is None or role.is_delete:
-            return None
-        permissions = role.permission_scope or {}
-        return ExpertExecutionSnapshot(
-            expert_id=role.id,
-            version=role.update_time.isoformat(),
-            name=role.name,
-            title=role.title,
-            department_id=role.department_id,
-            prompt_template=role.prompt_template,
-            model_role=role.model_role,
-            capability_keys=tuple(str(item) for item in (role.tools or [])),
-            permission_entries=tuple(
-                (str(key), json.dumps(value, ensure_ascii=False))
-                for key, value in permissions.items()
-            ),
-            owner_user_id=role.owner_user_id,
-        )
+        return await self._experts.get_execution(role_id)
 
 
 class SQLAlchemyAIQualityUnitOfWork:

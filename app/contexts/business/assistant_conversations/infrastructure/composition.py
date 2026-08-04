@@ -27,8 +27,7 @@ from app.contexts.business.assistant_conversations.infrastructure.sqlalchemy_uow
     SQLAlchemyConversationUnitOfWork,
 )
 from app.contexts.foundations.execution.agent_execution.public import (
-    run_agent,
-    run_agent_stream,
+    run_agent_snapshot,
 )
 from app.platform.deterministic import SystemClock, UUIDIdentifier
 
@@ -50,8 +49,8 @@ def build_assistant_conversations_application(
         agents=agents
         or LegacyAgentExecutionAdapter(
             session,
-            agent_stream=agent_stream or run_agent_stream,
-            agent_runner=agent_runner or run_agent,
+            agent_stream=agent_stream,
+            agent_runner=agent_runner or run_agent_snapshot,
         ),
         orchestration=PublishedOrchestrationAdapter(session),
         archive_port=archive_port or PublishedConversationArchiveAdapter(session),

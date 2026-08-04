@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.contracts import ExecutionContext
+from app.agents.contracts import ExecutionContext, agent_execution_result
 from app.agents.tool_dispatcher import ToolDispatcher
 from app.contexts.business.assistant_conversations.application.contracts import (
     AgentExecutionEvent,
@@ -22,6 +22,13 @@ from app.contexts.business.assistant_conversations.application.contracts import 
 )
 from app.contexts.business.assistant_conversations.domain.models import Assistant, Participant
 from app.contexts.business.task_management import public as task_management
+from app.contexts.foundations.execution.agent_execution import public as agent_execution
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionRequest as FoundationAgentExecutionRequest,
+)
+from app.contexts.foundations.execution.agent_execution.contracts.execution import (
+    AgentExecutionResult,
+)
 from app.contexts.foundations.execution.work_planning import public as work_planning
 from app.contexts.foundations.execution.workflow_runtime import public as workflow_runtime
 from app.contexts.foundations.governance.system_configuration import (
@@ -36,7 +43,6 @@ from app.contexts.foundations.knowledge.organizational_memory.contracts import (
 from app.contexts.foundations.knowledge.wiki_management import public as wiki_management
 from app.contexts.foundations.workforce.expert_management import public as expert_management
 from app.contexts.shared_kernel import ResourceNotFound
-from app.models.agent import AgentRole, AgentTaskRecord
 from app.models.knowledge import SCOPE_PERSONAL, KnowledgeBase
 from app.platform.object_storage import gateway as storage
 
@@ -47,8 +53,8 @@ _ASSISTANT_PROMPT = (
     "遇到需要事实依据的问题优先引用可查资料并标注来源；不确定就说不确定，不编造。"
 )
 
-AgentStream = Callable[..., AsyncIterator[str | AgentTaskRecord]]
-AgentRunner = Callable[..., Awaitable[AgentTaskRecord]]
+AgentStream = Callable[..., AsyncIterator[str | object]]
+AgentRunner = Callable[..., Awaitable[object]]
 LegacyDistill = Callable[..., Awaitable[str | None]]
 LegacyIngest = Callable[..., Awaitable[object]]
 
@@ -58,14 +64,12 @@ class SQLAlchemyAssistantDirectoryAdapter:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._experts = expert_management.build_local_expert_directory_port(session)
 
     async def get_or_create(self, principal: Principal) -> Assistant:
         user_id = principal.id
         display_name = principal.display_name
-        roster = await expert_management.list_expert_roster(
-            self._session,
-            include_personal=True,
-        )
+        roster = await self._experts.list_roster(include_personal=True)
         expert = next((item for item in roster if item.owner_user_id == user_id), None)
         if expert is None:
             base_name = f"{display_name}的助理"
@@ -102,27 +106,22 @@ class SQLAlchemyAssistantDirectoryAdapter:
         )
 
     async def list_addable(self) -> tuple[Participant, ...]:
-        statement = (
-            select(AgentRole)
-            .where(
-                AgentRole.owner_user_id.is_(None),
-                AgentRole.is_active.is_(True),
-                AgentRole.is_delete.is_(False),
-            )
-            .order_by(AgentRole.tier, AgentRole.name)
-        )
+        roster = await self._experts.list_roster(include_personal=False)
         return tuple(
-            Participant(id=row.id, name=row.name, title=row.title)
-            for row in (await self._session.execute(statement)).scalars()
+            Participant(id=item.expert_id, name=item.name, title=item.title)
+            for item in sorted(
+                (item for item in roster if item.is_active),
+                key=lambda item: (item.tier, item.name),
+            )
         )
 
     async def resolve_addable(self, agent_ids: tuple[uuid.UUID, ...]) -> tuple[Participant, ...]:
         result: list[Participant] = []
         for agent_id in agent_ids:
-            row = await self._session.get(AgentRole, agent_id)
-            if row is None or row.is_delete or not row.is_active or row.owner_user_id is not None:
+            item = await self._experts.get_roster(agent_id)
+            if item is None or not item.is_active or item.owner_user_id is not None:
                 raise ResourceNotFound("要加入的 AI 不存在或不可用")
-            result.append(Participant(id=row.id, name=row.name, title=row.title))
+            result.append(Participant(id=item.expert_id, name=item.name, title=item.title))
         return tuple(result)
 
     async def _personal_knowledge_base_id(self, assistant_id: uuid.UUID) -> uuid.UUID | None:
@@ -157,10 +156,11 @@ class LegacyAgentExecutionAdapter:
         self,
         session: AsyncSession,
         *,
-        agent_stream: AgentStream,
+        agent_stream: AgentStream | None,
         agent_runner: AgentRunner,
     ) -> None:
         self._session = session
+        self._experts = expert_management.build_local_expert_directory_port(session)
         self._agent_stream = agent_stream
         self._agent_runner = agent_runner
 
@@ -168,29 +168,46 @@ class LegacyAgentExecutionAdapter:
         return self._stream(request)
 
     async def _stream(self, request: AgentExecutionRequest) -> AsyncIterator[AgentExecutionEvent]:
-        role = await self._session.get(AgentRole, request.participant_id)
-        if role is None:
+        expert = await self._experts.get_execution(request.participant_id)
+        if expert is None:
             raise ResourceNotFound("智能体不存在")
-        record: AgentTaskRecord | None = None
-        async for item in self._agent_stream(
-            self._session,
-            role,
+        execution_request = FoundationAgentExecutionRequest(
+            expert=expert,
             task_type="desktop_chat",
             input_summary=f"桌面对话：{request.original_message[:40]}",
             user_message=request.prompt,
             user_id=request.principal_id,
             use_knowledge=True,
-        ):
-            if isinstance(item, AgentTaskRecord):
-                record = item
-            else:
-                yield AgentExecutionEvent(name="delta", text=item)
-        if record is None:
+        )
+        execution_result: AgentExecutionResult | None = None
+        if self._agent_stream is not None:
+            # Explicitly injected legacy streams remain available to tests and
+            # bootstrap callers while the default path uses the pure contract.
+            async for item in self._agent_stream(
+                self._session,
+                expert,
+                task_type="desktop_chat",
+                input_summary=f"桌面对话：{request.original_message[:40]}",
+                user_message=request.prompt,
+                user_id=request.principal_id,
+                use_knowledge=True,
+            ):
+                if isinstance(item, str):
+                    yield AgentExecutionEvent(name="delta", text=item)
+                else:
+                    execution_result = agent_execution_result(item)
+        else:
+            async for event in agent_execution.stream_agent(self._session, execution_request):
+                if event.delta is not None:
+                    yield AgentExecutionEvent(name="delta", text=event.delta)
+                elif event.result is not None:
+                    execution_result = event.result
+        if execution_result is None:
             raise RuntimeError("Agent reply completed without an execution record")
-        reply = record.output_content or record.error_msg or "（无回应）"
-        result = await ToolDispatcher().dispatch_text(
+        reply = execution_result.output_content or execution_result.error_msg or "（无回应）"
+        protocol_result = await ToolDispatcher().dispatch_text(
             self._session,
-            role,
+            expert,
             reply,
             ExecutionContext(
                 user_id=request.principal_id,
@@ -200,7 +217,7 @@ class LegacyAgentExecutionAdapter:
             user_id=request.principal_id,
             user_intent=request.original_message,
         )
-        reply = result.fold_notes(reply)
+        reply = protocol_result.fold_notes(reply)
         consultations = tuple(
             ConsultedReply(
                 participant_id=consulted.id,
@@ -209,7 +226,7 @@ class LegacyAgentExecutionAdapter:
                     consulted_record.output_content or consulted_record.error_msg or "（无回应）"
                 ),
             )
-            for consulted, consulted_record in result.consult_replies
+            for consulted, consulted_record in protocol_result.consult_replies
         )
         yield AgentExecutionEvent(
             name="complete",
