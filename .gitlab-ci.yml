@@ -77,7 +77,6 @@ verify_backend:
       prefix: uv
       files:
         - uv.lock
-    policy: pull
     paths:
       - .cache/uv/
     policy: pull-push
