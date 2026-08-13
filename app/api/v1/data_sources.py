@@ -15,7 +15,14 @@ from app.contexts.foundations.integration.connector_management.application.contr
     RegisterConnector,
     UpdateConnector,
 )
-from app.contexts.foundations.integration.connector_management.entrypoints import operations
+from app.contexts.foundations.integration.connector_management.contracts import (
+    ConnectorProbeResult,
+    ConnectorSnapshot,
+)
+from app.contexts.foundations.integration.connector_management.entrypoints import (
+    operations,
+    probe,
+)
 from app.platform.database import get_db
 from app.platform.http_runtime import ok
 from app.schemas.knowledge import DataSourceCreate, DataSourceUpdate
@@ -24,6 +31,22 @@ router = APIRouter(prefix="/data-sources", tags=["data-source"])
 
 DB = Annotated[AsyncSession, Depends(get_db)]
 Admin = Annotated[object, Depends(require_roles("admin"))]
+
+
+async def _probe_thinkingdata(
+    db: AsyncSession, _connector: ConnectorSnapshot
+) -> ConnectorProbeResult:
+    """thinkingdata 连通探针：委托运营分析（business），从组合根注入避免 foundations 反向依赖。"""
+    # ponytail: TD 连通复用运营分析的系统级 TD 读取校验（读系统配置的 TD 地址/密钥/日指标 SQL），
+    # 非按本连接器 config 独立建连；多 TD 连接器时都测同一套系统 TD 配置。需按连接器独立建连再拆。
+    result = await analytics.test_connector(db, date.today())
+    return ConnectorProbeResult(
+        status=result.status, message=result.message, row_count=result.row_count
+    )
+
+
+# 需要业务上下文的探针在组合根注入；原生探针（http_api）内建于 connector_management。
+_EXTRA_PROBES: dict[str, probe.ConnectorProbe] = {"thinkingdata": _probe_thinkingdata}
 
 
 @router.get("")
@@ -78,18 +101,7 @@ async def delete_ds(ds_id: uuid.UUID, db: DB, _: Admin) -> dict:
 
 @router.post("/{ds_id}/test")
 async def test_ds(ds_id: uuid.UUID, db: DB, _: Admin) -> dict:
-    """测试数据接口连通性（用生效配置真跑一次，不落库、不回显密钥，P2-26）。"""
+    """测试数据接口连通性（按类型分派执行器真跑一次，不落库、不回显密钥，P2-26/P3-1）。"""
     connector = await operations.get_connector(db, ds_id)
-    if connector.connector_type != "thinkingdata":
-        return ok(
-            {
-                "status": "unsupported",
-                "message": (
-                    f"暂仅支持 thinkingdata 类型连通测试，当前类型 {connector.connector_type}"
-                ),
-            }
-        )
-    # ponytail: TD 连通复用运营分析的系统级 TD 读取校验（读系统配置的 TD 地址/密钥/日指标 SQL），
-    # 非按本连接器 config 独立建连；多 TD 连接器时都测同一套系统 TD 配置。需按连接器独立建连再拆。
-    result = await analytics.test_connector(db, date.today())
+    result = await probe.probe_connector(db, connector, extra_probes=_EXTRA_PROBES)
     return ok(result.to_dict())

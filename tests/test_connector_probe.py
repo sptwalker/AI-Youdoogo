@@ -1,0 +1,108 @@
+"""连接器连通探针单测（离线）：http_api 探针（SSRF/缺配置/HTTP 错）+ 分派表按类型选执行器。
+
+http_api 探针经 httpx.MockTransport 离线；SSRF 经 monkeypatch net.resolve_ips 注入解析结果。
+分派表验证：原生 http_api 内建、注入探针（thinkingdata）被选中、未知类型安全回落 unsupported。
+"""
+
+import uuid
+
+import httpx
+import pytest
+
+from app.contexts.foundations.integration.connector_management.contracts import (
+    ConnectorProbeResult,
+    ConnectorSnapshot,
+)
+from app.contexts.foundations.integration.connector_management.entrypoints import probe
+from app.contexts.foundations.integration.connector_management.infrastructure.http_probe import (
+    probe_http_api,
+)
+from app.platform import net
+
+
+def _snap(
+    connector_type: str,
+    *,
+    config: dict[str, object] | None = None,
+    secret_ref: str | None = None,
+) -> ConnectorSnapshot:
+    return ConnectorSnapshot(
+        id=uuid.uuid4(),
+        name="t",
+        code="t",
+        connector_type=connector_type,
+        department_id=None,
+        config=config or {},
+        secret_ref=secret_ref,
+        secret_status="none",
+        is_active=True,
+        owner_expert_id=None,
+        owner_expert_name=None,
+    )
+
+
+# ── http_api 探针 ────────────────────────────────────────
+async def test_http_probe_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"pong")
+
+    result = await probe_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://api.example.com/health"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "ok" and "HTTP 200" in result.message
+
+
+async def test_http_probe_rejects_private_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["10.0.0.5"])
+    result = await probe_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "http://intranet.local/health"}),
+    )
+    assert result.status == "fail" and "SSRF" in result.message
+
+
+async def test_http_probe_not_configured_without_url() -> None:
+    result = await probe_http_api(None, _snap("http_api", config={}))  # type: ignore[arg-type]
+    assert result.status == "not_configured"
+
+
+async def test_http_probe_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    result = await probe_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"base_url": "https://api.example.com/x"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "fail"  # 5xx 经 raise_for_status → 结构化 fail，不抛穿
+
+
+# ── 分派表 ───────────────────────────────────────────────
+async def test_dispatch_selects_native_http_api() -> None:
+    """原生 http_api 内建于分派表：缺 url → not_configured（唯有 http_api 探针产出此结果）。"""
+    result = await probe.probe_connector(None, _snap("http_api", config={}))  # type: ignore[arg-type]
+    assert result.status == "not_configured"
+
+
+async def test_dispatch_selects_injected_probe() -> None:
+    async def _fake(_db: object, _c: ConnectorSnapshot) -> ConnectorProbeResult:
+        return ConnectorProbeResult(status="ok", message="TD 连通", row_count=7)
+
+    result = await probe.probe_connector(
+        None,  # type: ignore[arg-type]
+        _snap("thinkingdata"),
+        extra_probes={"thinkingdata": _fake},
+    )
+    assert result.status == "ok" and result.row_count == 7
+
+
+async def test_dispatch_unknown_type_unsupported() -> None:
+    result = await probe.probe_connector(None, _snap("mystery"))  # type: ignore[arg-type]
+    assert result.status == "unsupported" and "mystery" in result.message

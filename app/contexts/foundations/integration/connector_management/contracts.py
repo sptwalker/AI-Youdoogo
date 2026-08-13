@@ -45,3 +45,18 @@ class ConnectorSnapshot:
             "owner_agent_id": str(self.owner_expert_id) if self.owner_expert_id else None,
             "owner_agent_name": self.owner_expert_name,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorProbeResult:
+    """连通测试结果，前端读 status/message/row_count。
+
+    status: ok / fail / not_configured / unsupported。
+    """
+
+    status: str
+    message: str
+    row_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"status": self.status, "message": self.message, "row_count": self.row_count}
