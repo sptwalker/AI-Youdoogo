@@ -42,3 +42,37 @@ class ResolvedStep:
     instruction: str
     depends_on: tuple[int, ...]
     assignee_expert_id: uuid.UUID | None
+
+
+@dataclass(frozen=True)
+class TemplateAdminView:
+    """管理面全字段快照（含停用/归属/种子标记），供 CRUD 列表与详情。"""
+
+    id: uuid.UUID
+    name: str
+    description: str | None
+    department_id: uuid.UUID | None
+    steps: tuple[TemplateStep, ...]
+    enabled: bool
+    is_seed: bool
+
+
+@dataclass(frozen=True)
+class CreateTemplateCommand:
+    """新建模板（steps 已校验后落库）。"""
+
+    name: str
+    description: str | None
+    department_id: uuid.UUID | None
+    steps: tuple[TemplateStep, ...]
+
+
+@dataclass(frozen=True)
+class UpdateTemplateCommand:
+    """改模板（PATCH 语义：None 表示该字段不改）。"""
+
+    name: str | None = None
+    description: str | None = None
+    department_id: uuid.UUID | None = None
+    steps: tuple[TemplateStep, ...] | None = None
+    enabled: bool | None = None

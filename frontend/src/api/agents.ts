@@ -32,6 +32,8 @@ export interface SkillInfo {
   label: string
   description: string
   default_on: boolean
+  risk?: 'low' | 'medium' | 'high'
+  side_effect?: 'none' | 'internal_write' | 'external_write'
 }
 
 export interface Alert {

@@ -24,6 +24,7 @@ const ADMIN_ROUTES = [
   { path: '/data-sources', name: '数据接口' },
   { path: '/semantic-terms', name: '业务术语字典' },
   { path: '/ai-providers', name: 'AI 配置' },
+  { path: '/workflow-templates', name: '工作流模板' },
   { path: '/system-config', name: '系统配置' },
   { path: '/audit-log', name: '系统日志' },
 ]

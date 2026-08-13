@@ -165,6 +165,8 @@ async def list_skills(_: CurrentUser) -> dict:
                 "description": definition.description,
                 "default_on": definition.default_enabled,
                 "transport": capability_transport(definition).value,
+                "risk": definition.risk.value,
+                "side_effect": definition.side_effect.value,
             }
             for definition in definitions
         ]

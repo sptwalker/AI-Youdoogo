@@ -582,7 +582,7 @@ def test_agent_role_orm_mapping_stays_behind_explicit_compatibility_seams() -> N
         / "agent_execution"
         / "entrypoints"
         / "operations.py",
-        # 模板发起把 expert_code 解析成 assignee_expert_id（P3-2 逐步派发），只读 AgentRole.code→id。
+        # 模板发起把 expert_code 解析成 assignee_expert_id（P3-2），只读 AgentRole.code→id。
         APP
         / "contexts"
         / "foundations"

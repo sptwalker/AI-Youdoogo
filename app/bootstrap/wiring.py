@@ -22,6 +22,7 @@ from app.api.v1.proposals import router as proposals_router
 from app.api.v1.semantic import router as semantic_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
+from app.api.v1.workflow_templates import router as workflow_templates_router
 from app.contexts.business.proposal_management.entrypoints import (
     register_proposal_error_handlers,
 )
@@ -53,6 +54,7 @@ def register_routes(app: FastAPI) -> None:
         ai_providers_router,
         semantic_router,
         eval_router,
+        workflow_templates_router,
     ):
         app.include_router(router, prefix=prefix)
     # 服务间事件入站端点（docs/23 §3.3）：默认关 → 不注册（零新入站面）；on 才挂。不挂 /api/v1

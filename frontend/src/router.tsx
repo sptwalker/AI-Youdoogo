@@ -38,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'data-sources', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/DataSources')).default }) },
       { path: 'semantic-terms', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/SemanticTerms')).default }) },
       { path: 'ai-providers', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/AiProviders')).default }) },
+      { path: 'workflow-templates', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/WorkflowTemplates')).default }) },
       { path: 'system-config', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/SystemConfig')).default }) },
       { path: 'audit-log', handle: ADMIN_ONLY, lazy: async () => ({ Component: (await import('./pages/AuditLog')).default }) },
       { path: '*', lazy: async () => ({ Component: (await import('./pages/NotFound')).default }) },
