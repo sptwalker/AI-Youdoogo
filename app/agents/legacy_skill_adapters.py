@@ -95,3 +95,26 @@ async def legacy_query(
         },
     )
     return await agent_capability.execute(db, role, output, **kwargs)
+
+
+async def legacy_read_url(
+    db: AsyncSession,
+    role: AgentSubject,
+    output: str,
+    context: ExecutionContext,
+    exclude: set[str],
+) -> SkillResult:
+    from app.contexts.foundations.integration.read_url.entrypoints import (
+        agent_capability,
+    )
+
+    kwargs = accepted_kwargs(
+        agent_capability.execute,
+        {
+            "user_id": context.user_id,
+            "user_intent": context.user_intent,
+            "exclude": exclude,
+            "execution_context": context,
+        },
+    )
+    return await agent_capability.execute(db, role, output, **kwargs)

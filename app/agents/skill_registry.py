@@ -15,6 +15,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_collab,
     legacy_deliver,
     legacy_query,
+    legacy_read_url,
 )
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
     CapabilityDefinition,
@@ -85,6 +86,14 @@ def _query_executor() -> SkillExecutor:
     return agent_capability.DataQuerySkillExecutor()
 
 
+def _read_url_executor() -> SkillExecutor:
+    from app.contexts.foundations.integration.read_url.entrypoints import (
+        agent_capability,
+    )
+
+    return agent_capability.ReadUrlSkillExecutor()
+
+
 REGISTRY: dict[str, Skill] = {
     "env_context": Skill(
         _DEFINITIONS["env_context"],
@@ -103,6 +112,11 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["data_query"],
         executor_factory=_query_executor,
         legacy_executor=legacy_query,
+    ),
+    "read_url": Skill(
+        _DEFINITIONS["read_url"],
+        executor_factory=_read_url_executor,
+        legacy_executor=legacy_read_url,
     ),
 }
 
@@ -154,6 +168,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await query_capability.prompt_section(db)
+    if skill.key == "read_url":
+        from app.contexts.foundations.integration.read_url.entrypoints import (
+            agent_capability as read_url_capability,
+        )
+
+        return await read_url_capability.prompt_section()
     return ""
 
 

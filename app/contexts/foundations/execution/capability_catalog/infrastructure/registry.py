@@ -61,6 +61,19 @@ CAPABILITY_DEFINITIONS = (
         handler_identity="governed_data_query.execute",
         feature_flag="agent_data_query",
     ),
+    CapabilityDefinition(
+        key="read_url",
+        version="1.0",
+        label="读网页",
+        description="抓取指定网址正文，结合知识库综合成报告（只读，无副作用）",
+        input_schema_json='{"type":"object","required":["url"]}',
+        output_schema_json='{"type":"object"}',
+        risk=CapabilityRisk.LOW,
+        side_effect=CapabilitySideEffect.NONE,
+        permission_keys=("read_url",),
+        handler_identity="read_url.execute",
+        feature_flag="agent_read_url",
+    ),
 )
 
 
