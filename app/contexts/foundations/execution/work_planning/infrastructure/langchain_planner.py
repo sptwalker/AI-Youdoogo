@@ -17,7 +17,7 @@ PLANNER_SYSTEM = (
     "- skill 只能取:data_query(查运营数据)、deliver(生成文件/文档/表格)、"
     "collab(联系其他部门/AI)、notify(通知某真人)、other(其它)。\n"
     "- no 从 0 开始递增;depends_on 填本步依赖的前序步骤 no 列表（无依赖=空数组）。\n"
-    "- instruction 用一句话说清这步要做什么。步骤按依赖排序，最多 8 步。\n"
+    "- instruction 用一句话说清这步要做什么。步骤按依赖排序，最多 16 步。\n"
     "示例请求「把昨天运营数据做成日报并通知运营总监」→"
     '{"multi":true,"steps":[{"no":0,"title":"取昨日运营数据","skill":"data_query",'
     '"instruction":"查询昨天各产品运营指标","depends_on":[]},'
