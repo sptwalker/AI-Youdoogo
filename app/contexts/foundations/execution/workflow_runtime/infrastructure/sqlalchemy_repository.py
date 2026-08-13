@@ -137,6 +137,7 @@ def _step_created_progress(
     red_line: bool,
 ) -> WorkflowProgressedV1:
     run = workflow.run
+    step_expert = specification.assignee_expert_id or run.assignee_agent_id
     return WorkflowProgressedV1(
         event_id=uuid.uuid4(),
         workflow_id=run.id,
@@ -159,7 +160,7 @@ def _step_created_progress(
             "capability_key": specification.capability_key,
             "instruction": specification.instruction,
             "red_line": red_line,
-            "expert_id": str(run.assignee_agent_id) if run.assignee_agent_id else None,
+            "expert_id": str(step_expert) if step_expert else None,
             "depends_on_task_ids": [str(item) for item in depends_on_task_ids],
         },
     )
@@ -177,7 +178,8 @@ def _new_workflow_step(
         id=step_id,
         workflow_run_id=workflow.run.id,
         task_card_id=task_card_id,
-        assignee_agent_id=workflow.run.assignee_agent_id,
+        # 逐步派发（P3-2）：step 自带 expert 优先，缺省回落 run 单一 assignee（不破坏既有单派发）。
+        assignee_agent_id=specification.assignee_expert_id or workflow.run.assignee_agent_id,
         step_no=specification.number,
         title=specification.title,
         skill=specification.capability_key,

@@ -46,6 +46,8 @@ class WorkflowLaunchStep:
     capability_key: str
     instruction: str
     depends_on: tuple[int, ...] = ()
+    # 逐步承接专家（P3-2）：缺省 None → 回落 run 的单一 assignee，不破坏既有单派发。
+    assignee_expert_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

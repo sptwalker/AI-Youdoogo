@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 
 from app.contexts.foundations.execution.work_planning.application.ports import (
     PlanningModelPort,
@@ -24,6 +25,20 @@ AUTOMATIC_CAPABILITIES: frozenset[str] = frozenset(
 
 def requires_human_review(capability_key: str) -> bool:
     return capability_key not in AUTOMATIC_CAPABILITIES
+
+
+def _parse_expert(value: object) -> uuid.UUID | None:
+    """可选逐步承接专家（P3-2）：合法 UUID 字符串才采纳，缺省/非法一律回落 None。
+
+    非法值不判整份计划失败——逐步派发只是覆盖项，缺省语义是「回落 run 单派发」，
+    graceful degrade 比因一个可选字段拒整份多步计划更符合红线安全回落。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return uuid.UUID(value.strip())
+    except ValueError:
+        return None
 
 
 def parse_workflow_plan(raw: str, request: PlanWorkRequest) -> PlanWorkResult:
@@ -63,6 +78,7 @@ def parse_workflow_plan(raw: str, request: PlanWorkRequest) -> PlanWorkResult:
                     capability_key=capability.strip(),
                     instruction=instruction.strip(),
                     depends_on=tuple(dependencies),
+                    assignee_expert_id=_parse_expert(item.get("expert")),
                 )
             )
         except ValueError:

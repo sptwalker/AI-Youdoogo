@@ -34,6 +34,7 @@ def planning_to_start_command(plan: WorkflowPlan) -> StartWorkflowCommand:
                 capability_key=step.capability_key,
                 instruction=step.instruction,
                 depends_on=step.depends_on,
+                assignee_expert_id=step.assignee_expert_id,
             )
             for step in plan.steps
         ),

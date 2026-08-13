@@ -33,6 +33,8 @@ class WorkflowPlanStep:
     capability_key: str
     instruction: str
     depends_on: tuple[int, ...] = ()
+    # 逐步承接专家（P3-2）：缺省 None → 运行时回落 run 的单一 assignee，不破坏既有单派发。
+    assignee_expert_id: uuid.UUID | None = None
 
     def __post_init__(self) -> None:
         if self.number < 0:
