@@ -21,6 +21,9 @@ CONTENT_TYPES = {
     ),
     DeliverableFormat.MARKDOWN: "text/markdown; charset=utf-8",
     DeliverableFormat.TEXT: "text/plain; charset=utf-8",
+    DeliverableFormat.PPTX: (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ),
 }
 
 
@@ -37,10 +40,54 @@ def markdown_table_to_rows(body: str) -> list[list[str]]:
     return rows
 
 
+def markdown_to_slides(body: str) -> list[tuple[str, list[str]]]:
+    """把 markdown 正文切成幻灯片：#/##/… 行起新页作标题，其余非空行去掉项目符号作要点。
+
+    正文首行若非标题则自成首页标题（保证任意正文都能出至少一页）。纯确定性，无 LLM。
+    # ponytail: 表格数据行仍逐行作纯文本要点（保留「| 指标 | 值 |」原样，仅剔除 --- 分隔行）；
+    #   要真渲染成 pptx 表格再引 python-pptx 的 add_table，当前按文本够用、避免过度实现。
+    """
+    slides: list[tuple[str, list[str]]] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "|" in line and all(
+            set(cell) <= {"-", ":", " "} and cell for cell in line.strip("|").split("|")
+        ):
+            continue  # 跳过 Markdown 表格分隔行「| --- | :--: |」，否则会变成一条空要点
+        heading = re.match(r"^#{1,6}\s+(.*)$", line)
+        if heading:
+            slides.append((heading.group(1).strip(), []))
+        elif slides:
+            slides[-1][1].append(re.sub(r"^[-*•]\s*", "", line))
+        else:
+            slides.append((line, []))
+    return slides
+
+
 def build_bytes(file_format: DeliverableFormat | str, body: str) -> bytes:
     normalized = DeliverableFormat(file_format)
     if normalized in (DeliverableFormat.MARKDOWN, DeliverableFormat.TEXT):
         return body.strip().encode("utf-8")
+    if normalized is DeliverableFormat.PPTX:
+        slides = markdown_to_slides(body)
+        if not slides:
+            raise ValueError("交付内容为空，无法生成 PPT")
+        from pptx import Presentation
+
+        presentation = Presentation()
+        layout = presentation.slide_layouts[1]  # 标题 + 内容 版式
+        for title, bullets in slides:
+            slide = presentation.slides.add_slide(layout)
+            slide.shapes.title.text = title
+            frame = slide.placeholders[1].text_frame
+            frame.text = bullets[0] if bullets else ""
+            for bullet in bullets[1:]:
+                frame.add_paragraph().text = bullet
+        output = io.BytesIO()
+        presentation.save(output)
+        return output.getvalue()
     rows = markdown_table_to_rows(body)
     if not rows:
         raise ValueError("交付内容不含可解析的表格")

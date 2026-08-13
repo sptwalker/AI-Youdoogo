@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 _MAX_DELIVERIES = 2
 _DELIVER_RE = re.compile(
     r"【交付】\s*名称[：:]\s*([^；;\n]+?)\s*[；;]\s*格式[：:]\s*"
-    r"(csv|xlsx|md|txt)\s*\n+```[^\n]*\n(.*?)\n?```",
+    r"(csv|xlsx|md|txt|pptx)\s*\n+```[^\n]*\n(.*?)\n?```",
     re.DOTALL,
 )
 
@@ -50,21 +50,30 @@ class FeatureFlagResolver(Protocol):
 
 class DeliveryArgs(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    format: str = Field(pattern="^(csv|xlsx|md|txt)$")
+    format: str = Field(pattern="^(csv|xlsx|md|txt|pptx)$")
     body: str = Field(min_length=1)
 
 
 PROMPT_SECTION = (
     "\n\n【文件交付】（系统内建，已启用）当用户要你产出可下载的表格或文档时，"
     "在回复中单独写一段交付指令，系统会自动生成文件并放入用户工作桌面的「文件交付区」：\n"
-    "格式：先写一行 【交付】名称：<文件名>；格式：<csv|xlsx|md|txt>，"
+    "格式：先写一行 【交付】名称：<文件名>；格式：<csv|xlsx|md|txt|pptx>，"
     "紧接一个 ``` 代码块作为内容。\n"
     "- 表格（csv/xlsx）：代码块里放标准 Markdown 表格（首行表头，第二行 --- 分隔）。\n"
     "- 文档（md/txt）：代码块里放正文。\n"
+    "- 演示（pptx）：代码块里放 Markdown，#/## 开头的行会成为每页标题，其下每一行成为该页要点。\n"
     "每次回复最多交付 2 个文件。示例：\n"
     "【交付】名称：销售周报；格式：xlsx\n```\n| 日期 | 产品 | 销量 |\n| --- | --- | --- |\n"
     "| 2026-07-14 | A | 120 |\n```\n"
     "需要别的同事的数据时，先用【咨询 @AI名】取数，拿到后再在同一或下一轮回复里交付。"
+    "\n\n【标准化经营报告模板】当用户要你产出经营/分析报告（月报、周报、经营分析等）时，"
+    "报告正文按以下五个固定小节组织（用 ## 小节标题），确保口径统一、便于复用与转 PPT：\n"
+    "## 一、背景与范围（时间区间、覆盖部门/产品、数据来源）\n"
+    "## 二、关键指标（核心指标当期值、环比/同比，尽量用表格）\n"
+    "## 三、趋势分析（指标走势与驱动因素）\n"
+    "## 四、问题诊断（异常、风险、待解问题）\n"
+    "## 五、改进建议（可执行建议；重大调整仅作建议，须真人确认）\n"
+    "无对应数据的小节据实说明「本期无数据」，不得编造。"
 )
 
 

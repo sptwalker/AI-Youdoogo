@@ -160,6 +160,19 @@ def test_canonical_formatting_and_safe_file_name() -> None:
         "# 运营日报\n\n正文".encode()
     )
 
+    # pptx：分节转标题页 + 要点页；表格分隔行被剔除；python-pptx 回读断言（P1-2 验收）。
+    from pptx import Presentation
+
+    pptx_body = (
+        "# 封面页\n第一条要点\n- 第二条要点\n"
+        "## 第二页\n| 指标 | 值 |\n| --- | --- |\n| DAU | 42 |"
+    )
+    presentation = Presentation(io.BytesIO(build_bytes(DeliverableFormat.PPTX, pptx_body)))
+    slides = list(presentation.slides)
+    assert [slide.shapes.title.text for slide in slides] == ["封面页", "第二页"]
+    assert slides[0].placeholders[1].text_frame.text == "第一条要点\n第二条要点"  # "- " 去符号
+    assert slides[1].placeholders[1].text_frame.text == "| 指标 | 值 |\n| DAU | 42 |"  # 无 --- 行
+
     file_name = safe_file_name('  运营/日报:*?"<>|  ', DeliverableFormat.CSV)
     assert file_name.endswith(".csv")
     assert not set('/\\:*?"<>|').intersection(file_name)

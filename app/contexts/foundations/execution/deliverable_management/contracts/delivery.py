@@ -13,6 +13,7 @@ class DeliverableFormat(StrEnum):
     XLSX = "xlsx"
     MARKDOWN = "md"
     TEXT = "txt"
+    PPTX = "pptx"
 
 
 @dataclass(frozen=True, slots=True)
