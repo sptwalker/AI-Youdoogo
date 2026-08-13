@@ -33,6 +33,10 @@ class ReportSchedule(CommonMixin, Base):
     assignee_agent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("agent_role.id"), nullable=True
     )
+    # 指向钉死的工作流模板（docs/25 P4）；非空即走确定性展开（跳过 LLM），空则 request_text→LLM。
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workflow_template.id"), nullable=True
+    )
     day_of_month: Mapped[int] = mapped_column(Integer)
     hour: Mapped[int] = mapped_column(Integer, default=9, server_default="9")
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

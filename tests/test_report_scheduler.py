@@ -14,6 +14,7 @@ import pytest
 from app.bootstrap import report_scheduler
 from app.contexts.foundations.execution.report_scheduling import public as report_scheduling
 from app.contexts.foundations.execution.report_scheduling.contracts import ScheduleView
+from app.contexts.foundations.execution.workflow_templating.contracts import ResolvedStep
 
 
 def _view(**overrides: Any) -> ScheduleView:
@@ -24,6 +25,7 @@ def _view(**overrides: Any) -> ScheduleView:
         "request_text": "汇总本月经营数据并推送运营负责人审核",
         "creator_id": uuid.uuid4(),
         "assignee_agent_id": None,
+        "template_id": None,
         "day_of_month": 1,
         "hour": 9,
         "enabled": True,
@@ -71,6 +73,7 @@ class _FakeStart:
         assignee_agent_id: uuid.UUID | None,
         operator_id: uuid.UUID | None,
         title: str | None,
+        steps: list[Any] | None = None,
     ) -> dict[str, Any] | None:
         self.calls.append(
             {
@@ -79,6 +82,7 @@ class _FakeStart:
                 "assignee_agent_id": assignee_agent_id,
                 "operator_id": operator_id,
                 "title": title,
+                "steps": steps,
             }
         )
         return self.result
@@ -230,3 +234,57 @@ async def test_scan_once_does_not_mark_when_start_fails(monkeypatch: pytest.Monk
     assert len(start.calls) == 1  # 确实尝试了发起
     assert marked == []  # 但未标记 → 下轮重试（漏发比重复更糟）
     assert session.commits == 0
+
+
+# ── scan_once 模板分支（docs/25 P4：有模板走确定性展开，逐步派 6 部门）──────────
+async def test_scan_once_template_expands_to_per_step_experts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """有 template_id → 载模板展开成钉死步骤，逐步带各自 expert（跳过 LLM）。"""
+    tid = uuid.uuid4()
+    view = _view(template_id=tid)
+    marked: list[tuple[uuid.UUID, str]] = []
+    _patch_repo(monkeypatch, views=[view], marked=marked)
+    sales, finance = uuid.uuid4(), uuid.uuid4()
+    resolved = [
+        ResolvedStep(0, "取销售", "data_query", "查销售", (), sales),
+        ResolvedStep(1, "取财务", "data_query", "查财务", (), finance),
+    ]
+
+    async def _load(_session: object, template_id: uuid.UUID) -> list[ResolvedStep]:
+        assert template_id == tid
+        return resolved
+
+    monkeypatch.setattr(report_scheduler.workflow_templating, "load_template_steps", _load)
+    start = _FakeStart({"run": "ok"})
+
+    fired = await report_scheduler.scan_once(
+        datetime(2026, 8, 1, 9), sessions=_FakeSessions(_FakeSession()), start=start
+    )
+
+    assert fired == 1
+    passed = start.calls[0]["steps"]
+    assert passed is not None  # 模板路径必带钉死步骤
+    assert [step.assignee_expert_id for step in passed] == [sales, finance]  # 逐步派不同部门
+    assert marked == [(view.id, "2026-08")]
+
+
+async def test_scan_once_skips_when_template_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """指向的模板不存在/停用 → 跳过（不静默退化为单派发 LLM 串跑）。"""
+    view = _view(template_id=uuid.uuid4())
+    marked: list[tuple[uuid.UUID, str]] = []
+    _patch_repo(monkeypatch, views=[view], marked=marked)
+
+    async def _load(_session: object, _template_id: uuid.UUID) -> None:
+        return None
+
+    monkeypatch.setattr(report_scheduler.workflow_templating, "load_template_steps", _load)
+    start = _FakeStart({"run": "ok"})
+
+    fired = await report_scheduler.scan_once(
+        datetime(2026, 8, 1, 9), sessions=_FakeSessions(_FakeSession()), start=start
+    )
+
+    assert fired == 0
+    assert start.calls == []  # 模板失效即不发起
+    assert marked == []

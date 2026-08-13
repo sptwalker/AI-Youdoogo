@@ -19,12 +19,36 @@ from app.contexts.business.task_management import public as task_management
 from app.contexts.foundations.execution.report_scheduling import public as report_scheduling
 from app.contexts.foundations.execution.work_planning import public as work_planning
 from app.contexts.foundations.execution.workflow_runtime import public as workflow_runtime
+from app.contexts.foundations.execution.workflow_templating import public as workflow_templating
 from app.platform.database import async_session_factory
 
 logger = logging.getLogger(__name__)
 
 # start 的最小签名别名，便于测试注入假发起器（默认走真实编排入口）。
 StartFn = Callable[..., Awaitable[dict[str, Any] | None]]
+
+
+async def _template_plan_steps(
+    session: AsyncSession, template_id: uuid.UUID
+) -> list[work_planning.WorkflowPlanStep] | None:
+    """载模板并展开成 WorkflowPlanStep（组合根把 Context 契约形转 work_planning 形）。
+
+    expert_code 已在 workflow_templating 内解析成 assignee_expert_id（未知 code→None，P3-2 回落）。
+    """
+    resolved = await workflow_templating.load_template_steps(session, template_id)
+    if resolved is None:
+        return None
+    return [
+        work_planning.WorkflowPlanStep(
+            number=step.no,
+            title=step.title,
+            capability_key=step.skill,
+            instruction=step.instruction,
+            depends_on=tuple(step.depends_on),
+            assignee_expert_id=step.assignee_expert_id,
+        )
+        for step in resolved
+    ]
 
 
 def current_period(now: datetime) -> str:
@@ -62,8 +86,13 @@ async def _start_workflow(
     assignee_agent_id: uuid.UUID | None,
     operator_id: uuid.UUID | None,
     title: str | None,
+    steps: list[work_planning.WorkflowPlanStep] | None = None,
 ) -> dict[str, Any] | None:
     """系统发起 = plan_work → start_workflow（新架构双 Port，同一 is_red_line 入口）。
+
+    steps 非空 → 用调用方给的钉死步骤（模板发起，跳过 LLM 规划器），确定性建 WorkflowPlan；
+    缺省 → 走 plan_work LLM 路径。两条路径此后逐字一致（planning_to_start_command→
+    start_workflow→pair_publish_steps→红线判定），红线不旁路。
 
     operator_id 恒 None（红线：系统发起无真人代操作）——新架构 WorkIntent 已无 operator 字段，
     此参数仅为保留「系统发起无 operator」契约、供测试断言。规划非多步 / LLM 抖动 / 提交前异常
@@ -71,21 +100,33 @@ async def _start_workflow(
     """
     del operator_id
     try:
-        planned = await work_planning.plan_work(
-            work_planning.PlanWorkRequest(
+        if steps is not None:
+            plan: work_planning.WorkflowPlan | None = work_planning.WorkflowPlan(
                 work_planning.WorkIntent(
                     request=request,
                     creator_id=creator_id,
                     title=title,
                     assignee_expert_id=assignee_agent_id,
+                ),
+                tuple(steps),
+            )
+        else:
+            planned = await work_planning.plan_work(
+                work_planning.PlanWorkRequest(
+                    work_planning.WorkIntent(
+                        request=request,
+                        creator_id=creator_id,
+                        title=title,
+                        assignee_expert_id=assignee_agent_id,
+                    )
                 )
             )
-        )
-        if planned.plan is None:
+            plan = planned.plan
+        if plan is None:
             return None
         started = await task_management.start_workflow(
             session,
-            workflow_runtime.planning_to_start_command(planned.plan),
+            workflow_runtime.planning_to_start_command(plan),
         )
     except Exception:  # noqa: BLE001 - 发起失败退回，不标记游标下轮重试
         await session.rollback()
@@ -125,6 +166,16 @@ async def scan_once(
                 now=now,
             ):
                 continue
+            # 有模板 → 确定性展开成钉死步骤（跳过 LLM）；模板缺失/停用则跳过（不静默回落 LLM，
+            # 避免管理员本意「按模板派 6 部门」时因模板失效退化为单派发串跑）。空则走 LLM 路径。
+            steps: list[work_planning.WorkflowPlanStep] | None = None
+            if view.template_id is not None:
+                steps = await _template_plan_steps(session, view.template_id)
+                if steps is None:
+                    logger.warning(
+                        "调度指向的模板不存在/停用，本轮跳过 schedule=%s", view.id
+                    )
+                    continue
             result = await start(
                 session,
                 view.request_text,
@@ -132,6 +183,7 @@ async def scan_once(
                 assignee_agent_id=view.assignee_agent_id,
                 operator_id=None,
                 title=view.title,
+                steps=steps,
             )
             if result is None:
                 logger.warning("定时报告发起失败，本轮不标记，下轮重试 schedule=%s", view.id)

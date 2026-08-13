@@ -19,6 +19,7 @@ class ScheduleView:
     request_text: str
     creator_id: uuid.UUID | None
     assignee_agent_id: uuid.UUID | None
+    template_id: uuid.UUID | None
     day_of_month: int
     hour: int
     enabled: bool

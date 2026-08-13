@@ -27,6 +27,7 @@ from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.td_event_alias import TdEventAlias
 from app.models.workflow import OutboxEvent, ToolExecution, WorkflowEvent, WorkflowRun, WorkflowStep
+from app.models.workflow_template import WorkflowTemplate
 from app.platform.database.model import Base
 from app.platform.eventing.inbox_model import InboxEvent
 
@@ -74,4 +75,5 @@ __all__ = [
     "WorkflowEvent",
     "WorkflowRun",
     "WorkflowStep",
+    "WorkflowTemplate",
 ]

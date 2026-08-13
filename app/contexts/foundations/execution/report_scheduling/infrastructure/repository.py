@@ -33,6 +33,7 @@ async def list_enabled(session: AsyncSession) -> list[ScheduleView]:
             request_text=row.request_text,
             creator_id=row.creator_id,
             assignee_agent_id=row.assignee_agent_id,
+            template_id=row.template_id,
             day_of_month=row.day_of_month,
             hour=row.hour,
             enabled=row.enabled,
