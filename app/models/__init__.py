@@ -19,6 +19,7 @@ from app.models.meeting import (
 )
 from app.models.ops_data import OpsDailyMetric
 from app.models.proposal import ProposalCard, ProposalReview
+from app.models.report_schedule import ReportSchedule
 from app.models.resource_grant import ResourceGrant
 from app.models.semantic_term import SemanticTerm
 from app.models.sys_config import SysConfig
@@ -58,6 +59,7 @@ __all__ = [
     "OpsDailyMetric",
     "ProposalCard",
     "ProposalReview",
+    "ReportSchedule",
     "ResourceGrant",
     "SemanticTerm",
     "SysConfig",

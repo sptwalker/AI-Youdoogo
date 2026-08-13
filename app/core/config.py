@@ -168,6 +168,13 @@ class Settings(BaseSettings):
     workflow_recovery_scan_seconds: float = 30.0
     workflow_recovery_batch_size: int = 100
 
+    # 定时报告调度（docs/25 P1-1）：复用 workflow worker 循环的时钟闸做「到点扫描 due 的
+    # report_schedule」，不引入 celery/apscheduler。默认关 + 种子行默认停用 + creator_id 为空即
+    # 跳过 = 三重保险，生产逐字不变。系统自动发起的 run 仍走 plan_work → start_workflow
+    # （同一 is_red_line 判定），对外/资金/人事/发布步骤前必停 waiting_human。
+    report_scheduler_enabled: bool = False
+    report_schedule_scan_seconds: float = 300.0
+
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
     embedding_model: str = "text-embedding-v3"  # 换 bge-m3 等在此改（需 1024 维）

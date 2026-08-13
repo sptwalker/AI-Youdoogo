@@ -170,6 +170,7 @@ async def run_forever(
     settings = get_settings()
     poll = max(0.1, settings.workflow_worker_poll_seconds)
     recovery_after = 0.0
+    schedule_after = 0.0
     loop = asyncio.get_running_loop()
     while not stop.is_set():
         worked = False
@@ -182,6 +183,21 @@ async def run_forever(
             except Exception:
                 logger.warning("workflow step recovery scan failed", exc_info=True)
             recovery_after = now + max(1.0, settings.workflow_recovery_scan_seconds)
+        if settings.report_scheduler_enabled and now >= schedule_after:
+            # 复用本时钟闸做定时报告扫描（docs/25 P1-1）；发起走 plan_work → start_workflow
+            # 同一红线入口。datetime.now()=服务器本地时，day_of_month/hour 据此判定；
+            # ponytail: 多区部署再加 tz 设置、届时传 aware datetime（当前单区中国部署够用）。
+            from datetime import datetime
+
+            from app.bootstrap import report_scheduler
+
+            try:
+                await report_scheduler.scan_once(datetime.now())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("定时报告扫描失败", exc_info=True)
+            schedule_after = now + max(1.0, settings.report_schedule_scan_seconds)
         try:
             worked = await run_once(worker_id=worker_id, agent_runner=agent_runner)
         except asyncio.CancelledError:
