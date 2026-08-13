@@ -15,6 +15,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_collab,
     legacy_compose_feishu,
     legacy_deliver,
+    legacy_feishu_notify,
     legacy_query,
     legacy_read_attachment,
     legacy_read_url,
@@ -139,6 +140,11 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["compose_feishu"],
         legacy_executor=legacy_compose_feishu,
     ),
+    # 运营群播报：文本指令路径直发固定运营群（无结构化调用、无停点，self-gated 默认关）。
+    "feishu_notify": Skill(
+        _DEFINITIONS["feishu_notify"],
+        legacy_executor=legacy_feishu_notify,
+    ),
 }
 
 
@@ -207,6 +213,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await feishu_output_capability.prompt_section()
+    if skill.key == "feishu_notify":
+        from app.contexts.foundations.integration.feishu_notify.entrypoints import (
+            agent_capability as feishu_notify_capability,
+        )
+
+        return await feishu_notify_capability.prompt_section()
     return ""
 
 

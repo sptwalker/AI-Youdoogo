@@ -100,6 +100,19 @@ CAPABILITY_DEFINITIONS = (
         handler_identity="feishu_output.compose",
         feature_flag="agent_feishu_output",
     ),
+    CapabilityDefinition(
+        key="feishu_notify",
+        version="1.0",
+        label="飞书运营群播报",
+        description="把已确认的结论/通知播报到固定飞书运营群（运维旁路，best-effort，无真人停点）",
+        input_schema_json='{"type":"object","required":["text"]}',
+        output_schema_json='{"type":"object"}',
+        risk=CapabilityRisk.MEDIUM,
+        side_effect=CapabilitySideEffect.EXTERNAL_WRITE,
+        permission_keys=("feishu_notify",),
+        handler_identity="feishu_notify.broadcast",
+        feature_flag="agent_feishu_notify",
+    ),
 )
 
 

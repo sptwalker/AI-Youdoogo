@@ -1,0 +1,1 @@
+"""Feishu-notify delivery adapters."""
