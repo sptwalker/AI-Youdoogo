@@ -50,6 +50,7 @@ class UpdateUserCommand:
     is_active: bool | None = None
     feishu_open_id: str | None = None
     feishu_binding_changed: bool = False
+    email: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class SyncExternalUserCommand:
     mobile: str = ""
     avatar_url: str = ""
     department_id: uuid.UUID | None = None
+    email: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,7 @@ class IdentityUserResult:
     mobile: str
     avatar_url: str
     create_time: datetime
+    email: str | None = None
     is_delete: bool = False
 
 

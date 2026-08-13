@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from copy import deepcopy
@@ -44,6 +45,7 @@ from app.contexts.business.meeting_management.application.ports import (
     VoteAdvisoryRequest,
 )
 from app.contexts.business.meeting_management.domain.models import (
+    CLOSED,
     SCHEDULED,
     ConfirmationActorType,
     Discussion,
@@ -54,6 +56,8 @@ from app.contexts.business.meeting_management.domain.models import (
 )
 from app.contexts.foundations.identity.contracts import PrincipalType
 from app.contexts.shared_kernel import ResourceNotFound, RuleViolation
+
+logger = logging.getLogger(__name__)
 
 
 def _meeting_result(meeting: Meeting) -> MeetingResult:
@@ -131,7 +135,7 @@ class MeetingApplication:
             id=self._identifiers.new_id(),
             title=command.title,
             meeting_type=command.meeting_type,
-            status=SCHEDULED,
+            status=command.initial_status or SCHEDULED,
             creator_id=command.creator_id,
             participants=[deepcopy(item) for item in command.participants],
             department_id=command.department_id,
@@ -175,6 +179,13 @@ class MeetingApplication:
             meeting.transition_to(command.to_status)
             await uow.meetings.save_meeting(meeting)
             await uow.commit()
+        if command.to_status == CLOSED:
+            # 会议闭会自动生成纪要（A3，内部分析辅助·可编辑·无红线停点）；无发言时
+            # generate_minutes 会 raise RuleViolation，此处静默跳过而非打断闭会响应。
+            try:
+                await self.generate_minutes(GenerateMinutesCommand(meeting_id=meeting.id))
+            except RuleViolation:
+                logger.info("会议 %s 闭会时无发言，跳过自动纪要", meeting.id)
         return _meeting_result(meeting)
 
     async def add_discussion(self, command: AddDiscussionCommand) -> DiscussionResult:

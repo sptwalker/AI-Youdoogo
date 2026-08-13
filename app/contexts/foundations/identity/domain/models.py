@@ -41,6 +41,7 @@ class IdentityAccount:
     mobile: str
     avatar_url: str
     create_time: datetime
+    email: str | None = None
     is_deleted: bool = False
 
     def update(
@@ -53,6 +54,7 @@ class IdentityAccount:
         is_active: bool | None,
         feishu_open_id: str | None,
         feishu_binding_changed: bool,
+        email: str | None = None,
     ) -> None:
         """Apply the legacy partial-update contract without transport objects."""
         if role_code is not None:
@@ -69,6 +71,8 @@ class IdentityAccount:
             self.is_active = is_active
         if feishu_binding_changed:
             self.feishu_open_id = feishu_open_id
+        if email is not None:
+            self.email = email
 
     def sync_external_profile(
         self,
@@ -79,6 +83,7 @@ class IdentityAccount:
         mobile: str,
         avatar_url: str,
         department_id: uuid.UUID | None,
+        email: str | None = None,
     ) -> None:
         """Apply the latest external directory-owned profile fields."""
         self.real_name = real_name
@@ -87,3 +92,5 @@ class IdentityAccount:
         self.mobile = mobile
         self.avatar_url = avatar_url
         self.department_id = department_id
+        if email is not None:
+            self.email = email

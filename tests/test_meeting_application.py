@@ -9,10 +9,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.contexts.business.meeting_management.application.contracts import (
+    AddDiscussionCommand,
     AiVoteCommand,
     CastVoteCommand,
     ConfirmResolutionCommand,
     ConvertResolutionCommand,
+    SetMeetingStatusCommand,
     TallyVotesQuery,
     TaskResult,
 )
@@ -30,6 +32,7 @@ from app.contexts.business.meeting_management.application.use_cases import (
     MeetingApplication,
 )
 from app.contexts.business.meeting_management.domain.models import (
+    CLOSED,
     IN_PROGRESS,
     Meeting,
     Resolution,
@@ -338,3 +341,37 @@ async def test_task_failure_rolls_back_without_conversion_marker() -> None:
     assert resolution.converted_task_id is None
     assert state.commits == 0
     assert state.rollbacks == 1
+
+
+# ── 闭会自动纪要（docs/26 A3：内部分析辅助·无红线停点·无发言静默跳过）─────────
+async def test_closing_meeting_auto_generates_minutes() -> None:
+    state = FakeState()
+    meeting = seed_meeting(state)
+    application = build_application(state)
+    await application.add_discussion(
+        AddDiscussionCommand(
+            meeting_id=meeting.id,
+            speaker_id=uuid.UUID(int=2),
+            speaker_name="系统",
+            content="紧急会商议题：舆情",
+        )
+    )
+
+    await application.set_status(SetMeetingStatusCommand(meeting_id=meeting.id, to_status=CLOSED))
+
+    # 闭会即自动生成纪要（FakeAdvisory.minutes 回吐并 record 到 meeting.summary）
+    assert state.repository.meeting_rows[meeting.id].summary == "AI 建议纪要"
+
+
+async def test_closing_meeting_without_discussion_skips_minutes_silently() -> None:
+    state = FakeState()
+    meeting = seed_meeting(state)
+    application = build_application(state)
+
+    # 无发言 → generate_minutes 抛 RuleViolation，被 set_status 静默吞掉，闭会仍成功返回
+    result = await application.set_status(
+        SetMeetingStatusCommand(meeting_id=meeting.id, to_status=CLOSED)
+    )
+
+    assert result.status == CLOSED
+    assert state.repository.meeting_rows[meeting.id].summary is None

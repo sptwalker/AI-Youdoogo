@@ -70,6 +70,7 @@ def _user_result(account: IdentityAccount) -> IdentityUserResult:
         mobile=account.mobile,
         avatar_url=account.avatar_url,
         create_time=account.create_time,
+        email=account.email,
         is_delete=account.is_deleted,
     )
 
@@ -206,6 +207,7 @@ class IdentityApplication:
                         mobile=command.mobile,
                         avatar_url=command.avatar_url,
                         create_time=self._clock.now(),
+                        email=command.email,
                     )
                     await uow.identities.add(account)
                 else:
@@ -216,6 +218,7 @@ class IdentityApplication:
                         mobile=command.mobile,
                         avatar_url=command.avatar_url,
                         department_id=command.department_id,
+                        email=command.email,
                     )
                     await uow.identities.save(account)
                 await uow.flush()
@@ -242,6 +245,7 @@ class IdentityApplication:
                     is_active=command.is_active,
                     feishu_open_id=command.feishu_open_id,
                     feishu_binding_changed=command.feishu_binding_changed,
+                    email=command.email,
                 )
                 await uow.identities.save(account)
                 await uow.flush()

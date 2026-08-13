@@ -1,0 +1,1 @@
+"""Emergency consultation convening adapters."""

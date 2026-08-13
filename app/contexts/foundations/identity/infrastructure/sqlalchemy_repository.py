@@ -27,6 +27,7 @@ def _to_domain(user: SysUser) -> IdentityAccount:
         avatar_url=user.avatar_url,
         create_time=user.create_time,
         is_deleted=user.is_delete,
+        email=user.email,
     )
 
 
@@ -46,6 +47,7 @@ def _from_domain(account: IdentityAccount) -> SysUser:
         avatar_url=account.avatar_url,
         create_time=account.create_time,
         is_delete=account.is_deleted,
+        email=account.email,
     )
 
 
@@ -108,6 +110,7 @@ class SQLAlchemyIdentityRepository:
         row.mobile = account.mobile
         row.avatar_url = account.avatar_url
         row.is_delete = account.is_deleted
+        row.email = account.email
 
     async def list_accounts(self) -> list[IdentityAccount]:
         stmt = (

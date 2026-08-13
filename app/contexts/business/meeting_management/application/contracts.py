@@ -16,6 +16,10 @@ class CreateMeetingCommand:
     meeting_type: str = "decision"
     participants: tuple[dict[str, object], ...] = ()
     department_id: uuid.UUID | None = None
+    # 建会即直接进 IN_PROGRESS（跳过显式 set_status 流转）；调用方自行决定，默认沿用
+    # 既有行为（SCHEDULED）。convene_consultation 建紧急会商时传 IN_PROGRESS，避免
+    # 引入对 set_status 的额外跨 Context 调用。
+    initial_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

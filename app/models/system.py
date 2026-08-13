@@ -92,3 +92,6 @@ class SysUser(CommonMixin, Base):
     title: Mapped[str] = mapped_column(String(64), default="", server_default="")  # 职务
     mobile: Mapped[str] = mapped_column(String(32), default="", server_default="")
     avatar_url: Mapped[str] = mapped_column(String(512), default="", server_default="")
+    # 工作邮箱（docs/26 P4，send_email 能力收件人来源）：飞书同步/管理员填，未知则空 → 执行器如实
+    # 声明并安全跳过，不臆造地址。
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)

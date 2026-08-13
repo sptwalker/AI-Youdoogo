@@ -14,6 +14,7 @@ from app.agents.legacy_skill_adapters import (
     LegacyExecutor,
     legacy_collab,
     legacy_compose_feishu,
+    legacy_convene_consultation,
     legacy_deliver,
     legacy_feishu_notify,
     legacy_feishu_notify_person,
@@ -178,6 +179,13 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["feishu_notify_person"],
         legacy_executor=legacy_feishu_notify_person,
     ),
+    # 紧急会商 compose 半：文本指令路径产草稿（executor_factory=None，嵌 creator_id）；红线停真人
+    # 验收，默认关。机械会商半（convene_consultation_publish）由 policies 配对 + 注入 publisher 按
+    # publish_key 派发，不入 REGISTRY、对规划器/对话不可见（镜像 feishu_notify_person→publish）。
+    "convene_consultation": Skill(
+        _DEFINITIONS["convene_consultation"],
+        legacy_executor=legacy_convene_consultation,
+    ),
     # knowledge_index 走文本指令路径（终端型内部写，无停点、无回喂）；
     # 内部知识沉淀属辅助执行，故进 AUTOMATIC_CAPABILITIES（编排步免红线）。
     "knowledge_index": Skill(
@@ -271,6 +279,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await feishu_notify_person_capability.prompt_section()
+    if skill.key == "convene_consultation":
+        from app.contexts.foundations.integration.convene_consultation.entrypoints import (
+            agent_capability as convene_consultation_capability,
+        )
+
+        return await convene_consultation_capability.prompt_section()
     if skill.key == "knowledge_index":
         from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
             agent_capability as knowledge_index_capability,

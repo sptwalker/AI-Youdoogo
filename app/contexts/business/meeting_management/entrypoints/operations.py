@@ -74,6 +74,7 @@ async def create_meeting(
     meeting_type: str = "decision",
     participants: list[dict[str, object]] | None = None,
     department_id: uuid.UUID | None = None,
+    initial_status: str | None = None,
 ) -> MeetingResult:
     return await build_meeting_application(session).create(
         CreateMeetingCommand(
@@ -82,6 +83,7 @@ async def create_meeting(
             meeting_type=meeting_type,
             participants=tuple(participants or ()),
             department_id=department_id,
+            initial_status=initial_status,
         )
     )
 

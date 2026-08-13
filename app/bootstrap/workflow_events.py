@@ -56,6 +56,7 @@ from app.contexts.foundations.workforce.expert_management.infrastructure.sqlalch
     SQLAlchemyExpertSnapshotQuery,
 )
 from app.models.workflow import OutboxEvent
+from app.platform.database import async_session_factory
 from app.platform.eventing.inbox import EventEnvelope
 
 
@@ -68,12 +69,16 @@ class _FeishuMechanicalPublisher:
     """组合根注入的机械发布器：桥接飞书 Context，供 workflow_runtime 无跨界依赖调用。
 
     按 draft 的 ``publish_key`` 派发：``feishu_publish`` → feishu_output 云文档/多维表格；
-    ``feishu_notify_person_publish`` → 定向发送到指定的人/群（notify 自门控，关则安全跳过）。
-    ponytail: 扩展 email/convene 机械发布时在此按 publish_key 再加一支。
+    ``feishu_notify_person_publish`` → 定向发送到指定的人/群（notify 自门控，关则安全跳过）；
+    ``convene_consultation_publish`` → 真建会 + 定向通知四部门负责人（自开 session）。
+    ponytail: 扩展 email 等机械发布时在此按 publish_key 再加一支。
     """
 
     async def available(self) -> bool:
         # 任一目标就绪即放行本步；具体 draft 的目标未配 → 对应 operations 内部 no-op 安全跳过。
+        # ponytail: 本步整体以飞书就绪为闸——convene 建会本身不需飞书凭证，却与飞书发布共用本闸，
+        #           故飞书全关时 convene 也一并跳过（安全降级，飞书生产必配）。要按 draft 精确门控
+        #           时给 available() 传 capability_key 分档判定即可。
         return (
             await feishu_output_ops.feishu_output_available()
             or feishu_notify_person_ops.feishu_notify_person_available()
@@ -88,7 +93,33 @@ class _FeishuMechanicalPublisher:
             )
             kind = "feishu_notify_person_sent" if sent else "feishu_notify_person_skipped"
             return {**draft, "kind": kind}
+        if draft.get("publish_key") == "convene_consultation_publish":
+            return await self._convene(draft)
         return await feishu_output_ops.run_publish(dict(draft))
+
+    async def _convene(self, draft: dict[str, object]) -> dict[str, object]:
+        # 机械会商步只拿到 compose 嵌入的 draft（无 session/user_id）→ 自开 session 真建会。
+        # 缺 topic/creator_id（compose 未嵌发起人）→ 如实跳过，不臆造发起人。
+        from app.contexts.foundations.integration.convene_consultation.entrypoints import (
+            operations as convene_ops,
+        )
+
+        topic = str(draft.get("topic", ""))
+        creator_raw = draft.get("creator_id")
+        if not topic or not creator_raw:
+            return {**draft, "kind": "convene_consultation_skipped"}
+        async with async_session_factory() as session:
+            outcome = await convene_ops.convene(
+                session, topic=topic, creator_id=uuid.UUID(str(creator_raw))
+            )
+        return {
+            "kind": "meeting",
+            "meeting_id": str(outcome.meeting_id),
+            "participant_user_ids": [str(uid) for uid in outcome.participant_user_ids],
+            "participant_emails": list(outcome.participant_emails),
+            "notified": list(outcome.notified),
+            "skipped": list(outcome.skipped),
+        }
 
 
 _FEISHU_PUBLISHER = _FeishuMechanicalPublisher()
