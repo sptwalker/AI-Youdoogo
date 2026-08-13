@@ -54,6 +54,7 @@ _DEPARTMENTS: tuple[tuple[str, str, int], ...] = (
     ("dept_hr", "人资行政部", 7),
     ("dept_finance", "财务部", 8),
     ("dept_public_design", "公共设计组", 9),
+    ("dept_legal", "法务部", 10),
 )
 _EXECS: tuple[tuple[str, str, str], ...] = (
     ("exec_cpo", "CPO", "首席产品顾问"),
@@ -75,6 +76,9 @@ _DIRECTORS: tuple[tuple[str, str, str, str], ...] = (
     ("dir_business", "商务合作部总监助理", "dept_business", "exec_cbo"),
     ("dir_hr", "人资行政部总监助理", "dept_hr", "exec_cho"),
     ("dir_finance", "财务部总监助理", "dept_finance", "exec_cfo"),
+    # 法务部总监助理暂挂首席运营顾问名下（无独立首席法务顾问，避免为单岗新增 exec）。
+    # ponytail: 需独立法务条线再拆 exec_clo。
+    ("dir_legal", "法务部总监助理", "dept_legal", "exec_coo"),
 )
 _EXEC_PROMPT = (
     "你是创想悦动的{title}（公司级 AI 顾问）。你协助并代理真人高管进行分管领域的战略分析、"

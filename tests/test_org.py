@@ -48,9 +48,9 @@ async def _agent(session: AsyncSession, code: str) -> AgentRole:
 async def test_seed_idempotent(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     session, ceo = ctx
     r1 = await organization.seed_org_template(session, ceo_user_id=ceo)
-    assert r1 == {"root": "创想悦动", "departments": 9, "execs": 8, "directors": 9}
+    assert r1 == {"root": "创想悦动", "departments": 10, "execs": 8, "directors": 10}
     depts1, agents1 = await _count(session, SysDepartment), await _count(session, AgentRole)
-    assert depts1 == 10 and agents1 == 17  # 根+9部门；8顾问+9总监助理
+    assert depts1 == 11 and agents1 == 18  # 根+10部门；8顾问+10总监助理
     root = await _dept(session, "company")
     first = await _dept(session, "dept_product_base")
     assert isinstance(root.id, uuid.UUID) and root.path == f"/{root.id}/"
@@ -58,8 +58,8 @@ async def test_seed_idempotent(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
 
     # 重跑不造重复（按 code upsert）
     await organization.seed_org_template(session, ceo_user_id=ceo)
-    assert await _count(session, SysDepartment) == 10
-    assert await _count(session, AgentRole) == 17
+    assert await _count(session, SysDepartment) == 11
+    assert await _count(session, AgentRole) == 18
 
 
 async def test_seed_accepts_default_ceo_and_leaves_supervisor_unset(
@@ -94,7 +94,7 @@ async def test_tree_shape(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
     await organization.seed_org_template(session, ceo_user_id=ceo)
     tree = await organization.get_snapshot(session)
     assert len(tree.roots) == 1 and tree.roots[0].department.node_type == "company"
-    assert len(tree.roots[0].children) == 9  # 9 个一级部门
+    assert len(tree.roots[0].children) == 10  # 10 个一级部门
     assert tree.roots[0].department.department_id == (await _dept(session, "company")).id
     assert [child.department.name for child in tree.roots[0].children] == [
         "基础产品部",
@@ -106,6 +106,7 @@ async def test_tree_shape(ctx: tuple[AsyncSession, uuid.UUID]) -> None:
         "人资行政部",
         "财务部",
         "公共设计组",
+        "法务部",
     ]
     assert all(
         isinstance(child.department.department_id, uuid.UUID)

@@ -108,6 +108,35 @@ def test_pairing_noop_without_compose() -> None:
     assert pair_publish_steps(steps) == steps
 
 
+def test_pairing_repoints_convene_downstream_to_publish() -> None:
+    # convene 机械发布步产真会议：下游对 convene compose(2) 的依赖须改指向其机械发布步。
+    steps = (
+        _launch(1, "data_query"),
+        _launch(2, "convene_consultation", (1,)),
+        _launch(3, "generate_minutes", (2,)),
+        _launch(4, "send_email", (2,)),
+    )
+    paired = pair_publish_steps(steps)
+    by_key = {s.capability_key: s for s in paired}
+    publish_no = by_key["convene_consultation_publish"].number
+    # 机械发布步自身仍依赖 compose(2)（不改指向自己，否则成环）
+    assert by_key["convene_consultation_publish"].depends_on == (2,)
+    # 下游（纪要 / 邮件 compose）改指向 convene 发布步（真会议所在）
+    assert by_key["generate_minutes"].depends_on == (publish_no,)
+    assert by_key["send_email"].depends_on == (publish_no,)
+
+
+def test_pairing_does_not_repoint_non_convene_publish() -> None:
+    # 飞书/邮件发布步无消费型产出：下游依赖保持指向 compose，不改指向发布步。
+    steps = (
+        _launch(1, "feishu_notify_person"),
+        _launch(2, "deliver", (1,)),
+    )
+    paired = pair_publish_steps(steps)
+    by_key = {s.capability_key: s for s in paired}
+    assert by_key["deliver"].depends_on == (1,)  # 仍指向 compose(1)
+
+
 # ── 策略（红线归属）────────────────────────────────────────────
 def test_publish_is_mechanical_not_red_line() -> None:
     assert is_mechanical("feishu_publish") is True

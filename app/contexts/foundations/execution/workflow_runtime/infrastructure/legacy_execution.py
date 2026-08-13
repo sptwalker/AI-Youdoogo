@@ -175,6 +175,8 @@ class _LegacyCapabilityExecutionAdapter:
         prepared: PreparedWorkflowStep,
         agent_result: AgentExecutionResult,
     ) -> ExecuteWorkflowStepResult:
+        if prepared.capability_key == "generate_minutes":
+            return await self._generate_minutes(prepared)
         if is_mechanical(prepared.capability_key):
             return await self._publish_mechanically(prepared)
         if prepared.expert is None:
@@ -213,6 +215,32 @@ class _LegacyCapabilityExecutionAdapter:
             artifacts=tuple(_freeze_mapping(item) for item in result.artifacts),
             capability_execution_ids=tuple(result.tool_execution_ids),
         )
+
+    async def _generate_minutes(
+        self, prepared: PreparedWorkflowStep
+    ) -> ExecuteWorkflowStepResult:
+        """机械纪要步：读上游 convene 机械步经 pipe_outputs 流入的真 meeting，调单一写者生成纪要。
+
+        meeting 由 convene 机械发布步产出并记为 artifact（本步依赖已 repoint 指向该发布步）。无上游
+        会议 / 会议无发言（RuleViolation）均属正常前置缺失 → 如实声明、不判失败、不触发重试。绝不自
+        写 meeting ORM——经 meeting_management.public 单一写者（跨 Context 只走 public）。
+        """
+        from app.contexts.business.meeting_management import public as meetings
+        from app.contexts.shared_kernel import RuleViolation
+
+        meeting = _meeting_artifact(prepared.input_data)
+        if meeting is None:
+            return ExecuteWorkflowStepResult(succeeded=True, content="无上游会议，已跳过纪要生成")
+        meeting_id = uuid.UUID(str(meeting["meeting_id"]))
+        try:
+            await meetings.generate_minutes(
+                self._session, meeting_id, operator_id=prepared.creator_id
+            )
+        except RuleViolation:
+            return ExecuteWorkflowStepResult(
+                succeeded=True, content=f"会议 {meeting_id} 暂无发言，已跳过纪要生成"
+            )
+        return ExecuteWorkflowStepResult(succeeded=True, content=f"已生成会议 {meeting_id} 纪要")
 
     async def _publish_mechanically(
         self, prepared: PreparedWorkflowStep
@@ -280,6 +308,17 @@ async def execute_step(
 
 def _freeze_mapping(value: dict[str, object]) -> tuple[tuple[str, object], ...]:
     return tuple((str(key), item) for key, item in value.items())
+
+
+def _meeting_artifact(
+    input_data: tuple[tuple[str, object], ...],
+) -> dict[str, object] | None:
+    """从上游经 pipe_outputs 流入的 artifacts 里取第一条带 meeting_id 的会议项（无则 None）。"""
+    raw = dict(input_data).get("artifacts")
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict) and item.get("kind") == "meeting" and item.get("meeting_id"):
+            return item
+    return None
 
 
 __all__ = [

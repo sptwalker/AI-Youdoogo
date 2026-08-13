@@ -15,6 +15,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_collab,
     legacy_compose_feishu,
     legacy_convene_consultation,
+    legacy_create_operational_proposal,
     legacy_deliver,
     legacy_feishu_notify,
     legacy_feishu_notify_person,
@@ -194,6 +195,18 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["send_email"],
         legacy_executor=legacy_send_email,
     ),
+    # 运营提案：内部顾问输出（notify=False 无对外发送）→ 非红线，走文本指令路径产提案 artifact，
+    # 进 AUTOMATIC（编排步免停）、default_enabled=True。无机械步、无结构化 executor。
+    "create_operational_proposal": Skill(
+        _DEFINITIONS["create_operational_proposal"],
+        legacy_executor=legacy_create_operational_proposal,
+    ),
+    # 会商纪要：机械步（读上游 convene 真 meeting 生成纪要），由 legacy_execution._generate_minutes
+    # 专列分支处理——仅登记定义（无 executor_factory/legacy_executor），供模板校验与目录一致性；
+    # 对规划器/对话不可见（default_enabled=False，非默认集）。镜像 *_publish 机械键但为可见模板步。
+    "generate_minutes": Skill(
+        _DEFINITIONS["generate_minutes"],
+    ),
     # knowledge_index 走文本指令路径（终端型内部写，无停点、无回喂）；
     # 内部知识沉淀属辅助执行，故进 AUTOMATIC_CAPABILITIES（编排步免红线）。
     "knowledge_index": Skill(
@@ -299,6 +312,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await send_email_capability.prompt_section()
+    if skill.key == "create_operational_proposal":
+        from app.contexts.business.operational_analytics.entrypoints import (
+            agent_capability as operational_proposal_capability,
+        )
+
+        return await operational_proposal_capability.prompt_section()
     if skill.key == "knowledge_index":
         from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
             agent_capability as knowledge_index_capability,
