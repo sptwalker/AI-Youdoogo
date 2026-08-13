@@ -87,6 +87,19 @@ CAPABILITY_DEFINITIONS = (
         handler_identity="read_attachment.execute",
         feature_flag="agent_read_attachment",
     ),
+    CapabilityDefinition(
+        key="compose_feishu",
+        version="1.0",
+        label="整理飞书草稿",
+        description="把内容整理成飞书云文档/多维表格草稿（红线，先出草稿待真人验收后才发布，本步不调飞书）",
+        input_schema_json='{"type":"object"}',
+        output_schema_json='{"type":"object"}',
+        risk=CapabilityRisk.MEDIUM,
+        side_effect=CapabilitySideEffect.INTERNAL_WRITE,
+        permission_keys=("compose_feishu",),
+        handler_identity="feishu_output.compose",
+        feature_flag="agent_feishu_output",
+    ),
 )
 
 

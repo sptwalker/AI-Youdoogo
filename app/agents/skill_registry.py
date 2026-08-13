@@ -13,6 +13,7 @@ from app.agents.contracts import AgentSubject, SkillExecutor, agent_subject
 from app.agents.legacy_skill_adapters import (
     LegacyExecutor,
     legacy_collab,
+    legacy_compose_feishu,
     legacy_deliver,
     legacy_query,
     legacy_read_attachment,
@@ -132,6 +133,12 @@ REGISTRY: dict[str, Skill] = {
         executor_factory=_read_attachment_executor,
         legacy_executor=legacy_read_attachment,
     ),
+    # compose 走文本指令路径产草稿（executor_factory=None，不作结构化调用）；红线停真人验收。
+    # 机械发布半（feishu_publish）待跨模块编排专项统一重建，见 feishu_output.agent_capability。
+    "compose_feishu": Skill(
+        _DEFINITIONS["compose_feishu"],
+        legacy_executor=legacy_compose_feishu,
+    ),
 }
 
 
@@ -194,6 +201,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await read_attachment_capability.prompt_section()
+    if skill.key == "compose_feishu":
+        from app.contexts.foundations.integration.feishu_output.entrypoints import (
+            agent_capability as feishu_output_capability,
+        )
+
+        return await feishu_output_capability.prompt_section()
     return ""
 
 
