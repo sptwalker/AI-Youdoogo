@@ -113,6 +113,19 @@ CAPABILITY_DEFINITIONS = (
         handler_identity="feishu_notify.broadcast",
         feature_flag="agent_feishu_notify",
     ),
+    CapabilityDefinition(
+        key="knowledge_index",
+        version="1.0",
+        label="留存知识库",
+        description="把已确认的结论/报告留存到公司知识库（内部写入·可检索复用·非对外发布）",
+        input_schema_json='{"type":"object","required":["title","body"]}',
+        output_schema_json='{"type":"object"}',
+        risk=CapabilityRisk.LOW,
+        side_effect=CapabilitySideEffect.INTERNAL_WRITE,
+        permission_keys=("knowledge_index",),
+        handler_identity="knowledge_indexing.index_text",
+        feature_flag="agent_knowledge_index",
+    ),
 )
 
 

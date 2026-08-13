@@ -10,9 +10,9 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
 # 对规划器/模板不可见（§8.4），只由 pair_publish_steps 配对生成。
 MECHANICAL_CAPABILITIES: frozenset[str] = frozenset({"feishu_publish"})
 
-# 无需真人停点：只读取数/交付 + 已被上游 compose 验收门控的机械发布步。
+# 无需真人停点：只读取数/交付/内部知识沉淀 + 已被上游 compose 验收门控的机械发布步。
 AUTOMATIC_CAPABILITIES: frozenset[str] = (
-    frozenset({"data_query", "deliver"}) | MECHANICAL_CAPABILITIES
+    frozenset({"data_query", "deliver", "knowledge_index"}) | MECHANICAL_CAPABILITIES
 )
 
 # compose 红线键 → (机械发布键, 发布步标题, 发布步指令)。

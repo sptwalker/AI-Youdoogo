@@ -16,7 +16,10 @@ from app.contexts.foundations.execution.work_planning.contracts.planning import 
 )
 
 MAX_PLAN_STEPS = 8
-AUTOMATIC_CAPABILITIES: frozenset[str] = frozenset({"data_query", "deliver"})
+# knowledge_index：内部知识沉淀属「辅助执行」（可检索复用·可软删·非对外发布）→ 免真人停点。
+AUTOMATIC_CAPABILITIES: frozenset[str] = frozenset(
+    {"data_query", "deliver", "knowledge_index"}
+)
 
 
 def requires_human_review(capability_key: str) -> bool:

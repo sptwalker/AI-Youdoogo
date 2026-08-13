@@ -16,6 +16,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_compose_feishu,
     legacy_deliver,
     legacy_feishu_notify,
+    legacy_knowledge_index,
     legacy_query,
     legacy_read_attachment,
     legacy_read_url,
@@ -105,6 +106,14 @@ def _read_attachment_executor() -> SkillExecutor:
     return agent_capability.ReadAttachmentSkillExecutor()
 
 
+def _knowledge_index_executor() -> SkillExecutor:
+    from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
+        agent_capability,
+    )
+
+    return agent_capability.KnowledgeIndexSkillExecutor()
+
+
 REGISTRY: dict[str, Skill] = {
     "env_context": Skill(
         _DEFINITIONS["env_context"],
@@ -144,6 +153,13 @@ REGISTRY: dict[str, Skill] = {
     "feishu_notify": Skill(
         _DEFINITIONS["feishu_notify"],
         legacy_executor=legacy_feishu_notify,
+    ),
+    # knowledge_index 走文本指令路径（终端型内部写，无停点、无回喂）；
+    # 内部知识沉淀属辅助执行，故进 AUTOMATIC_CAPABILITIES（编排步免红线）。
+    "knowledge_index": Skill(
+        _DEFINITIONS["knowledge_index"],
+        executor_factory=_knowledge_index_executor,
+        legacy_executor=legacy_knowledge_index,
     ),
 }
 
@@ -219,6 +235,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await feishu_notify_capability.prompt_section()
+    if skill.key == "knowledge_index":
+        from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
+            agent_capability as knowledge_index_capability,
+        )
+
+        return await knowledge_index_capability.prompt_section()
     return ""
 
 
