@@ -74,6 +74,11 @@ class _FeishuMechanicalPublisher:
     ``send_email_publish`` → 按 username 解析邮箱真发送（自开 session）。
     ponytail: 类名保留 Feishu 前缀但实为通用机械发布器（含建会/发信等非飞书目标）；私有类，
               重命名属纯 churn，故留名不改。扩展新机械发布时在此按 publish_key 再加一支。
+    ponytail: at-least-once 外写，无幂等键——execute() 外写与 finalize() 提交非原子，其间 worker
+              崩溃 / 租约被抢判 stale 时该步会被重新领取并再次 publish（真人验收「之后」重复建会 /
+              发信 / 通知，无二次人工闸）。触发窗口窄、飞书集成默认关（canary=0 walking-skeleton），
+              承接线上流量前收口：给 publish 传 `{run_id}:{step_id}:{publish_key}` 幂等键，convene
+              建会 / send_email 落 dedupe，或建 step→external-effect 关联表。
     """
 
     async def available(self) -> bool:

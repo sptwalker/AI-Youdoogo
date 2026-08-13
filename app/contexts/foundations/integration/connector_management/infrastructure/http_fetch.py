@@ -83,14 +83,23 @@ async def fetch_http_api(
         async with httpx.AsyncClient(
             timeout=_TIMEOUT, transport=transport, follow_redirects=False
         ) as client:
-            response = await client.request(
+            async with client.stream(
                 method,
                 url,
                 headers=headers,
                 json=body if isinstance(body, (dict, list)) else None,
-            )
-            response.raise_for_status()
-            raw = response.content[:_MAX_BYTES]
+            ) as response:
+                response.raise_for_status()
+                # 流式累计到 _MAX_BYTES 即断——绝不 response.content 事后切片（那会先把整页
+                # 缓冲进内存，上限形同虚设）。内存上界 ≈ _MAX_BYTES + 单块，超大 body 不整页进内存。
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= _MAX_BYTES:
+                        break
+            raw = b"".join(chunks)[:_MAX_BYTES]
     except httpx.HTTPError as exc:
         # 不复用 str(exc)：httpx 异常文本可能含带 token 的完整 URL
         logger.warning(

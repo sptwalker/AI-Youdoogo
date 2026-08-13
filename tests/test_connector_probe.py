@@ -15,6 +15,7 @@ from app.contexts.foundations.integration.connector_management.contracts import 
 )
 from app.contexts.foundations.integration.connector_management.entrypoints import probe
 from app.contexts.foundations.integration.connector_management.infrastructure.http_fetch import (
+    _MAX_BYTES,
     fetch_http_api,
 )
 from app.contexts.foundations.integration.connector_management.infrastructure.http_probe import (
@@ -199,6 +200,23 @@ async def test_fetch_http_error_is_structured(monkeypatch: pytest.MonkeyPatch) -
         transport=httpx.MockTransport(_handler),
     )
     assert result.status == "fail"  # 5xx → 结构化 fail，不抛穿
+
+
+async def test_fetch_caps_oversized_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """上游返回超 _MAX_BYTES 的 body → 流式累计到上限即断，输出截到 _MAX_BYTES（不整页留存）。"""
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+    huge = b"a" * (_MAX_BYTES * 2)  # 2× 上限的非 JSON body
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=huge)
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://competitor.example.com/dump"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "ok"
+    assert len(result.text.encode("utf-8")) <= _MAX_BYTES  # 输出被截，未整页留存
 
 
 async def test_fetch_from_connector_rejects_non_http_api() -> None:
