@@ -212,6 +212,29 @@ async def legacy_feishu_notify_person(
     return await agent_capability.execute(db, role, output, **kwargs)
 
 
+async def legacy_knowledge_search(
+    db: AsyncSession,
+    role: AgentSubject,
+    output: str,
+    context: ExecutionContext,
+    exclude: set[str],
+) -> SkillResult:
+    from app.contexts.foundations.knowledge.knowledge_search.entrypoints import (
+        agent_capability,
+    )
+
+    kwargs = accepted_kwargs(
+        agent_capability.execute,
+        {
+            "user_id": context.user_id,
+            "user_intent": context.user_intent,
+            "exclude": exclude,
+            "execution_context": context,
+        },
+    )
+    return await agent_capability.execute(db, role, output, **kwargs)
+
+
 async def legacy_knowledge_index(
     db: AsyncSession,
     role: AgentSubject,

@@ -18,6 +18,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_feishu_notify,
     legacy_feishu_notify_person,
     legacy_knowledge_index,
+    legacy_knowledge_search,
     legacy_query,
     legacy_read_attachment,
     legacy_read_url,
@@ -115,6 +116,14 @@ def _knowledge_index_executor() -> SkillExecutor:
     return agent_capability.KnowledgeIndexSkillExecutor()
 
 
+def _knowledge_search_executor() -> SkillExecutor:
+    from app.contexts.foundations.knowledge.knowledge_search.entrypoints import (
+        agent_capability,
+    )
+
+    return agent_capability.KnowledgeSearchSkillExecutor()
+
+
 REGISTRY: dict[str, Skill] = {
     "env_context": Skill(
         _DEFINITIONS["env_context"],
@@ -143,6 +152,13 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["read_attachment"],
         executor_factory=_read_attachment_executor,
         legacy_executor=legacy_read_attachment,
+    ),
+    # 历史案例检索：文本指令路径「取回→回喂综合」（只读内部 KB，可信不加防注入 fence）；
+    # 无副作用 → 进 AUTOMATIC，编排步无真人停点。prompt_section 始终可用（无门控）。
+    "knowledge_search": Skill(
+        _DEFINITIONS["knowledge_search"],
+        executor_factory=_knowledge_search_executor,
+        legacy_executor=legacy_knowledge_search,
     ),
     # compose 走文本指令路径产草稿（executor_factory=None，不作结构化调用）；红线停真人验收。
     # 机械发布半（feishu_publish）待跨模块编排专项统一重建，见 feishu_output.agent_capability。
@@ -231,6 +247,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await read_attachment_capability.prompt_section()
+    if skill.key == "knowledge_search":
+        from app.contexts.foundations.knowledge.knowledge_search.entrypoints import (
+            agent_capability as knowledge_search_capability,
+        )
+
+        return await knowledge_search_capability.prompt_section()
     if skill.key == "compose_feishu":
         from app.contexts.foundations.integration.feishu_output.entrypoints import (
             agent_capability as feishu_output_capability,
