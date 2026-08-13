@@ -43,6 +43,9 @@ from app.contexts.foundations.execution.workflow_runtime.infrastructure.event_ha
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
     workflow_progress_from_payload,
 )
+from app.contexts.foundations.integration.feishu_output.entrypoints import (
+    operations as feishu_output_ops,
+)
 from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
     event_handler as knowledge_events,
 )
@@ -56,6 +59,22 @@ from app.platform.eventing.inbox import EventEnvelope
 class _EnvironmentSnapshotCache:
     def invalidate(self) -> None:
         environment_projection.invalidate_cache()
+
+
+class _FeishuMechanicalPublisher:
+    """组合根注入的机械发布器：桥接 feishu_output Context，供 workflow_runtime 无跨界依赖调用。
+
+    ponytail: 目前仅飞书；扩展 email/notify_person 机械发布时在此按 draft 派发到对应 operations。
+    """
+
+    async def available(self) -> bool:
+        return await feishu_output_ops.feishu_output_available()
+
+    async def publish(self, draft: dict[str, object]) -> dict[str, object]:
+        return await feishu_output_ops.run_publish(dict(draft))
+
+
+_FEISHU_PUBLISHER = _FeishuMechanicalPublisher()
 
 
 class _EnvironmentSnapshotRefresh:
@@ -131,6 +150,7 @@ async def handle_event(
             agent_runner=agent_runner,
             task_projection=_task_projection(session),
             experts=SQLAlchemyExpertSnapshotQuery(session),
+            publisher=_FEISHU_PUBLISHER,
         )
 
     if event.event_type == DISBAND_ARCHIVE_EVENT:

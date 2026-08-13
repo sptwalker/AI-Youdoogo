@@ -23,6 +23,7 @@ from app.contexts.foundations.execution.agent_execution.contracts.execution impo
 )
 from app.contexts.foundations.execution.workflow_runtime.application.ports import (
     ExpertSnapshotPort,
+    MechanicalPublisherPort,
     TaskProjectionPort,
     WorkflowUnitOfWorkFactory,
 )
@@ -40,6 +41,9 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     ExecuteWorkflowStepResult,
     PreparedWorkflowStep,
     StepExecutionDisposition,
+)
+from app.contexts.foundations.execution.workflow_runtime.domain.policies import (
+    is_mechanical,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure import (
     step_leases,
@@ -156,15 +160,23 @@ class _LegacyAgentExecutionAdapter:
 
 
 class _LegacyCapabilityExecutionAdapter:
-    def __init__(self, session: AsyncSession, runner: AgentRunner) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        runner: AgentRunner,
+        publisher: MechanicalPublisherPort | None = None,
+    ) -> None:
         self._session = session
         self._runner = runner
+        self._publisher = publisher
 
     async def execute(
         self,
         prepared: PreparedWorkflowStep,
         agent_result: AgentExecutionResult,
     ) -> ExecuteWorkflowStepResult:
+        if is_mechanical(prepared.capability_key):
+            return await self._publish_mechanically(prepared)
         if prepared.expert is None:
             return ExecuteWorkflowStepResult(False, "步骤无可用执行者", error="步骤无可用执行者")
         expert = cast(ExpertExecutionSnapshot, prepared.expert)
@@ -202,6 +214,34 @@ class _LegacyCapabilityExecutionAdapter:
             capability_execution_ids=tuple(result.tool_execution_ids),
         )
 
+    async def _publish_mechanically(
+        self, prepared: PreparedWorkflowStep
+    ) -> ExecuteWorkflowStepResult:
+        """机械发布步：取上游 compose 步经 pipe_outputs 流入的已验收草稿逐份发布（无 LLM）。
+
+        草稿按 publish_key 匹配本步能力键；发布器由组合根注入（切断跨界依赖），未注入或凭证
+        未配 → 如实跳过（best-effort，不抛错阻塞工作流），绝不触发未授权对外写。
+        """
+        raw = dict(prepared.input_data).get("artifacts")
+        drafts = [
+            item
+            for item in (raw if isinstance(raw, list) else [])
+            if isinstance(item, dict)
+            and item.get("publish_key") == prepared.capability_key
+        ]
+        if not drafts:
+            return ExecuteWorkflowStepResult(succeeded=True, content="无待发布草稿")
+        if self._publisher is None or not await self._publisher.available():
+            return ExecuteWorkflowStepResult(
+                succeeded=True, content="未配置飞书凭证，已跳过发布"
+            )
+        published = [await self._publisher.publish(draft) for draft in drafts]
+        return ExecuteWorkflowStepResult(
+            succeeded=True,
+            content=f"已发布 {len(published)} 份飞书内容",
+            artifacts=tuple(_freeze_mapping(item) for item in published),
+        )
+
 
 async def execute_step(
     db: AsyncSession,
@@ -211,6 +251,7 @@ async def execute_step(
     agent_runner: AgentRunner,
     task_projection: TaskProjectionPort,
     experts: ExpertSnapshotPort,
+    publisher: MechanicalPublisherPort | None = None,
 ) -> StepExecutionDisposition:
     raw_step_id = event.payload.get("workflow_step_id")
     if not raw_step_id:
@@ -223,7 +264,7 @@ async def execute_step(
         prepare=PrepareWorkflowStep(typed_units, experts),
         execute=ExecuteWorkflowStep(
             _LegacyAgentExecutionAdapter(db, agent_runner),
-            _LegacyCapabilityExecutionAdapter(db, agent_runner),
+            _LegacyCapabilityExecutionAdapter(db, agent_runner, publisher),
         ),
         finalize=FinalizeWorkflowStep(typed_units),
         heartbeat=_LeaseHeartbeat(settings.workflow_step_lease_seconds),

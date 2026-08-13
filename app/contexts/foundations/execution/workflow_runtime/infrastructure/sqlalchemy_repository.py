@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -22,6 +22,7 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     WorkflowStepStatus,
 )
 from app.contexts.foundations.execution.workflow_runtime.domain.policies import (
+    pair_publish_steps,
     requires_human_review,
 )
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
@@ -247,6 +248,8 @@ async def create_workflow(
 ) -> WorkflowRun:
     if len(command.steps) < 2:
         raise RuleViolation("持久化编排至少需要两个步骤")
+    # 唯一收口：为红线 compose 步配对机械发布步（对规划器/模板不可见），下游一律用配对后的步集。
+    command = replace(command, steps=pair_publish_steps(command.steps))
     workflow = _new_workflow(command)
     await publish_workflow_progress(
         session,

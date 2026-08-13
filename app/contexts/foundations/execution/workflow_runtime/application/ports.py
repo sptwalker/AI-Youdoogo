@@ -83,3 +83,15 @@ class WorkflowCapabilityExecutionPort(Protocol):
 
 class WorkflowLeaseHeartbeatPort(Protocol):
     def keep_alive(self, claim: ClaimedWorkflowStep) -> AbstractAsyncContextManager[None]: ...
+
+
+class MechanicalPublisherPort(Protocol):
+    """机械发布端口：真人验收 compose 草稿后由机械步做不可逆对外写（无 LLM）。
+
+    具体飞书/邮件等实现由组合根（bootstrap）注入，切断 workflow_runtime 对 integration
+    Context entrypoints 的跨界依赖；``available`` 假 → 未配凭证，机械步如实跳过不发。
+    """
+
+    async def available(self) -> bool: ...
+
+    async def publish(self, draft: dict[str, object]) -> dict[str, object]: ...

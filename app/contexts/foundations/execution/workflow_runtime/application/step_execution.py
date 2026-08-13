@@ -6,6 +6,7 @@ from typing import cast
 
 from app.contexts.foundations.execution.agent_execution.contracts.execution import (
     AgentExecutionRequest,
+    AgentExecutionResult,
     AgentExecutionStatus,
     ExecutionTrace,
 )
@@ -27,8 +28,16 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
     StepClaimStatus,
     StepExecutionDisposition,
 )
+from app.contexts.foundations.execution.workflow_runtime.domain.policies import (
+    is_mechanical,
+)
 from app.contexts.foundations.workforce.expert_management.contracts.execution import (
     ExpertExecutionSnapshot,
+)
+
+# 机械发布步跳过 LLM：合成一个空的成功执行结果喂能力端口（机械分支忽略此结果内容）。
+_MECHANICAL_AGENT_RESULT = AgentExecutionResult(
+    status=AgentExecutionStatus.SUCCEEDED, trace=ExecutionTrace()
 )
 
 
@@ -87,6 +96,9 @@ class ExecuteWorkflowStep:
         self._capabilities = capabilities
 
     async def execute(self, prepared: PreparedWorkflowStep) -> ExecuteWorkflowStepResult:
+        if is_mechanical(prepared.capability_key):
+            # 机械发布步：真人已验收上游 compose 草稿，本步不调 LLM，直接做不可逆对外写。
+            return await self._capabilities.execute(prepared, _MECHANICAL_AGENT_RESULT)
         if prepared.expert is None:
             return ExecuteWorkflowStepResult(
                 succeeded=False,
