@@ -163,6 +163,7 @@ class AgentExecutionRequest:
     principal_id: uuid.UUID
     original_message: str
     prompt: str
+    attachments: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

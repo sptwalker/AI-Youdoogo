@@ -397,6 +397,7 @@ class AssistantConversationsApplication:
                 principal_id=command.principal.id,
                 original_message=command.message,
                 prompt=prompt,
+                attachments=command.attachments,
             )
         ):
             if agent_event.name == "delta":

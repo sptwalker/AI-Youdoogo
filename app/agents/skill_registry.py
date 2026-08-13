@@ -15,6 +15,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_collab,
     legacy_deliver,
     legacy_query,
+    legacy_read_attachment,
     legacy_read_url,
 )
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
@@ -94,6 +95,14 @@ def _read_url_executor() -> SkillExecutor:
     return agent_capability.ReadUrlSkillExecutor()
 
 
+def _read_attachment_executor() -> SkillExecutor:
+    from app.contexts.foundations.integration.read_attachment.entrypoints import (
+        agent_capability,
+    )
+
+    return agent_capability.ReadAttachmentSkillExecutor()
+
+
 REGISTRY: dict[str, Skill] = {
     "env_context": Skill(
         _DEFINITIONS["env_context"],
@@ -117,6 +126,11 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["read_url"],
         executor_factory=_read_url_executor,
         legacy_executor=legacy_read_url,
+    ),
+    "read_attachment": Skill(
+        _DEFINITIONS["read_attachment"],
+        executor_factory=_read_attachment_executor,
+        legacy_executor=legacy_read_attachment,
     ),
 }
 
@@ -174,6 +188,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await read_url_capability.prompt_section()
+    if skill.key == "read_attachment":
+        from app.contexts.foundations.integration.read_attachment.entrypoints import (
+            agent_capability as read_attachment_capability,
+        )
+
+        return await read_attachment_capability.prompt_section()
     return ""
 
 

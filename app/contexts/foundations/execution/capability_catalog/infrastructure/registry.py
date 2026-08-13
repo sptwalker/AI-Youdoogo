@@ -74,6 +74,19 @@ CAPABILITY_DEFINITIONS = (
         handler_identity="read_url.execute",
         feature_flag="agent_read_url",
     ),
+    CapabilityDefinition(
+        key="read_attachment",
+        version="1.0",
+        label="读附件",
+        description="解析本轮用户上传附件正文，结合知识库综合成报告（只读，仅限本轮受信附件）",
+        input_schema_json='{"type":"object","required":["storage_path","name"]}',
+        output_schema_json='{"type":"object"}',
+        risk=CapabilityRisk.LOW,
+        side_effect=CapabilitySideEffect.NONE,
+        permission_keys=("read_attachment",),
+        handler_identity="read_attachment.execute",
+        feature_flag="agent_read_attachment",
+    ),
 )
 
 

@@ -212,6 +212,7 @@ class LegacyAgentExecutionAdapter:
             ExecutionContext(
                 user_id=request.principal_id,
                 user_intent=request.original_message,
+                attachments=request.attachments,
                 agent_runner=self._agent_runner,
             ),
             user_id=request.principal_id,
