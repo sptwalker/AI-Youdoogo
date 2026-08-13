@@ -16,6 +16,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_compose_feishu,
     legacy_deliver,
     legacy_feishu_notify,
+    legacy_feishu_notify_person,
     legacy_knowledge_index,
     legacy_query,
     legacy_read_attachment,
@@ -154,6 +155,13 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["feishu_notify"],
         legacy_executor=legacy_feishu_notify,
     ),
+    # 定向飞书 compose 半：文本指令路径产草稿（executor_factory=None）；红线停真人验收，默认关。
+    # 机械发布半（feishu_notify_person_publish）由 policies 配对 + 注入 publisher 按 key 派发，
+    # 不入 REGISTRY、对规划器/对话不可见（镜像 compose_feishu→feishu_publish）。
+    "feishu_notify_person": Skill(
+        _DEFINITIONS["feishu_notify_person"],
+        legacy_executor=legacy_feishu_notify_person,
+    ),
     # knowledge_index 走文本指令路径（终端型内部写，无停点、无回喂）；
     # 内部知识沉淀属辅助执行，故进 AUTOMATIC_CAPABILITIES（编排步免红线）。
     "knowledge_index": Skill(
@@ -235,6 +243,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await feishu_notify_capability.prompt_section()
+    if skill.key == "feishu_notify_person":
+        from app.contexts.foundations.integration.feishu_notify_person.entrypoints import (
+            agent_capability as feishu_notify_person_capability,
+        )
+
+        return await feishu_notify_person_capability.prompt_section()
     if skill.key == "knowledge_index":
         from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
             agent_capability as knowledge_index_capability,

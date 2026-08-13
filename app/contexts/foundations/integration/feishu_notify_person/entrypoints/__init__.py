@@ -1,0 +1,1 @@
+"""Feishu directed-notify adapters."""

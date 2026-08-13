@@ -8,7 +8,9 @@ from app.contexts.foundations.execution.workflow_runtime.contracts.runtime impor
 
 # 机械发布步键：真人验收 compose 草稿后由机械步做不可逆对外写——无 LLM、无二次真人停点。
 # 对规划器/模板不可见（§8.4），只由 pair_publish_steps 配对生成。
-MECHANICAL_CAPABILITIES: frozenset[str] = frozenset({"feishu_publish"})
+MECHANICAL_CAPABILITIES: frozenset[str] = frozenset(
+    {"feishu_publish", "feishu_notify_person_publish"}
+)
 
 # 无需真人停点：只读取数/交付/内部知识沉淀 + 已被上游 compose 验收门控的机械发布步。
 AUTOMATIC_CAPABILITIES: frozenset[str] = (
@@ -16,11 +18,16 @@ AUTOMATIC_CAPABILITIES: frozenset[str] = (
 )
 
 # compose 红线键 → (机械发布键, 发布步标题, 发布步指令)。
-# ponytail: 目前仅飞书；send_email/feishu_notify_person/convene 落地时各加一行即复用整套编排。
+# ponytail: send_email/convene 落地时各加一行即复用整套编排。
 #           convene 的机械步会产 meeting 数据集供下游消费，届时需补「下游依赖改指向机械步」的
 #           repoint 逻辑（当前无消费方，YAGNI）。
 _PUBLISH_PAIRINGS: dict[str, tuple[str, str, str]] = {
     "compose_feishu": ("feishu_publish", "发布飞书草稿", "将已验收的飞书草稿发布到飞书"),
+    "feishu_notify_person": (
+        "feishu_notify_person_publish",
+        "发送定向飞书通知",
+        "将已验收的定向飞书草稿发送到指定的人或群",
+    ),
 }
 
 

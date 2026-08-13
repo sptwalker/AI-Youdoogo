@@ -43,6 +43,9 @@ from app.contexts.foundations.execution.workflow_runtime.infrastructure.event_ha
 from app.contexts.foundations.execution.workflow_runtime.infrastructure.events import (
     workflow_progress_from_payload,
 )
+from app.contexts.foundations.integration.feishu_notify_person.entrypoints import (
+    operations as feishu_notify_person_ops,
+)
 from app.contexts.foundations.integration.feishu_output.entrypoints import (
     operations as feishu_output_ops,
 )
@@ -62,15 +65,29 @@ class _EnvironmentSnapshotCache:
 
 
 class _FeishuMechanicalPublisher:
-    """组合根注入的机械发布器：桥接 feishu_output Context，供 workflow_runtime 无跨界依赖调用。
+    """组合根注入的机械发布器：桥接飞书 Context，供 workflow_runtime 无跨界依赖调用。
 
-    ponytail: 目前仅飞书；扩展 email/notify_person 机械发布时在此按 draft 派发到对应 operations。
+    按 draft 的 ``publish_key`` 派发：``feishu_publish`` → feishu_output 云文档/多维表格；
+    ``feishu_notify_person_publish`` → 定向发送到指定的人/群（notify 自门控，关则安全跳过）。
+    ponytail: 扩展 email/convene 机械发布时在此按 publish_key 再加一支。
     """
 
     async def available(self) -> bool:
-        return await feishu_output_ops.feishu_output_available()
+        # 任一目标就绪即放行本步；具体 draft 的目标未配 → 对应 operations 内部 no-op 安全跳过。
+        return (
+            await feishu_output_ops.feishu_output_available()
+            or feishu_notify_person_ops.feishu_notify_person_available()
+        )
 
     async def publish(self, draft: dict[str, object]) -> dict[str, object]:
+        if draft.get("publish_key") == "feishu_notify_person_publish":
+            sent = await feishu_notify_person_ops.send_to_recipient(
+                str(draft.get("recipient", "")),
+                bool(draft.get("is_chat", False)),
+                str(draft.get("text", "")),
+            )
+            kind = "feishu_notify_person_sent" if sent else "feishu_notify_person_skipped"
+            return {**draft, "kind": kind}
         return await feishu_output_ops.run_publish(dict(draft))
 
 
