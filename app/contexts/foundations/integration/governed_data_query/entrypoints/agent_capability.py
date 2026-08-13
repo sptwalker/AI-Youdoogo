@@ -119,6 +119,52 @@ def render_table(result: dict[str, Any]) -> str:
     return "\n".join([head, separator, *body]) + tail
 
 
+def _scalar_kind(value: Any) -> str:
+    """把单元格值归到一个粗粒度标量类别，用于列内类型一致性判定（bool 是 int 子类，先判）。"""
+    if isinstance(value, bool):
+        return "布尔"
+    if isinstance(value, (int, float)):
+        return "数值"
+    if isinstance(value, str):
+        return "文本"
+    return "其它"
+
+
+def validate_dataset(columns: list[str], rows: list[dict[str, Any]]) -> list[str]:
+    """对取数结果做确定性质量校验，返回问题标记列表（纯函数、无 LLM、只读不改数据）。
+
+    在取数与综合之间产出「校验报告」附给下游，让模型据实说明数据质量、不臆测填补缺失值。
+    检查：① 声明列在每一行都缺该键 → 缺列；② 列内 None/空串/缺键计数 → 空值；
+    ③ 忽略空值后列内标量类别多于一种（如数值列混入文本 → 量纲/类型异常）→ 类型不一致。
+    # ponytail: 期望 schema / 单位 / 取值域校验留到列带元数据契约再加，当前按结果自描述够用。
+    """
+    if not columns or not rows:
+        return []
+    findings: list[str] = []
+    for column in columns:
+        present = [row[column] for row in rows if column in row]
+        if not present:
+            findings.append(f"缺列「{column}」：查询声明该列但结果无任何取值")
+            continue
+        missing = len(rows) - len(present)
+        empties = missing + sum(1 for value in present if value is None or value == "")
+        if empties:
+            findings.append(f"列「{column}」空值 {empties}/{len(rows)} 行")
+        kinds = {_scalar_kind(v) for v in present if v is not None and v != ""}
+        if len(kinds) > 1:
+            findings.append(f"列「{column}」类型不一致：混有 {'、'.join(sorted(kinds))}")
+    return findings
+
+
+def render_validation(findings: list[str]) -> str:
+    """把校验报告渲染成回喂解读轮的文本块（无异常也显式声明，让模型知道已校验）。"""
+    if not findings:
+        return "数据校验：未发现空值/类型/缺列异常。"
+    return "数据校验发现以下问题（请据实说明，勿臆测填补缺失值）:\n" + "\n".join(
+        f"- {item}" for item in findings
+    )
+
+
 async def _enabled(
     db: AsyncSession,
     resolver: FeatureFlagResolver | None,
@@ -173,20 +219,27 @@ class DataQuerySkillExecutor:
         if status == "fail":
             result.notes.append(f"取数失败（{query_result.get('msg', '')}）:{args.sql[:80]}")
             return result
+        columns = query_result.get("columns") or []
+        rows = query_result.get("rows") or []
+        validation = validate_dataset(columns, rows)
         result.datasets.append(
             {
                 "sql": args.sql,
-                "columns": query_result.get("columns") or [],
-                "rows": query_result.get("rows") or [],
+                "columns": columns,
+                "rows": rows,
                 "row_count": query_result.get("row_count", 0),
                 "truncated": bool(query_result.get("truncated")),
+                "validation": validation,
             }
         )
         await self._interpret(
             db,
             subject,
             request.raw_text or args.sql,
-            [f"查询:{args.sql}\n结果:\n{render_table(query_result)}"],
+            [
+                f"查询:{args.sql}\n结果:\n{render_table(query_result)}\n"
+                f"{render_validation(validation)}"
+            ],
             context,
             result,
         )
@@ -331,5 +384,7 @@ __all__ = [
     "parse",
     "prompt_section",
     "render_table",
+    "render_validation",
     "run_readonly_sql",
+    "validate_dataset",
 ]

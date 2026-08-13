@@ -12,6 +12,9 @@ from app.contexts.foundations.integration.governed_data_query.contracts import (
     GovernedQueryRequest,
 )
 from app.contexts.foundations.integration.governed_data_query.entrypoints import (
+    agent_capability,
+)
+from app.contexts.foundations.integration.governed_data_query.entrypoints import (
     operations as data_query,
 )
 from app.models import Base
@@ -28,6 +31,27 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as s:
         yield s
     await engine.dispose()
+
+
+# ── validate_dataset:确定性清洗校验（P2）───────────────
+def test_validate_dataset_flags_dirty_data() -> None:
+    """脏数据产出正确标记：空值 / 类型不一致 / 缺列；干净数据无标记。"""
+    columns = ["dau", "revenue", "note"]
+    rows = [
+        {"dau": 42, "revenue": 100, "note": "ok"},
+        {"dau": None, "revenue": "N/A", "note": ""},  # dau 空值；revenue 混文本；note 空串
+        {"dau": 7, "revenue": 200},  # note 缺键
+    ]
+    findings = "\n".join(agent_capability.validate_dataset(columns, rows))
+    assert "dau" in findings and "空值" in findings
+    assert "revenue" in findings and "类型不一致" in findings
+    assert "note" in findings  # 空串 + 缺键都计入空值
+    # 干净数据无任何标记
+    assert agent_capability.validate_dataset(["c"], [{"c": 1}, {"c": 2}]) == []
+    # 声明列但结果完全无该键 → 缺列
+    assert any("缺列" in f for f in agent_capability.validate_dataset(["ghost"], [{"c": 1}]))
+    # int/float 同属数值，不误报类型不一致
+    assert agent_capability.validate_dataset(["x"], [{"x": 1}, {"x": 1.5}]) == []
 
 
 class _FakeTD:
