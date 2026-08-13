@@ -27,6 +27,7 @@ dependencies = [
     "cryptography>=50.0",
     "trafilatura>=2.2.0",
     "python-pptx>=1.0",
+    "aiosmtplib>=3.0",
 ]
 
 [dependency-groups]

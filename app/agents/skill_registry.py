@@ -23,6 +23,7 @@ from app.agents.legacy_skill_adapters import (
     legacy_query,
     legacy_read_attachment,
     legacy_read_url,
+    legacy_send_email,
 )
 from app.contexts.foundations.execution.capability_catalog.contracts.definition import (
     CapabilityDefinition,
@@ -186,6 +187,13 @@ REGISTRY: dict[str, Skill] = {
         _DEFINITIONS["convene_consultation"],
         legacy_executor=legacy_convene_consultation,
     ),
+    # 发送邮件 compose 半：文本指令路径产草稿（executor_factory=None，收件人按 username 发布解析）；
+    # 红线外部写停真人验收，默认关。机械发送半（send_email_publish）由 policies 配对 + 注入
+    # publisher 按 publish_key 派发（自开 session），不入 REGISTRY。
+    "send_email": Skill(
+        _DEFINITIONS["send_email"],
+        legacy_executor=legacy_send_email,
+    ),
     # knowledge_index 走文本指令路径（终端型内部写，无停点、无回喂）；
     # 内部知识沉淀属辅助执行，故进 AUTOMATIC_CAPABILITIES（编排步免红线）。
     "knowledge_index": Skill(
@@ -285,6 +293,12 @@ async def _section(db: AsyncSession, skill: Skill) -> str:
         )
 
         return await convene_consultation_capability.prompt_section()
+    if skill.key == "send_email":
+        from app.contexts.foundations.integration.send_email.entrypoints import (
+            agent_capability as send_email_capability,
+        )
+
+        return await send_email_capability.prompt_section()
     if skill.key == "knowledge_index":
         from app.contexts.foundations.knowledge.knowledge_indexing.entrypoints import (
             agent_capability as knowledge_index_capability,

@@ -67,6 +67,14 @@ async def get_user_by_id(
     return authenticated.user if authenticated is not None else None
 
 
+async def get_user_by_username(
+    session: AsyncSession,
+    *,
+    username: str,
+) -> IdentityUserResult | None:
+    return await build_identity_application(session).find_by_username(username)
+
+
 async def create_user(
     session: AsyncSession,
     *,

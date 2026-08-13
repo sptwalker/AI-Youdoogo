@@ -197,6 +197,14 @@ class Settings(BaseSettings):
     td_base_url: str = ""  # 形如 http://HOST:8992，待联调确认
     td_api_secret: str = ""
 
+    # SMTP 发信（docs/26 P4，send_email 能力）。host 留空即判"未配置"安全跳过，不臆造地址。
+    # smtp_password 走 sys_config(is_secret=True)/.env 同一约定（CLAUDE.md 开发铁律#4）。
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_addr: str = ""
+
     @model_validator(mode="after")
     def _enforce_prod_secret(self) -> "Settings":
         """非 local 环境拒绝弱/默认 JWT 密钥，启动即失败而非静默签发可伪造令牌。"""

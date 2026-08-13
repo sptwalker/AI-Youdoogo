@@ -141,6 +141,11 @@ class IdentityApplication:
             account = await uow.identities.get_by_id(query.user_id)
         return _authenticated(account) if account is not None else None
 
+    async def find_by_username(self, username: str) -> IdentityUserResult | None:
+        async with self._uow_factory() as uow:
+            account = await uow.identities.find_by_username(username)
+        return _user_result(account) if account is not None else None
+
     async def create_user(self, command: CreateUserCommand) -> IdentityUserResult:
         validate_role(command.role_code)
         try:
