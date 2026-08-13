@@ -167,6 +167,71 @@ def test_is_due_clamps_day_past_month_end() -> None:
     assert due is True
 
 
+# ── interval_is_due（秒级轮询到点，对称补全月度 is_due）──────────
+def test_interval_is_due_true_when_never_fired() -> None:
+    # 从未触发（游标空）→ 立即到点，首轮即扫。
+    assert (
+        report_scheduler.interval_is_due(
+            enabled=True,
+            interval_seconds=300,
+            last_fired_at=None,
+            now=datetime(2026, 8, 1, 9, 0, 0),
+        )
+        is True
+    )
+
+
+def test_interval_is_due_true_when_interval_elapsed() -> None:
+    # 距上次触发已满 interval（正好 300s）→ 到点。
+    assert (
+        report_scheduler.interval_is_due(
+            enabled=True,
+            interval_seconds=300,
+            last_fired_at=datetime(2026, 8, 1, 9, 0, 0),
+            now=datetime(2026, 8, 1, 9, 5, 0),
+        )
+        is True
+    )
+
+
+def test_interval_is_due_false_when_interval_not_elapsed() -> None:
+    # 未满 interval（仅过 299s）→ 不到点，等下轮。
+    assert (
+        report_scheduler.interval_is_due(
+            enabled=True,
+            interval_seconds=300,
+            last_fired_at=datetime(2026, 8, 1, 9, 0, 0),
+            now=datetime(2026, 8, 1, 9, 4, 59),
+        )
+        is False
+    )
+
+
+def test_interval_is_due_false_when_disabled() -> None:
+    assert (
+        report_scheduler.interval_is_due(
+            enabled=False,
+            interval_seconds=300,
+            last_fired_at=None,
+            now=datetime(2026, 8, 1, 9, 0, 0),
+        )
+        is False
+    )
+
+
+def test_interval_is_due_false_when_interval_not_configured() -> None:
+    # interval<=0 视为未配置 → 永不触发（防误配 0 秒风暴）。
+    assert (
+        report_scheduler.interval_is_due(
+            enabled=True,
+            interval_seconds=0,
+            last_fired_at=None,
+            now=datetime(2026, 8, 1, 9, 0, 0),
+        )
+        is False
+    )
+
+
 # ── scan_once（发起 / 标记 / 跳过）──────────────────────────
 async def test_scan_once_fires_and_marks(monkeypatch: pytest.MonkeyPatch) -> None:
     view = _view()

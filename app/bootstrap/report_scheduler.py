@@ -78,6 +78,26 @@ def is_due(
     return (now.day, now.hour) >= (target_day, hour)
 
 
+def interval_is_due(
+    *,
+    enabled: bool,
+    interval_seconds: int,
+    last_fired_at: datetime | None,
+    now: datetime,
+) -> bool:
+    """分钟/秒级轮询到点判定（对称补全月度 is_due，供 P2 舆情扫描按 interval 触发）。
+
+    启用 +（从未触发 或 距上次触发已满 interval）即到点。interval<=0 视为未配置→不触发。
+    纯函数、可单测；幂等游标用「上次触发时刻」而非期键（秒级无自然期键）。now/last_fired_at 同源
+    （均服务器本地 naive datetime），只做差值比较不涉时区。
+    """
+    if not enabled or interval_seconds <= 0:
+        return False
+    if last_fired_at is None:
+        return True
+    return (now - last_fired_at).total_seconds() >= interval_seconds
+
+
 async def _start_workflow(
     session: AsyncSession,
     request: str,

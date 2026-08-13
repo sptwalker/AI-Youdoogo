@@ -60,3 +60,22 @@ class ConnectorProbeResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {"status": self.status, "message": self.message, "row_count": self.row_count}
+
+
+@dataclass(frozen=True, slots=True)
+class HttpFetchResult:
+    """http_api 只读取数结果（对称补全 ConnectorProbeResult，探针只连通、本结果带 body）。
+
+    status: ok / fail / not_configured。records 为归一后的结构化记录（JSON 列表/对象→dict 列表），
+    text 为原始文本预览（非 JSON 或作为兜底，已截断上限），供下游按需取用。外部正文进 agent
+    _interpret 前须由调用方防注入 fence 包裹（本层只取数、不喂 LLM）。
+    """
+
+    status: str
+    message: str
+    records: tuple[dict[str, Any], ...] = ()
+    text: str = ""
+
+    @property
+    def row_count(self) -> int:
+        return len(self.records)

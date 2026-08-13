@@ -14,6 +14,9 @@ from app.contexts.foundations.integration.connector_management.contracts import 
     ConnectorSnapshot,
 )
 from app.contexts.foundations.integration.connector_management.entrypoints import probe
+from app.contexts.foundations.integration.connector_management.infrastructure.http_fetch import (
+    fetch_http_api,
+)
 from app.contexts.foundations.integration.connector_management.infrastructure.http_probe import (
     probe_http_api,
 )
@@ -106,3 +109,100 @@ async def test_dispatch_selects_injected_probe() -> None:
 async def test_dispatch_unknown_type_unsupported() -> None:
     result = await probe.probe_connector(None, _snap("mystery"))  # type: ignore[arg-type]
     assert result.status == "unsupported" and "mystery" in result.message
+
+
+# ── http_api 取数执行器（对称补全探针：探针只连通，取数带 body）───
+async def test_fetch_normalises_nested_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": 1, "t": "差评爆发"}, {"id": 2}]})
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://api.example.com/sentiment"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "ok" and result.row_count == 2
+    assert result.records[0]["t"] == "差评爆发"
+
+
+async def test_fetch_skips_empty_first_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """{"errors":[], "data":[...]} 不因 errors 空列表排在前面而丢真数据。"""
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"errors": [], "data": [{"id": 1, "t": "舆情"}]})
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://api.example.com/sentiment"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "ok" and result.row_count == 1
+    assert result.records[0]["t"] == "舆情"  # 命中已知 data 键而非空 errors
+
+
+async def test_fetch_wraps_bare_list_and_scalars(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["纯文本项", {"k": "v"}])
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://api.example.com/x"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.row_count == 2
+    assert result.records[0] == {"value": "纯文本项"}  # 标量项归一为 {value:...}
+
+
+async def test_fetch_non_json_returns_text_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content="<html>竞品官网更新</html>".encode())
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://competitor.example.com"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "ok" and result.records == ()
+    assert "竞品官网更新" in result.text
+
+
+async def test_fetch_rejects_private_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["127.0.0.1"])
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "http://localhost/metrics"}),
+    )
+    assert result.status == "fail" and "SSRF" in result.message
+
+
+async def test_fetch_not_configured_without_url() -> None:
+    result = await fetch_http_api(None, _snap("http_api", config={}))  # type: ignore[arg-type]
+    assert result.status == "not_configured"
+
+
+async def test_fetch_http_error_is_structured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(net, "resolve_ips", lambda _host: ["93.184.216.34"])
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    result = await fetch_http_api(
+        None,  # type: ignore[arg-type]
+        _snap("http_api", config={"url": "https://api.example.com/x"}),
+        transport=httpx.MockTransport(_handler),
+    )
+    assert result.status == "fail"  # 5xx → 结构化 fail，不抛穿
+
+
+async def test_fetch_from_connector_rejects_non_http_api() -> None:
+    from app.contexts.foundations.integration.connector_management import public
+
+    result = await public.fetch_from_connector(None, _snap("thinkingdata"))  # type: ignore[arg-type]
+    assert result.status == "fail" and "仅 http_api" in result.message
