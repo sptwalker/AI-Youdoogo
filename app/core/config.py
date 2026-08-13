@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     report_scheduler_enabled: bool = False
     report_schedule_scan_seconds: float = 300.0
 
+    # 营销舆情事件驱动响应（docs/26 P2）：注册 sentiment.anomaly.detected 的 outbox handler，
+    # 命中即经 report_scheduler._start_workflow 系统发起应急响应 workflow（同一 is_red_line，
+    # feishu_notify_person 等对外步骤前必停 waiting_human）。默认关——注册与否自门控，红线不旁路。
+    sentiment_response_enabled: bool = False
+
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
     embedding_model: str = "text-embedding-v3"  # 换 bge-m3 等在此改（需 1024 维）

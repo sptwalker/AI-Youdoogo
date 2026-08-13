@@ -49,6 +49,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     if register_relay():
         logger.info("event relay 已启用（事件传输门禁 / docs/23）")
+
+    from app.bootstrap.sentiment_scanner import register_sentiment_response
+
+    if register_sentiment_response():
+        logger.info("营销舆情事件驱动响应已启用（docs/26 P2，红线不旁路）")
     try:
         yield
     finally:
