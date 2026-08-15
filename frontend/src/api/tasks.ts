@@ -13,6 +13,12 @@ export interface TaskCard {
   sla_hours: number | null
   result_content: string | null
   create_time: string
+  project_id: string | null
+  archived_at: string | null
+  /** 只读派生：看板泳道（待启动/进行中/待审核/已完成/驳回/已终止/已归档）。 */
+  lane: string
+  /** 只读派生：进行中且陈旧/等待 → 需关注。 */
+  blocked: boolean
 }
 
 export type TaskStatus =

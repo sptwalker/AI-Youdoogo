@@ -20,6 +20,11 @@ export interface PendingItem {
   meta: string | null
   priority: string
   create_time: string
+  /** 4 因子加权优先级分（0~1，可人工调权重，后端派生不落库）。 */
+  score: number
+  is_read: boolean
+  is_processed: boolean
+  ai_summary: string | null
 }
 
 export interface MyTask {
@@ -42,6 +47,23 @@ export interface Desktop {
 /** 我的桌面；传 userId 则由 admin 查看他人（监督）。 */
 export function getDesktop(userId?: string): Promise<Desktop> {
   return request({ method: 'GET', url: userId ? `/desktop/${userId}` : '/desktop' })
+}
+
+export interface InboxItemRef {
+  kind: string
+  id: string
+}
+
+/** 批量置收件箱读/处理态（真人确认触发）。至少给一个动作；仅改本人读态，不外发（红线）。 */
+export function markInbox(
+  items: InboxItemRef[],
+  action: { is_read?: boolean; is_processed?: boolean },
+): Promise<{ marked: number }> {
+  return request({
+    method: 'POST',
+    url: '/desktop/inbox/mark',
+    data: { items, ...action },
+  })
 }
 
 // ── 工作桌面对话（专属助理 + 圆桌多AI）──────────────────────────

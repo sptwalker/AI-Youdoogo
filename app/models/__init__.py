@@ -9,6 +9,7 @@ from app.models.desktop import DesktopMessage
 from app.models.discussion import ChannelMember, DiscussionChannel, DiscussionMessage
 from app.models.eval_case import EvalCase
 from app.models.feedback import AgentFeedback
+from app.models.inbox_state import InboxItemState
 from app.models.knowledge import DataSource, KnowledgeBase, KnowledgeFile, KnowledgeVector
 from app.models.llm_log import LlmCallLog
 from app.models.meeting import (
@@ -18,6 +19,7 @@ from app.models.meeting import (
     MeetingVote,
 )
 from app.models.ops_data import OpsDailyMetric
+from app.models.project import Project
 from app.models.proposal import ProposalCard, ProposalReview
 from app.models.report_schedule import ReportSchedule
 from app.models.resource_grant import ResourceGrant
@@ -26,6 +28,7 @@ from app.models.sys_config import SysConfig
 from app.models.system import SysDepartment, SysRole, SysUser
 from app.models.task import TaskCard, TaskCardLog
 from app.models.td_event_alias import TdEventAlias
+from app.models.time_management import FocusSession, Schedule, TimeLog
 from app.models.workflow import OutboxEvent, ToolExecution, WorkflowEvent, WorkflowRun, WorkflowStep
 from app.models.workflow_template import WorkflowTemplate
 from app.platform.database.model import Base
@@ -48,7 +51,9 @@ __all__ = [
     "DiscussionMessage",
     "EvalCase",
     "ExpertRelease",
+    "FocusSession",
     "InboxEvent",
+    "InboxItemState",
     "KnowledgeBase",
     "KnowledgeFile",
     "KnowledgeVector",
@@ -58,10 +63,12 @@ __all__ = [
     "MeetingResolution",
     "MeetingVote",
     "OpsDailyMetric",
+    "Project",
     "ProposalCard",
     "ProposalReview",
     "ReportSchedule",
     "ResourceGrant",
+    "Schedule",
     "SemanticTerm",
     "SysConfig",
     "SysDepartment",
@@ -70,6 +77,7 @@ __all__ = [
     "TaskCard",
     "TaskCardLog",
     "TdEventAlias",
+    "TimeLog",
     "ToolExecution",
     "OutboxEvent",
     "WorkflowEvent",

@@ -18,6 +18,9 @@ from app.contexts.foundations.knowledge.wiki_management.entrypoints.operations i
 from app.contexts.foundations.knowledge.wiki_management.entrypoints.operations import (
     update_knowledge_base as update_knowledge_base,
 )
+from app.contexts.foundations.knowledge.wiki_management.infrastructure.sqlalchemy import (
+    ensure_personal_kb as ensure_personal_kb,
+)
 from app.contexts.foundations.knowledge.wiki_management.infrastructure.visibility import (
     agent_visible_knowledge_base_ids as agent_visible_knowledge_base_ids,
 )

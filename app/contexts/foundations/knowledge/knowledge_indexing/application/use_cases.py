@@ -19,8 +19,12 @@ class KnowledgeIndexing:
     def __init__(self, gateway: DocumentIndexGateway) -> None:
         self._gateway = gateway
 
-    async def list_documents(self, *, limit: int) -> tuple[IndexedDocument, ...]:
-        return await self._gateway.list_documents(limit=limit)
+    async def list_documents(
+        self, *, limit: int, knowledge_base_id: uuid.UUID | None = None
+    ) -> tuple[IndexedDocument, ...]:
+        return await self._gateway.list_documents(
+            limit=limit, knowledge_base_id=knowledge_base_id
+        )
 
     async def index_text(self, command: IndexTextCommand) -> IndexedDocument:
         return await self._gateway.index_text(command)

@@ -63,6 +63,19 @@ class _MessagePin(BaseModel):
     message_id: uuid.UUID
 
 
+class _InboxItemRef(BaseModel):
+    kind: str = Field(max_length=16)
+    id: uuid.UUID
+
+
+class _InboxMark(BaseModel):
+    """批量置收件箱读态（真人逐条/一次确认）。至少给一个动作。"""
+
+    items: list[_InboxItemRef] = Field(min_length=1, max_length=200)
+    is_read: bool | None = None
+    is_processed: bool | None = None
+
+
 def _conversation_principal(user: _UserLike) -> Principal:
     return Principal(
         id=user.id,
@@ -84,6 +97,20 @@ def _desktop_principal(user: _UserLike) -> work_desktop.DesktopPrincipal:
 async def get_my_desktop(db: DB, user: CurrentUser) -> dict:
     """我的工作桌面（待我处理统一队列 + 我的任务 + 对话/资料入口）。"""
     return ok(await work_desktop.get_desktop(db, _desktop_principal(user)))
+
+
+@router.post("/inbox/mark")
+async def mark_inbox(body: _InboxMark, db: DB, user: CurrentUser) -> dict:
+    """批量置收件箱读/处理态（真人确认触发）。仅改本人读态，不触碰来源、不外发（红线）。"""
+    return ok(
+        await work_desktop.mark_inbox(
+            db,
+            _desktop_principal(user),
+            tuple(work_desktop.InboxItemRef(kind=item.kind, id=item.id) for item in body.items),
+            is_read=body.is_read,
+            is_processed=body.is_processed,
+        )
+    )
 
 
 @router.get("/chat")

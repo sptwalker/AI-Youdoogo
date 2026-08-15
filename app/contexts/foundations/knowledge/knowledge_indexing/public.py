@@ -1,5 +1,7 @@
 """Stable Knowledge Indexing application facade for outer adapters."""
 
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
@@ -30,6 +32,36 @@ from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure.remote
     RemoteKnowledgeIndexAdapter,
 )
 from app.core.config import get_settings
+from app.platform.outbox.repository import enqueue
+
+# 个人经验自动沉淀事件契约（docs/27 B1.3）；生产者放本 facade → 跨 Context 产出点经此登记，
+# 消费者 handler 在 infrastructure/personal_sink 单向依赖本模块，避免 public↔infra 环。
+PERSONAL_KNOWLEDGE_SINK_V1 = "personal.knowledge.sink.v1"
+_SINK_TITLE_MAX = 255
+
+
+async def enqueue_personal_knowledge_sink(
+    session: AsyncSession,
+    *,
+    owner_user_id: uuid.UUID,
+    title: str,
+    content: str,
+    source_record_id: uuid.UUID,
+) -> None:
+    """把一条 AI 产出登记为「待沉淀」outbox 事件（同一产出记录只登记一次）。"""
+    await enqueue(
+        session,
+        aggregate_type="agent_task_record",
+        aggregate_id=source_record_id,
+        event_type=PERSONAL_KNOWLEDGE_SINK_V1,
+        dedupe_key=f"pks:{source_record_id}",  # 每条产出记录幂等，不重复沉淀
+        payload={
+            "owner_user_id": str(owner_user_id),
+            "title": title[:_SINK_TITLE_MAX],
+            "content": content,
+            "source_record_id": str(source_record_id),
+        },
+    )
 
 
 def build_local_knowledge_index_port(session: AsyncSession) -> KnowledgeIndexPort:

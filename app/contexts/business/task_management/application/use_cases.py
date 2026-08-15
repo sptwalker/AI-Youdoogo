@@ -65,13 +65,27 @@ class TaskManagementApplication:
         *,
         status: str | None,
         limit: int,
+        project_id: uuid.UUID | None = None,
+        include_archived: bool = False,
     ) -> tuple[TaskView, ...]:
         return await self._tasks.list_views(
             status=status,
             parent_id=None,
             limit=limit,
             visibility=self._visibility(principal),
+            project_id=project_id,
+            include_archived=include_archived,
         )
+
+    async def archive(self, principal: TaskPrincipal, task_id: uuid.UUID) -> TaskView:
+        # 归档=个人工作台软标记（与状态机正交，裁决 #2）；行级可见守卫 + 幂等（二次归档拒绝）。
+        task = await self._tasks.get_view(task_id)
+        self._ensure_visible(principal, task)
+        if task.archived_at is not None:
+            raise RuleViolation("任务已归档")
+        archived = await self._tasks.archive_view(task_id)
+        await self._transaction.commit()
+        return archived
 
     async def detail(self, principal: TaskPrincipal, task_id: uuid.UUID) -> TaskDetailView:
         task = await self._tasks.get_view(task_id)

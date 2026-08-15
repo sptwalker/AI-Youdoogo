@@ -153,11 +153,16 @@ async def test_create_list_and_detail_preserve_visibility_and_envelope(
     titles = {item["title"] for item in listed.json()["data"]}
     assert {"我的任务", "部门任务", "新任务"} <= titles
     assert "不可见任务" not in titles
+    # A3：列表投影携带派生泳道 + blocked 预警（新建卡 → 待启动、未阻塞）
+    fresh = next(item for item in listed.json()["data"] if item["title"] == "新任务")
+    assert fresh["lane"] == "待启动"
+    assert fresh["blocked"] is False
 
     detail = await client.get(f"/api/v1/tasks/{state['ids']['mine']}")
     hidden = await client.get(f"/api/v1/tasks/{state['ids']['hidden']}")
     assert detail.status_code == 200
     assert detail.json()["data"]["task"]["title"] == "我的任务"
+    assert detail.json()["data"]["task"]["lane"] == "待启动"
     assert hidden.status_code == 404
 
 
@@ -214,6 +219,51 @@ async def test_run_endpoint_drives_assigned_task_to_reported(
             ).scalars()
         )
     assert [log.to_status for log in logs] == ["dispatched", "executing", "reported"]
+
+
+async def test_project_scoping_and_archive_flow(
+    task_client: tuple[AsyncClient, dict[str, Any]],
+) -> None:
+    """A2：任务挂 project_id + 按项目筛选 + 归档软标记（默认列表排除）+ 跨 owner 隔离。"""
+    client, _ = task_client
+
+    project = await client.post("/api/v1/projects", json={"name": "冬季营销"})
+    assert project.status_code == 200
+    pid = project.json()["data"]["id"]
+
+    created = await client.post(
+        "/api/v1/tasks",
+        json={"title": "项目任务", "task_type": "manual", "project_id": pid},
+    )
+    assert created.status_code == 200
+    tid = created.json()["data"]["id"]
+    assert created.json()["data"]["project_id"] == pid
+    assert created.json()["data"]["archived_at"] is None
+
+    scoped = await client.get("/api/v1/tasks", params={"project_id": pid})
+    assert [item["id"] for item in scoped.json()["data"]] == [tid]
+
+    archived = await client.post(f"/api/v1/tasks/{tid}/archive")
+    assert archived.status_code == 200
+    assert archived.json()["data"]["archived_at"] is not None
+
+    active = await client.get("/api/v1/tasks", params={"project_id": pid})
+    assert active.json()["data"] == []
+    with_archived = await client.get(
+        "/api/v1/tasks", params={"project_id": pid, "include_archived": "true"}
+    )
+    assert [item["id"] for item in with_archived.json()["data"]] == [tid]
+
+    # 二次归档 → RuleViolation → 400
+    again = await client.post(f"/api/v1/tasks/{tid}/archive")
+    assert again.status_code == 400
+
+    # 引用不存在/他人项目建任务 → 校验前置堵住 → 404（信任边界 + 行级隔离）
+    ghost = await client.post(
+        "/api/v1/tasks",
+        json={"title": "越权", "task_type": "manual", "project_id": str(uuid.uuid4())},
+    )
+    assert ghost.status_code == 404
 
 
 async def test_accepting_durable_step_records_decision_and_resume_outbox(

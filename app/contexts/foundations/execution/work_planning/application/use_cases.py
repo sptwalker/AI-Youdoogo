@@ -17,14 +17,8 @@ from app.contexts.foundations.execution.work_planning.contracts.planning import 
 )
 
 MAX_PLAN_STEPS = 16
-# knowledge_index：内部知识沉淀属「辅助执行」（可检索复用·可软删·非对外发布）→ 免真人停点。
-AUTOMATIC_CAPABILITIES: frozenset[str] = frozenset(
-    {"data_query", "deliver", "knowledge_index"}
-)
-
-
-def requires_human_review(capability_key: str) -> bool:
-    return capability_key not in AUTOMATIC_CAPABILITIES
+# 红线判定唯一事实源在 workflow_runtime/domain/policies.py（建步时盖 red_line 戳、运行时强制停点）；
+# 规划器不再自留一份 AUTOMATIC 清单，避免两份分叉——前端预览高亮亦对齐 policies 的自动能力集。
 
 
 def _parse_expert(value: object) -> uuid.UUID | None:

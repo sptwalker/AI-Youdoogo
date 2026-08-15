@@ -60,6 +60,7 @@ async def create_task(body: TaskCreate, db: DB, user: CurrentUser) -> dict:
                 parent_id=body.parent_id,
                 sla_hours=body.sla_hours,
                 payload=tuple(body.payload.items()),
+                project_id=body.project_id,
             ),
         )
     )
@@ -89,14 +90,21 @@ async def list_tasks(
     user: CurrentUser,
     status: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    project_id: Annotated[uuid.UUID | None, Query()] = None,
+    include_archived: Annotated[bool, Query()] = False,
 ) -> dict:
-    """任务列表（行级可见性：普通员工只见本人/本部门/派给己，管理层全见）。"""
+    """任务列表（行级可见性：普通员工只见本人/本部门/派给己，管理层全见）。
+
+    可按 project_id 归属项目筛选；默认排除已归档卡（include_archived=true 显示）。
+    """
     return ok(
         await task_management.list_tasks(
             db,
             _principal(user),
             status=status,
             limit=limit,
+            project_id=project_id,
+            include_archived=include_archived,
         )
     )
 
@@ -173,3 +181,9 @@ async def run_task(task_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
             task_management.RunTaskRequest(task_id=task_id, operator_id=user.id),
         )
     )
+
+
+@router.post("/{task_id}/archive")
+async def archive_task(task_id: uuid.UUID, db: DB, user: CurrentUser) -> dict:
+    """归档任务卡（软标记，移出活动看板；不入状态机，二次归档 → 400）。"""
+    return ok(await task_management.archive_task(db, _principal(user), task_id))

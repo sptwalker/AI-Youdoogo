@@ -1,0 +1,73 @@
+【开发任务：协同与沟通中枢】
+
+步骤1：上下文关联的对话系统
+- 数据模型（补充到 app/workspace/models/）：
+  - WorkspaceConversation（对话空间表）
+    - ref_type: enum, 关联类型（task/project/topic）
+    - ref_id: int, 关联ID
+    - title: str
+    - created_by: int
+    - is_async: bool, 是否异步会商
+    - async_deadline: datetime, 异步讨论截止时间
+  - WorkspaceMessage（消息表）
+    - conversation_id: int
+    - sender_id: int
+    - sender_type: enum, 发送者类型（human/ai）
+    - content: text
+    - message_type: enum, 类型（text/file/action_item/vote/decision）
+    - metadata: json, 扩展字段（引用的消息ID、关联的任务ID等）
+    - ai_summary: str, AI生成的摘要
+
+- 实现对话空间创建：创建任务/项目时自动创建关联对话空间
+- 实现消息收发：基于已有 WebSocket，支持文本、文件、@提及、引用回复
+- 实现上下文自动携带：进入对话空间时自动加载关联任务的背景、文档、历史讨论
+- 实现全局对话搜索：跨所有对话空间的全文检索
+
+步骤2：讨论一键转行动
+- 实现消息操作接口：
+  a) 转待办：将消息内容转为 WorkspaceTask，自动关联当前对话空间
+  b) 转AI任务：将消息内容转为 AI 任务，自动携带上下文
+  c) 转提案：将消息转为正式提案卡（调用已有提案系统）
+  d) @负责人跟进：创建任务并指派给指定人
+- 所有从讨论产生的行动项自动关联到对话空间，可追踪进度
+
+步骤3：异步会商模式
+- 实现异步会商创建：设置议题、参与人、截止时间
+- 实现观点收集：参与人陆续发表意见，系统自动记录
+- 实现AI观点汇总：
+  a) 讨论结束或截止时间到达时，AI自动汇总各方观点
+  b) 提炼共识点与分歧点
+  c) 生成结论建议，发起人确认后正式生效
+  d) 结论自动转为决议，关联到项目知识库
+- 实现进度提醒：截止前24小时提醒未发言的参与人
+
+步骤4：跨部门协作面板
+- 实现协作空间：专门用于跨部门项目的协同空间，双方成员均可查看
+- 实现交付物管理：明确交付标准、截止时间、验收状态
+- 实现协作评分：协作结束后双方互相评分，数据存入部门协作效率分析
+
+步骤5：协同沟通 API（app/workspace/api/collaboration.py）
+- GET /conversations — 获取对话空间列表
+- GET /conversations/{id}/messages — 获取消息列表（分页）
+- POST /conversations/{id}/messages — 发送消息
+- POST /messages/{id}/convert — 消息转行动（指定类型）
+- POST /async-discussions — 创建异步会商
+- GET /async-discussions/{id} — 获取会商详情
+- POST /async-discussions/{id}/conclude — AI汇总并生成结论
+- GET /collaboration/spaces — 获取协作空间列表
+- POST /collaboration/spaces/{id}/deliverables — 添加交付物
+- POST /collaboration/spaces/{id}/rate — 提交协作评分
+
+步骤6：协同沟通前端组件
+- frontend/src/pages/workspace/collaboration/
+  - 对话面板：嵌入任务详情页右侧，展示关联对话
+  - 消息操作菜单：右键消息可转待办/转AI任务/转提案
+  - 异步会商页面：议题展示、观点列表、AI汇总结果、结论确认
+  - 跨部门协作空间：双方进度看板、交付物管理、评分
+
+【验收要求】
+- 消息转行动操作≤2步完成
+- 异步会商观点汇总准确率≥80%
+- 对话上下文自动加载完整，包含关联文档与历史决议
+- 实时消息推送延迟≤1秒
+- 跨部门协作空间数据双方实时同步

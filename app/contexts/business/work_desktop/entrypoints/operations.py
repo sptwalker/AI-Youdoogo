@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.contexts.business.work_desktop.application.contracts import (
     DeliverableDownloadResult,
     DesktopPrincipal,
+    InboxItemRef,
 )
 from app.contexts.business.work_desktop.infrastructure.composition import (
     build_work_desktop_application,
@@ -30,6 +31,22 @@ async def get_supervised_desktop(
         target_user_id,
     )
     return result.as_dict()
+
+
+async def mark_inbox(
+    session: AsyncSession,
+    principal: DesktopPrincipal,
+    items: tuple[InboxItemRef, ...],
+    *,
+    is_read: bool | None = None,
+    is_processed: bool | None = None,
+) -> dict[str, int]:
+    """批量置读/处理态（真人确认触发）。仅写本人读态，改后提交。"""
+    count = await build_work_desktop_application(session).mark_inbox(
+        principal, items, is_read=is_read, is_processed=is_processed
+    )
+    await session.commit()
+    return {"marked": count}
 
 
 async def list_deliverables(

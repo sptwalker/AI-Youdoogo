@@ -13,6 +13,7 @@ import {
 import { Button, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import Markdown from '../components/Markdown'
+import MyKnowledgeSuggest from '../components/MyKnowledgeSuggest'
 import { listRoles } from '../api/agents'
 import {
   createTask,
@@ -46,6 +47,7 @@ export default function Tasks() {
   const pending = usePendingActions()
   const reload = () => actionRef.current?.reload()
   const [roleNames, setRoleNames] = useState<Record<string, string>>({})
+  const [createTitle, setCreateTitle] = useState('')
 
   useEffect(() => {
     void listRoles()
@@ -216,7 +218,8 @@ export default function Tasks() {
             key="create"
             title="创建任务卡"
             trigger={<Button type="primary">新建任务</Button>}
-            modalProps={{ destroyOnHidden: true }}
+            modalProps={{ destroyOnHidden: true, afterClose: () => setCreateTitle('') }}
+            onValuesChange={(_, all) => setCreateTitle((all.title as string) ?? '')}
             onFinish={async (v) => {
               await createTask(v)
               message.success('已创建')
@@ -248,6 +251,8 @@ export default function Tasks() {
               request={agentRoleOptions}
             />
             <ProFormDigit name="sla_hours" label="SLA(小时，可选)" min={1} />
+            {/* B1.5：按标题推荐本人相关知识（只读参考，不改任务） */}
+            <MyKnowledgeSuggest title={createTitle} />
           </ModalForm>,
         ]}
       />

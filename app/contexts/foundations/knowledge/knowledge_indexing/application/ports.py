@@ -14,7 +14,9 @@ from app.contexts.foundations.knowledge.knowledge_indexing.contracts import (
 
 
 class DocumentIndexGateway(Protocol):
-    async def list_documents(self, *, limit: int) -> tuple[IndexedDocument, ...]: ...
+    async def list_documents(
+        self, *, limit: int, knowledge_base_id: uuid.UUID | None = None
+    ) -> tuple[IndexedDocument, ...]: ...
 
     async def index_text(self, command: IndexTextCommand) -> IndexedDocument: ...
 

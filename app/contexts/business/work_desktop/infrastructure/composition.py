@@ -13,6 +13,7 @@ from app.contexts.business.work_desktop.infrastructure.adapters import (
     PublishedKnowledgeCounterAdapter,
     PublishedProposalQueueAdapter,
     SQLAlchemyDeliverableInboxAdapter,
+    SQLAlchemyInboxStateAdapter,
     SQLAlchemyResolutionQueueAdapter,
     SQLAlchemyTaskDashboardAdapter,
 )
@@ -29,4 +30,5 @@ def build_work_desktop_application(session: AsyncSession) -> WorkDesktopApplicat
         identities=PublishedIdentityDirectoryAdapter(session),
         deliverables=SQLAlchemyDeliverableInboxAdapter(session),
         storage=KnowledgeObjectStorageAdapter(),
+        inbox_state=SQLAlchemyInboxStateAdapter(session),
     )

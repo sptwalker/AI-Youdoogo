@@ -15,7 +15,7 @@ from app.contexts.foundations.execution.capability_catalog.contracts.definition 
 from app.contexts.foundations.execution.capability_catalog.infrastructure.registry import (
     CAPABILITY_DEFINITIONS,
 )
-from app.contexts.foundations.execution.work_planning.application.use_cases import (
+from app.contexts.foundations.execution.workflow_runtime.domain.policies import (
     requires_human_review,
 )
 from app.contexts.foundations.knowledge.knowledge_indexing import public as index_public

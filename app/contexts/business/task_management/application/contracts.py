@@ -29,6 +29,7 @@ class CreateTaskRequest:
     parent_id: uuid.UUID | None = None
     sla_hours: int | None = None
     payload: tuple[tuple[str, object], ...] = ()
+    project_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +99,9 @@ class TaskView:
     assignee_type: str = "agent"
     payload: tuple[tuple[str, object], ...] = ()
     step_no: int | None = None
+    project_id: uuid.UUID | None = None
+    archived_at: datetime | None = None
+    update_time: datetime | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +116,8 @@ class TaskView:
             "sla_hours": self.sla_hours,
             "result_content": self.result_content,
             "create_time": self.create_time.isoformat(),
+            "project_id": str(self.project_id) if self.project_id else None,
+            "archived_at": self.archived_at.isoformat() if self.archived_at else None,
         }
 
 

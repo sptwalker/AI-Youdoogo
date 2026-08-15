@@ -1,0 +1,76 @@
+【开发任务：个人知识中枢】
+
+步骤1：知识自动沉淀服务（app/workspace/services/knowledge_service.py）
+- 实现工作产出自动监听与归档：
+  a) 监听 AI 任务完成事件，产出物自动归档
+  b) 监听用户创建/更新的文档，自动归档
+  c) 监听会议纪要生成事件，自动提取要点归档
+  d) 监听任务完成事件，自动生成任务复盘摘要归档
+- 实现智能分类与打标签：调用大模型为每条知识生成标签（项目、主题、类型、参与人）
+- 实现内容提取：对长文档/会议记录/聊天记录自动生成结构化摘要
+- 实现手动收藏接口：用户可收藏任意内容并添加个人备注
+- 所有知识条目关联 user_id，严格个人隔离
+
+步骤2：个人知识数据模型（补充到 app/workspace/models/）
+- WorkspaceKnowledge（个人知识条目表）
+  - user_id: int, 所属用户
+  - title: str, 标题
+  - content_type: enum, 类型（document/meeting_note/task_summary/ai_output/manual_note/external）
+  - content: text, 正文或摘要
+  - original_ref: str, 原始内容引用（文档ID/消息ID/任务ID）
+  - project_id: int, 关联项目
+  - tags: json, 标签列表
+  - vector_id: str, 向量索引ID
+  - is_private: bool, 是否私有（默认true）
+  - shared_with: json, 共享给哪些用户
+  - quality_score: float, AI评估的知识质量分
+
+- WorkspaceKnowledgeLink（知识关联表）
+  - knowledge_id: int
+  - task_id: int, 关联任务
+  - project_id: int, 关联项目
+  - relation_type: enum, 关联类型（output/reference/context）
+
+步骤3：语义检索与问答（复用已有 RAG）
+- 在已有知识库中创建个人知识专属集合（namespace: personal_{user_id}）
+- 实现个人知识检索接口：
+  a) 混合检索（关键词+向量）
+  b) 结果按相关度+时间+质量分综合排序
+  c) 所有结果附带来源引用与跳转链接
+- 实现知识问答：基于个人知识库的 RAG 问答，答案必须附带来源
+- 实现知识关联推荐算法：
+  a) 新建任务时，基于任务标题+描述检索 Top5 相关知识
+  b) 查看任意知识时，推荐相似知识
+  c) 任务进行中，主动推送可能有用的历史知识
+
+步骤4：个人方法论与能力画像
+- 实现方法论自动总结：每月定时任务，基于用户历史工作数据，按任务类型总结常用框架、决策偏好、效率特征
+- 实现能力画像生成：基于知识标签、项目类型、任务完成情况，生成能力标签与擅长领域
+- 实现成长建议：基于能力画像与岗位要求（可配置），给出学习建议
+
+步骤5：知识中枢 API（app/workspace/api/knowledge.py）
+- GET /knowledge — 分页查询个人知识，支持按标签/类型/项目/时间筛选
+- GET /knowledge/{id} — 获取知识详情
+- POST /knowledge — 手动创建/收藏知识
+- PUT /knowledge/{id} — 更新知识（标签、备注、共享设置）
+- DELETE /knowledge/{id} — 删除知识
+- POST /knowledge/search — 语义检索
+- POST /knowledge/qa — 知识问答
+- GET /knowledge/recommend — 获取推荐知识（基于当前任务或上下文）
+- GET /knowledge/methodology — 获取个人方法论总结
+- GET /knowledge/capability — 获取能力画像
+- POST /knowledge/{id}/share — 分享知识给他人
+
+步骤6：知识中枢前端页面
+- frontend/src/pages/workspace/knowledge/
+  - 知识列表：卡片式展示，支持标签筛选与搜索
+  - 知识详情：正文展示、来源跳转、相关知识推荐、分享操作
+  - 搜索与问答：自然语言搜索框 + 问答界面，答案附带来源引用
+  - 能力画像：可视化展示能力标签、方法论总结、成长建议
+
+【验收要求】
+- AI任务产出、文档更新、会议纪要的自动归档覆盖率≥90%
+- 语义检索 Top5 准确率≥80%，响应时间≤3秒
+- 新建任务时知识推荐在1秒内返回
+- 个人知识严格隔离，无越权访问
+- 知识问答答案必须附带来源，无来源时明确告知

@@ -180,6 +180,11 @@ class Settings(BaseSettings):
     # feishu_notify_person 等对外步骤前必停 waiting_human）。默认关——注册与否自门控，红线不旁路。
     sentiment_response_enabled: bool = False
 
+    # 个人经验自动沉淀（docs/27 B1.3）：直连 AI 产出（非工作流子步）成功后自动写产出人个人知识库。
+    # 内部辅助执行（knowledge_index AUTOMATIC，不外发），内容可编辑/删除；默认关——生产者与
+    # handler 同门控，off 则零行为变化、既有执行链路逐字不变。
+    personal_knowledge_autosink_enabled: bool = False
+
     # Embedding（知识库向量化，A/B 可配置：留空则用通义 text-embedding-v3）
     embedding_base_url: str = ""  # OpenAI 兼容 /embeddings 端点根地址；留空→通义
     embedding_model: str = "text-embedding-v3"  # 换 bge-m3 等在此改（需 1024 维）

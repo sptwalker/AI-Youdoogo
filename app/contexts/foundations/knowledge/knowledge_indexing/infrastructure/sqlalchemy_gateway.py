@@ -38,13 +38,19 @@ class SqlAlchemyDocumentIndexGateway:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_documents(self, *, limit: int) -> tuple[IndexedDocument, ...]:
+    async def list_documents(
+        self, *, limit: int, knowledge_base_id: uuid.UUID | None = None
+    ) -> tuple[IndexedDocument, ...]:
         statement = (
             select(KnowledgeFile)
             .where(KnowledgeFile.is_delete.is_(False))
             .order_by(KnowledgeFile.create_time.desc())
             .limit(limit)
         )
+        if knowledge_base_id is not None:
+            statement = statement.where(
+                KnowledgeFile.knowledge_base_id == knowledge_base_id
+            )
         return tuple(
             _snapshot(record)
             for record in (await self._session.execute(statement)).scalars()

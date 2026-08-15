@@ -9,6 +9,7 @@ import { clearToken } from '../api/http'
 import { routeAllowsRole } from '../auth/authorization'
 
 const BIZ_ROUTES = [
+  { path: '/workspace', name: '工作台' },
   { path: '/knowledge', name: '知识库' },
   { path: '/discussion', name: '协作空间' },
   { path: '/agents', name: '智能体' },

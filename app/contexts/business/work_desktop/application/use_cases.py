@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from app.contexts.business.work_desktop.application.contracts import (
     DeliverableDownloadResult,
     DeliverableProjection,
     DesktopPrincipal,
     DesktopResult,
+    InboxItemRef,
     MyTaskResult,
     PendingItemResult,
 )
@@ -17,15 +19,22 @@ from app.contexts.business.work_desktop.application.ports import (
     CollaborationQueuePort,
     DeliverableInboxPort,
     IdentityDirectoryPort,
+    InboxStatePort,
     KnowledgeCounterPort,
     ObjectStoragePort,
     ProposalQueuePort,
     ResolutionQueuePort,
     TaskDashboardPort,
 )
-from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound
+from app.contexts.business.work_desktop.domain import inbox
+from app.contexts.shared_kernel import PermissionDenied, ResourceNotFound, RuleViolation
 
 _LIMIT = 50
+
+
+def _aware(moment: datetime) -> datetime:
+    """DB 侧 SQLite 落 naive 时间，PG 落 aware；统一按 UTC 归一以便做时效差值。"""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 class WorkDesktopApplication:
@@ -43,6 +52,7 @@ class WorkDesktopApplication:
         identities: IdentityDirectoryPort,
         deliverables: DeliverableInboxPort,
         storage: ObjectStoragePort,
+        inbox_state: InboxStatePort,
     ) -> None:
         self._tasks = tasks
         self._proposals = proposals
@@ -53,8 +63,14 @@ class WorkDesktopApplication:
         self._identities = identities
         self._deliverables = deliverables
         self._storage = storage
+        self._inbox_state = inbox_state
 
-    async def desktop(self, principal: DesktopPrincipal) -> DesktopResult:
+    async def desktop(
+        self,
+        principal: DesktopPrincipal,
+        *,
+        weights: inbox.InboxWeights = inbox.DEFAULT_WEIGHTS,
+    ) -> DesktopResult:
         pending = [
             PendingItemResult(
                 kind="task",
@@ -102,7 +118,7 @@ class WorkDesktopApplication:
             )
             for collaboration in await self._collaborations.review_queue(principal)
         )
-        pending.sort(key=lambda item: item.create_time, reverse=True)
+        pending = await self._rank_inbox(principal, pending, weights)
 
         my_tasks = tuple(
             MyTaskResult(
@@ -132,6 +148,59 @@ class WorkDesktopApplication:
         if target is None or target.is_deleted:
             raise ResourceNotFound("用户不存在")
         return await self.desktop(target)
+
+    async def _rank_inbox(
+        self,
+        principal: DesktopPrincipal,
+        items: list[PendingItemResult],
+        weights: inbox.InboxWeights,
+    ) -> list[PendingItemResult]:
+        """去重 + 4 因子打分 + 叠加持久读态，按分数（再按时间）降序。"""
+        states = await self._inbox_state.states_for(principal.id)
+        now = datetime.now(UTC)
+        seen: set[tuple[str, uuid.UUID]] = set()
+        ranked: list[PendingItemResult] = []
+        for item in items:
+            key = (item.kind, item.id)
+            if key in seen:  # 同一来源去重合并，保留首现
+                continue
+            seen.add(key)
+            state = states.get(key)
+            ranked.append(
+                PendingItemResult(
+                    kind=item.kind,
+                    id=item.id,
+                    title=item.title,
+                    meta=item.meta,
+                    priority=item.priority,
+                    create_time=item.create_time,
+                    score=inbox.priority_score(
+                        item.kind, item.priority, _aware(item.create_time), now, weights
+                    ),
+                    is_read=state.is_read if state else False,
+                    is_processed=state.is_processed if state else False,
+                    ai_summary=state.ai_summary if state else None,
+                )
+            )
+        ranked.sort(key=lambda i: (i.score, i.create_time), reverse=True)
+        return ranked
+
+    async def mark_inbox(
+        self,
+        principal: DesktopPrincipal,
+        items: tuple[InboxItemRef, ...],
+        *,
+        is_read: bool | None = None,
+        is_processed: bool | None = None,
+    ) -> int:
+        """批量置读/处理态（真人逐条/一次确认触发）。仅写本人读态，不触碰来源聚合、不外发。"""
+        if is_read is None and is_processed is None:
+            raise RuleViolation("批量处理需至少指定 is_read 或 is_processed 之一")
+        if not items:
+            return 0
+        return await self._inbox_state.mark(
+            principal.id, items, is_read=is_read, is_processed=is_processed
+        )
 
     async def list_deliverables(
         self,

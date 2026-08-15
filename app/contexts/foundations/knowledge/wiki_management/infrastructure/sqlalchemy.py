@@ -17,9 +17,42 @@ from app.contexts.foundations.knowledge.wiki_management.application.ports import
 from app.contexts.foundations.knowledge.wiki_management.contracts import KnowledgeScope
 from app.contexts.foundations.knowledge.wiki_management.domain.models import KnowledgeBase
 from app.contexts.shared_kernel import ConflictDetected
+from app.models.knowledge import SCOPE_PERSONAL, KnowledgeFile
 from app.models.knowledge import KnowledgeBase as KnowledgeBaseRow
-from app.models.knowledge import KnowledgeFile
 from app.platform.outbox.source_change import publish_source_change
+
+
+async def ensure_personal_kb(session: AsyncSession, user_id: uuid.UUID) -> uuid.UUID:
+    """获取或创建归属该真人的个人知识库，返回其 id（docs/27 B1）。
+
+    按 (owner_user_id==user_id, scope=personal) get-or-create；code=personal:{user_id} 唯一。
+    个人库归本人，检索隔离在 API 层只放行本人库 id → 复用既有 visible_kb_ids 杠杆。
+    # ponytail: 并发下双插由 uq_kb_code 唯一索引兜底（抛 IntegrityError），单机内测足够；
+    #           需要无缝并发再改 ON CONFLICT upsert。
+    """
+    existing = (
+        await session.execute(
+            select(KnowledgeBaseRow.id).where(
+                KnowledgeBaseRow.owner_user_id == user_id,
+                KnowledgeBaseRow.scope == SCOPE_PERSONAL,
+                KnowledgeBaseRow.is_delete.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    row = KnowledgeBaseRow(
+        id=uuid.uuid4(),
+        name="我的知识",
+        code=f"personal:{user_id}",
+        scope=SCOPE_PERSONAL,
+        owner_user_id=user_id,
+        is_default=False,
+        is_active=True,
+    )
+    session.add(row)
+    await session.flush()
+    return row.id
 
 
 def _to_domain(row: KnowledgeBaseRow) -> KnowledgeBase:

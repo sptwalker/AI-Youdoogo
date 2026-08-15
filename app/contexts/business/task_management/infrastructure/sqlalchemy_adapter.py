@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contexts.business.task_management.application.contracts import (
@@ -66,6 +66,9 @@ class SQLAlchemyTaskManagementAdapter:
             assignee_type=task.assignee_type,
             payload=tuple((task.payload or {}).items()),
             step_no=task.step_no,
+            project_id=task.project_id,
+            archived_at=task.archived_at,
+            update_time=task.update_time,
         )
 
     @staticmethod
@@ -89,6 +92,7 @@ class SQLAlchemyTaskManagementAdapter:
             parent_id=request.parent_id,
             sla_hours=request.sla_hours,
             payload=dict(request.payload),
+            project_id=request.project_id,
         )
         return self._task_view(task)
 
@@ -115,12 +119,18 @@ class SQLAlchemyTaskManagementAdapter:
         parent_id: uuid.UUID | None,
         limit: int,
         visibility: TaskVisibility,
+        project_id: uuid.UUID | None = None,
+        include_archived: bool = False,
     ) -> tuple[TaskView, ...]:
         statement = select(TaskCard).where(TaskCard.is_delete.is_(False))
         if status:
             statement = statement.where(TaskCard.status == status)
         if parent_id:
             statement = statement.where(TaskCard.parent_id == parent_id)
+        if project_id:
+            statement = statement.where(TaskCard.project_id == project_id)
+        if not include_archived:
+            statement = statement.where(TaskCard.archived_at.is_(None))
         if not visibility.unrestricted:
             conditions = [TaskCard.creator_id == visibility.principal_id]
             if visibility.department_id is not None:
@@ -136,6 +146,17 @@ class SQLAlchemyTaskManagementAdapter:
 
     async def list_log_views(self, task_id: uuid.UUID) -> tuple[TaskLogView, ...]:
         return tuple(self._log_view(log) for log in await self.list_logs(task_id))
+
+    async def archive_view(self, task_id: uuid.UUID) -> TaskView:
+        return self._task_view(await self.archive_record(task_id))
+
+    async def archive_record(self, task_id: uuid.UUID) -> TaskCard:
+        # 归档软标记：DB 侧 func.now() 落戳（与 create_time 一致的服务端时间策略），不入状态机。
+        task = await self.get_record(task_id)
+        task.archived_at = func.now()
+        await self._session.flush()
+        await self._session.refresh(task)
+        return task
 
     async def transition_view(
         self,
@@ -168,6 +189,7 @@ class SQLAlchemyTaskManagementAdapter:
         payload: dict[str, Any] | None = None,
         step_no: int | None = None,
         task_id: uuid.UUID | None = None,
+        project_id: uuid.UUID | None = None,
     ) -> TaskCard:
         task = TaskCard(
             id=task_id or uuid.uuid4(),
@@ -180,6 +202,7 @@ class SQLAlchemyTaskManagementAdapter:
             sla_hours=sla_hours,
             payload=payload or {},
             step_no=step_no,
+            project_id=project_id,
         )
         self._session.add(task)
         await self._session.flush()

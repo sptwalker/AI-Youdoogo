@@ -25,6 +25,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, lazy: async () => ({ Component: (await import('./pages/Dashboard')).default }) },
+      { path: 'workspace', lazy: async () => ({ Component: (await import('./pages/workspace')).default }) },
       { path: 'knowledge', lazy: async () => ({ Component: (await import('./pages/Knowledge')).default }) },
       { path: 'ops-board', lazy: async () => ({ Component: (await import('./pages/OpsBoard')).default }) },
       { path: 'agents', lazy: async () => ({ Component: (await import('./pages/Agents')).default }) },

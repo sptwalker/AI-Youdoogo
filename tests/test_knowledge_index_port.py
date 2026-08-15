@@ -89,7 +89,9 @@ async def test_list_documents_passes_limit(monkeypatch: pytest.MonkeyPatch) -> N
     """port.list_documents → gateway.list_documents，透传 limit（不触真实 DB）。"""
     captured: dict[str, Any] = {}
 
-    async def fake_list(self: Any, *, limit: int) -> tuple[IndexedDocument, ...]:
+    async def fake_list(
+        self: Any, *, limit: int, knowledge_base_id: Any = None
+    ) -> tuple[IndexedDocument, ...]:
         captured["limit"] = limit
         return ()
 

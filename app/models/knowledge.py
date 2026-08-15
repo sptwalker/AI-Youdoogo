@@ -50,6 +50,9 @@ class KnowledgeBase(CommonMixin, Base):
     owner_agent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("agent_role.id"), nullable=True
     )  # personal 时=专属知识区归属的顾问/助理
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sys_user.id"), nullable=True
+    )  # personal 库归属的真人（docs/27 B1）；公司/部门库留 NULL，检索隔离复用 visible_kb_ids
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

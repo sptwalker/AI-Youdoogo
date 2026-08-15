@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.core.config import get_settings
 from app.platform.database import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     if register_sentiment_response():
         logger.info("营销舆情事件驱动响应已启用（docs/26 P2，红线不旁路）")
+
+    if get_settings().personal_knowledge_autosink_enabled:
+        from app.bootstrap import workflow_events
+        from app.contexts.foundations.knowledge.knowledge_indexing.infrastructure import (
+            personal_sink,
+        )
+
+        workflow_events.register_event_handler(
+            personal_sink.PERSONAL_KNOWLEDGE_SINK_V1,
+            personal_sink.handle_personal_knowledge_sink,
+        )
+        logger.info("个人经验自动沉淀已启用（docs/27 B1.3，内部辅助执行不外发）")
     try:
         yield
     finally:

@@ -91,6 +91,10 @@ class PendingItemResult:
     meta: str | None
     priority: str
     create_time: datetime
+    score: float = 0.0
+    is_read: bool = False
+    is_processed: bool = False
+    ai_summary: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -100,7 +104,28 @@ class PendingItemResult:
             "meta": self.meta,
             "priority": self.priority,
             "create_time": self.create_time.isoformat(),
+            "score": self.score,
+            "is_read": self.is_read,
+            "is_processed": self.is_processed,
+            "ai_summary": self.ai_summary,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class InboxStateProjection:
+    """某待办来源的读态（缺省=未读未处理无摘要）。"""
+
+    is_read: bool = False
+    is_processed: bool = False
+    ai_summary: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InboxItemRef:
+    """批量处理的目标条目引用（来源类型 + 源聚合 id）。"""
+
+    kind: str
+    id: uuid.UUID
 
 
 @dataclass(frozen=True, slots=True)

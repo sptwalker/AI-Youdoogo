@@ -195,6 +195,65 @@ async def test_send_delegates_to_user_and_chat(monkeypatch: pytest.MonkeyPatch) 
     assert seen == ["user:ou_p:hi", "chat:oc_g:yo"]
 
 
+# ── B2.3 番茄钟单点拦截（仅影响发给本人的通知，不改对外红线）──────────
+async def test_send_intercepted_during_focus(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.contexts.business.time_management import public as tm_public
+
+    sent = False
+
+    async def _user(open_id: str, text: str) -> bool:
+        nonlocal sent
+        sent = True
+        return True
+
+    async def _intercepting(session: object, user_id: uuid.UUID) -> bool:
+        return True
+
+    monkeypatch.setattr(notify, "send_text_to_user", _user)
+    monkeypatch.setattr(tm_public, "is_user_focus_intercepting", _intercepting)
+    result = await operations.send_to_recipient(
+        "ou_self", False, "别打扰", session=object(), recipient_user_id=uuid.uuid4()
+    )
+    assert result is False and sent is False  # 专注期内发给本人 → 被跳过
+
+
+async def test_send_proceeds_when_not_focusing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.contexts.business.time_management import public as tm_public
+
+    async def _user(open_id: str, text: str) -> bool:
+        return True
+
+    async def _not_intercepting(session: object, user_id: uuid.UUID) -> bool:
+        return False
+
+    monkeypatch.setattr(notify, "send_text_to_user", _user)
+    monkeypatch.setattr(tm_public, "is_user_focus_intercepting", _not_intercepting)
+    result = await operations.send_to_recipient(
+        "ou_self", False, "在线提醒", session=object(), recipient_user_id=uuid.uuid4()
+    )
+    assert result is True  # 非专注期正常发送
+
+
+async def test_outbound_send_never_checks_focus(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 对外定向发送（不带本人身份）→ 绝不触发拦截判定，红线路径不受影响
+    from app.contexts.business.time_management import public as tm_public
+
+    checked = False
+
+    async def _user(open_id: str, text: str) -> bool:
+        return True
+
+    async def _spy(session: object, user_id: uuid.UUID) -> bool:
+        nonlocal checked
+        checked = True
+        return True
+
+    monkeypatch.setattr(notify, "send_text_to_user", _user)
+    monkeypatch.setattr(tm_public, "is_user_focus_intercepting", _spy)
+    assert await operations.send_to_recipient("ou_other", False, "对外通知") is True
+    assert checked is False  # 未提供 recipient_user_id → 不判专注拦截
+
+
 # ── 注册表成员 + 红线 + 机械配对 ─────────────────────────────────
 def test_compose_registry_membership_and_red_line() -> None:
     assert "feishu_notify_person" in REGISTRY

@@ -1,0 +1,89 @@
+【开发任务：数据与决策辅助面板】
+
+步骤1：个性化指标体系
+- 数据模型（补充到 app/workspace/models/）：
+  - WorkspaceMetricCard（指标卡片配置表）
+    - user_id: int
+    - metric_key: str, 指标标识
+    - metric_name: str, 展示名称
+    - data_source: str, 数据来源（API/SQL/precomputed）
+    - config: json, 指标配置（计算规则、展示方式、预警阈值）
+    - sort_order: int
+    - is_active: bool
+  - WorkspaceMetricData（指标预计算数据表）
+    - metric_key: str
+    - user_id: int
+    - date: date
+    - value: float
+    - trend: json, 趋势数据（近7天/30天）
+    - anomaly_flag: bool, 是否异常
+  - WorkspaceInsight（AI洞察表）
+    - user_id: int
+    - metric_key: str
+    - insight_type: enum, 类型（anomaly/opportunity/trend）
+    - content: text, 洞察内容
+    - related_data: json, 相关数据
+    - is_read: bool
+    - created_at: datetime
+
+- 实现指标配置管理：用户可自定义关注的指标，配置预警阈值
+- 预置常用指标模板：按岗位（销售/运营/研发/管理）预置常用指标组合
+- 实现指标数据获取：
+  a) 优先调用已有业务系统的数据API
+  b) 无API的指标通过定时SQL预计算
+  c) 数据每日凌晨刷新，重要指标每小时刷新
+
+步骤2：AI主动洞察
+- 实现每日洞察生成定时任务：
+  a) 扫描用户关注的所有指标
+  b) 检测异常波动（超出正常区间、环比变化超阈值）
+  c) 调用大模型进行初步原因分析（结合相关指标与事件）
+  d) 生成洞察内容，推送到收件箱
+- 实现洞察分级：按影响程度分为 warning/info/opportunity
+- 实现洞察一键深析：点击洞察可触发AI深度分析任务
+
+步骤3：一键深度分析
+- 实现分析任务创建：基于指标异常自动生成分析任务描述
+- 复用AI任务中心执行深度分析：
+  a) 自动拉取相关维度数据
+  b) 执行趋势分析、对比分析、归因分析
+  c) 生成标准化分析报告
+  d) 报告自动关联到对应项目
+
+步骤4：决策辅助卡
+- 实现决策场景识别：当用户在任务中标记「需要决策」或创建决策类任务时触发
+- 实现决策辅助卡生成：
+  a) 自动汇总相关数据与指标
+  b) 检索历史同类决策案例（从知识库）
+  c) 生成2-3个可选方案，每个方案含利弊分析、预期影响
+  d) 标注风险点与不确定因素
+  e) 给出AI推荐方案与理由
+- 实现决策记录：最终决策自动记录，关联到项目知识库，用于后续复盘
+
+步骤5：数据面板 API（app/workspace/api/insights.py）
+- GET /metrics — 获取用户指标卡片列表
+- POST /metrics — 添加指标卡片
+- PUT /metrics/{id} — 更新指标配置
+- DELETE /metrics/{id} — 删除指标卡片
+- GET /metrics/{id}/data — 获取指标数据与趋势
+- GET /insights — 获取AI洞察列表
+- POST /insights/{id}/read — 标记已读
+- POST /insights/{id}/deep-analyze — 触发深度分析
+- POST /decision-cards — 生成决策辅助卡
+- GET /decision-cards/{id} — 获取决策辅助卡详情
+- POST /decision-cards/{id}/record — 记录最终决策
+
+步骤6：数据面板前端页面
+- frontend/src/pages/workspace/insights/
+  - 指标看板：可自定义布局的指标卡片，异常标红，展示趋势小图
+  - 洞察列表：按时间倒序展示AI洞察，分级颜色标记
+  - 深度分析报告：展示AI生成的分析报告，含图表与结论
+  - 决策辅助卡：展示可选方案对比、风险提示、推荐方案
+  - 指标配置：拖拽式卡片管理，阈值配置
+
+【验收要求】
+- 指标数据更新延迟≤5分钟（重要指标）/≤24小时（普通指标）
+- AI主动洞察有效率（用户认为有价值）≥60%
+- 一键深度分析报告生成≤3分钟
+- 决策辅助卡生成≤30秒，包含≥2个可选方案
+- 指标看板支持自定义布局，配置实时生效

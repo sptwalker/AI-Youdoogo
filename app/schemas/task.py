@@ -27,6 +27,7 @@ class TaskCreate(BaseModel):
     parent_id: uuid.UUID | None = None
     sla_hours: int | None = Field(default=None, ge=1)
     payload: dict[str, Any] = Field(default_factory=dict)
+    project_id: uuid.UUID | None = None
 
 
 class DecomposeRequest(BaseModel):

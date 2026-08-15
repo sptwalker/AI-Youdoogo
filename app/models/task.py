@@ -1,9 +1,10 @@
 """任务卡表（docs/03 §3.3，阶段3）：任务主表 + 流转日志。"""
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +42,13 @@ class TaskCard(CommonMixin, Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("task_card.id"), nullable=True
     )  # 拆解出的子任务指向父任务
+    # A2（docs/27）：个人工作台归属项目 + 归档软标记（纯加列，历史行取默认，与状态机正交）
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("project.id"), nullable=True
+    )  # 归属项目（可空，无项目=散卡）
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # 归档时刻（软标记，非删除；裁决 #2 不入状态机）
     # 任务编排（docs/14 阶段B）：父卡下的 DAG 步骤（纯加列，历史行取默认，不破坏现有卡）
     step_no: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 步骤序号（0=首步）
     depends_on: Mapped[list[str]] = mapped_column(

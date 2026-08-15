@@ -1,0 +1,64 @@
+【开发任务：AI任务中心增强 + 第一期联调测试】
+
+步骤1：AI任务创建增强（app/workspace/services/ai_task_service.py）
+- 实现自然语言任务拆解：
+  a) 接收用户自然语言描述
+  b) 调用大模型生成执行计划（步骤列表，每步含描述、预估耗时、所需工具、依赖）
+  c) 返回给用户确认，用户可编辑后启动
+- 实现复杂度分级：simple/medium/complex，对应不同模型与超时配置
+- 实现任务模板管理：保存/加载/删除常用任务模板
+
+步骤2：AI任务执行编排（app/workspace/agents/ai_task_graph.py）
+- 基于已有 LangGraph 框架创建专用的 AI 任务执行 Graph
+- Graph 节点：
+  a) plan_validate — 校验执行计划
+  b) step_execute — 执行单个步骤（调用已有工具库）
+  c) step_check — 步骤结果自检
+  d) human_intervention — 人工确认节点（关键步骤时暂停）
+  e) result_compile — 汇总所有步骤结果生成最终产出
+  f) error_handler — 异常处理（重试/跳过/通知用户）
+- 实现执行状态实时推送：通过 WebSocket 向前端推送进度更新
+- 实现执行日志记录：每步的输入、输出、耗时、Token 消耗写入 execution_log
+
+步骤3：AI任务结果管理
+- 实现产出物归档：自动关联到对应项目，生成摘要与标签
+- 实现迭代修改：用户输入修改意见，AI基于完整上下文重新执行相关步骤
+- 实现版本管理：每次迭代保存新版本，支持版本对比与回退
+- 实现质量评分：用户1-5星评分+文字反馈，反馈写入数据库用于后续优化
+
+步骤4：AI任务 API（app/workspace/api/ai_tasks.py）
+- POST /ai-tasks/plan — 生成执行计划（不执行）
+- POST /ai-tasks — 创建并启动AI任务
+- GET /ai-tasks/{id} — 获取任务详情与执行状态
+- GET /ai-tasks/{id}/logs — 获取执行日志
+- POST /ai-tasks/{id}/pause — 暂停任务
+- POST /ai-tasks/{id}/resume — 恢复任务
+- POST /ai-tasks/{id}/cancel — 取消任务
+- POST /ai-tasks/{id}/iterate — 提交迭代修改意见
+- GET /ai-tasks/{id}/versions — 获取版本列表
+- POST /ai-tasks/{id}/rate — 提交质量评分
+- GET /ai-tasks/templates — 获取任务模板列表
+- POST /ai-tasks/templates — 保存模板
+
+步骤5：AI任务中心前端页面
+- frontend/src/pages/workspace/ai-tasks/
+  - 任务列表：展示所有AI任务，状态用标签+进度条展示
+  - 创建向导：自然语言输入 → AI生成计划 → 用户确认 → 启动
+  - 执行详情：实时进度条、步骤日志、当前步骤详情
+  - 结果查看：文档预览、版本切换、迭代修改、评分
+  - 模板管理：保存常用任务模板
+
+步骤6：第一期集成联调
+- 打通收件箱→任务看板→AI任务中心的完整流程
+- 收件箱事项可一键转为AI任务
+- AI任务完成后自动生成收件箱通知
+- 任务看板中AI任务的进度实时同步
+- 编写集成测试，覆盖核心用户旅程
+
+【验收要求】
+- AI任务拆解合理，子步骤可执行，预估耗时误差≤50%
+- 执行进度实时推送，延迟≤5秒
+- 支持至少3次迭代修改，版本完整保留
+- 异常处理完善：工具调用失败、超时、模型错误均有降级方案
+- 核心用户旅程集成测试全部通过
+- 5人内测可正常使用，无阻断性Bug

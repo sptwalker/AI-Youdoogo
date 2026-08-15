@@ -11,6 +11,7 @@ from app.contexts.business.task_management.application.contracts import (
     TransitionTaskRequest,
 )
 from app.contexts.business.task_management.entrypoints.operations import (
+    archive_task,
     create_task,
     create_task_in_transaction,
     decompose_task,
@@ -32,6 +33,7 @@ __all__ = [
     "TaskPrincipal",
     "TaskView",
     "TransitionTaskRequest",
+    "archive_task",
     "create_task",
     "create_task_in_transaction",
     "decompose_task",

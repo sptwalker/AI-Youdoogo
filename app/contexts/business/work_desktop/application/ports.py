@@ -9,6 +9,8 @@ from app.contexts.business.work_desktop.application.contracts import (
     CollaborationProjection,
     DeliverableProjection,
     DesktopPrincipal,
+    InboxItemRef,
+    InboxStateProjection,
     ProposalProjection,
     ResolutionProjection,
     TaskProjection,
@@ -61,3 +63,22 @@ class DeliverableInboxPort(Protocol):
 
 class ObjectStoragePort(Protocol):
     async def get_object_bytes(self, object_name: str) -> bytes: ...
+
+
+class InboxStatePort(Protocol):
+    async def states_for(
+        self, owner_user_id: uuid.UUID
+    ) -> dict[tuple[str, uuid.UUID], InboxStateProjection]:
+        """本人全部收件箱读态，键为 (kind, source_id)。"""
+        ...
+
+    async def mark(
+        self,
+        owner_user_id: uuid.UUID,
+        items: tuple[InboxItemRef, ...],
+        *,
+        is_read: bool | None = None,
+        is_processed: bool | None = None,
+    ) -> int:
+        """批量置读态（upsert，仅改本人行）；返回受影响条目数。"""
+        ...

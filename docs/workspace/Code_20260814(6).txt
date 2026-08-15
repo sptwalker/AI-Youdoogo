@@ -1,0 +1,88 @@
+【开发任务：智能日程与时间管理】
+
+步骤1：日程数据模型（补充到 app/workspace/models/）
+- WorkspaceSchedule（日程表）
+  - user_id: int
+  - task_id: int, 关联任务（可空）
+  - title: str
+  - start_time: datetime
+  - end_time: datetime
+  - schedule_type: enum, 类型（task_work/meeting/focus/personal）
+  - is_fixed: bool, 是否固定时间（不可被AI调整）
+  - energy_level: enum, 所需精力（high/medium/low）
+  - source: str, 来源（manual/ai_suggested/calendar_sync）
+
+- WorkspaceFocusSession（专注时段表）
+  - user_id: int
+  - task_id: int, 专注的任务
+  - start_time: datetime
+  - end_time: datetime
+  - actual_end: datetime, 实际结束时间
+  - interrupted_count: int, 被打断次数
+  - completed: bool
+
+- WorkspaceTimeLog（时间记录表，自动统计）
+  - user_id: int
+  - date: date
+  - category: enum, 类别（meeting/focus_work/ai_collab/fragment/admin）
+  - duration_minutes: int
+  - task_id: int, 关联任务（可空）
+
+步骤2：智能排程服务（app/workspace/services/schedule_service.py）
+- 实现精力曲线学习：基于用户历史高效时段数据，构建个人精力曲线模型（可先用简单的固定模板，后续迭代为个性化学习）
+- 实现智能排程算法：
+  a) 输入：待办任务列表（含优先级、预估耗时、精力需求、截止时间）、已有固定日程、个人精力曲线
+  b) 输出：每日时段分配方案，高优+高精力任务安排在高效时段
+  c) 支持约束：最小工作块（如30分钟）、会议缓冲时间、午休保护
+- 实现日程冲突检测与自动调整建议
+- 实现日程变更联动：任务截止时间变更时自动建议调整日程
+
+步骤3：会议智能管理
+- 实现会前准备自动推送：会议前30分钟推送议程、相关资料、上次会议待办完成情况
+- 复用已有会议纪要能力，会议结束后自动：
+  a) 生成纪要并关联到相关项目
+  b) 提取待办事项，自动创建任务卡进入收件箱
+  c) 跟踪待办完成情况
+- 实现参会价值评估：AI基于会议议程、参会人、用户角色，评估「是否必须参加」，非核心会议建议看纪要
+
+步骤4：专注模式与时间统计
+- 实现专注模式：
+  a) 一键开启，关联当前任务
+  b) 期间拦截非高优先级通知（通过已有消息推送模块控制）
+  c) 内置番茄钟（25分钟工作+5分钟休息，可配置）
+  d) 记录专注时长与打断次数
+- 实现时间自动统计：
+  a) 基于日程、会议记录、专注时段、任务活动，自动分类统计时间分配
+  b) 每日定时生成时间分配数据
+- 实现周度时间复盘报告：
+  a) 各类别时间占比统计
+  b) 与上周对比趋势
+  c) AI生成时间管理优化建议
+
+步骤5：日程管理 API（app/workspace/api/schedule.py）
+- GET /schedule — 获取指定日期/周的日程
+- POST /schedule/ai-plan — AI生成排程方案（返回建议，用户确认后生效）
+- POST /schedule — 手动创建日程
+- PUT /schedule/{id} — 更新日程
+- DELETE /schedule/{id} — 删除日程
+- POST /focus/start — 开始专注
+- POST /focus/{id}/end — 结束专注
+- GET /focus/stats — 专注统计
+- GET /time-report/weekly — 获取周度时间报告
+- GET /meetings/{id}/prep — 获取会议准备材料
+- GET /meetings/{id}/value-assessment — 获取参会价值评估
+
+步骤6：日程管理前端页面
+- frontend/src/pages/workspace/schedule/
+  - 日历视图：日/周视图，展示日程与任务排期
+  - AI排程面板：展示AI推荐方案，支持拖拽调整后确认
+  - 专注模式：全屏简洁视图，番茄钟倒计时，任务展示
+  - 时间报告：图表展示时间分配、趋势对比、优化建议
+  - 会议卡片：展示即将到来的会议，一键查看准备材料
+
+【验收要求】
+- AI排程方案可执行率≥80%（用户接受或微调后执行）
+- 专注模式通知拦截准确，高优先级事项不被拦截
+- 时间统计数据完整度100%（基于系统内可追踪的活动）
+- 周度时间报告自动生成，包含AI优化建议
+- 会议待办自动提取准确率≥80%

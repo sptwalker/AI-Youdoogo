@@ -30,9 +30,13 @@ class TaskCardRepositoryPort(Protocol):
         parent_id: uuid.UUID | None,
         limit: int,
         visibility: TaskVisibility,
+        project_id: uuid.UUID | None = None,
+        include_archived: bool = False,
     ) -> tuple[TaskView, ...]: ...
 
     async def list_log_views(self, task_id: uuid.UUID) -> tuple[TaskLogView, ...]: ...
+
+    async def archive_view(self, task_id: uuid.UUID) -> TaskView: ...
 
     async def transition_view(
         self,

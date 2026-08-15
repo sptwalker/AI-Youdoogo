@@ -14,6 +14,8 @@ from app.contexts.business.work_desktop.application.contracts import (
     CollaborationProjection,
     DeliverableProjection,
     DesktopPrincipal,
+    InboxItemRef,
+    InboxStateProjection,
     ProposalProjection,
     ResolutionProjection,
     TaskProjection,
@@ -22,6 +24,7 @@ from app.contexts.foundations.access_control import public as access_control
 from app.contexts.foundations.identity import public as identity
 from app.contexts.foundations.identity.contracts import Principal, PrincipalType
 from app.models.deliverable import Deliverable
+from app.models.inbox_state import InboxItemState
 from app.models.meeting import MeetingResolution
 from app.models.task import TaskCard
 from app.platform.object_storage.gateway import get_object_bytes
@@ -242,3 +245,66 @@ class SQLAlchemyDeliverableInboxAdapter:
 class KnowledgeObjectStorageAdapter:
     async def get_object_bytes(self, object_name: str) -> bytes:
         return await get_object_bytes(object_name)
+
+
+class SQLAlchemyInboxStateAdapter:
+    """收件箱读态 upsert/读取（本人隔离：owner_user_id 恒为调用方）。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def states_for(
+        self, owner_user_id: uuid.UUID
+    ) -> dict[tuple[str, uuid.UUID], InboxStateProjection]:
+        rows = (
+            await self._session.execute(
+                select(InboxItemState).where(
+                    InboxItemState.owner_user_id == owner_user_id,
+                    InboxItemState.is_delete.is_(False),
+                )
+            )
+        ).scalars()
+        return {
+            (row.kind, row.source_id): InboxStateProjection(
+                is_read=row.is_read,
+                is_processed=row.is_processed,
+                ai_summary=row.ai_summary,
+            )
+            for row in rows
+        }
+
+    async def mark(
+        self,
+        owner_user_id: uuid.UUID,
+        items: tuple[InboxItemRef, ...],
+        *,
+        is_read: bool | None = None,
+        is_processed: bool | None = None,
+    ) -> int:
+        # 逐条 upsert：已有则改，无则建。行数少（一屏收件箱），朴素循环足够。
+        # ponytail: N 次 get+insert；量级大到成瓶颈再换 PG on-conflict 批量 upsert
+        affected = 0
+        for ref in items:
+            existing = (
+                await self._session.execute(
+                    select(InboxItemState).where(
+                        InboxItemState.owner_user_id == owner_user_id,
+                        InboxItemState.kind == ref.kind,
+                        InboxItemState.source_id == ref.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                existing = InboxItemState(
+                    owner_user_id=owner_user_id,
+                    kind=ref.kind,
+                    source_id=ref.id,
+                )
+                self._session.add(existing)
+            if is_read is not None:
+                existing.is_read = is_read
+            if is_processed is not None:
+                existing.is_processed = is_processed
+            affected += 1
+        await self._session.flush()
+        return affected

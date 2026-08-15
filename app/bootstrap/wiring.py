@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.api.v1.admin import router as admin_router
 from app.api.v1.agents import router as agents_router
 from app.api.v1.ai_providers import router as ai_providers_router
+from app.api.v1.ai_tasks import router as ai_tasks_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.collab import router as collab_router
 from app.api.v1.data_sources import router as data_sources_router
@@ -16,9 +17,12 @@ from app.api.v1.grants import router as grants_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.knowledge_bases import router as knowledge_bases_router
 from app.api.v1.meetings import router as meetings_router
+from app.api.v1.my_knowledge import router as my_knowledge_router
 from app.api.v1.ops_data import router as ops_data_router
 from app.api.v1.org import router as org_router
+from app.api.v1.projects import router as projects_router
 from app.api.v1.proposals import router as proposals_router
+from app.api.v1.schedule import router as schedule_router
 from app.api.v1.semantic import router as semantic_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.users import router as users_router
@@ -38,14 +42,18 @@ def register_routes(app: FastAPI) -> None:
         users_router,
         knowledge_router,
         knowledge_bases_router,
+        my_knowledge_router,
         data_sources_router,
         agents_router,
         ops_data_router,
         tasks_router,
+        ai_tasks_router,
         proposals_router,
+        projects_router,
         meetings_router,
         org_router,
         desktop_router,
+        schedule_router,
         discussion_router,
         discussion_message_router,
         admin_router,

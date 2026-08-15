@@ -25,9 +25,11 @@ def _indexing(session: AsyncSession) -> KnowledgeIndexing:
 
 
 async def list_documents(
-    session: AsyncSession, *, limit: int = 100
+    session: AsyncSession, *, limit: int = 100, knowledge_base_id: uuid.UUID | None = None
 ) -> tuple[IndexedDocument, ...]:
-    return await _indexing(session).list_documents(limit=limit)
+    return await _indexing(session).list_documents(
+        limit=limit, knowledge_base_id=knowledge_base_id
+    )
 
 
 async def index_text(session: AsyncSession, command: IndexTextCommand) -> IndexedDocument:
