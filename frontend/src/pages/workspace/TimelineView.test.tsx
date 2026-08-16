@@ -12,12 +12,20 @@ vi.mock('../../api/schedule', () => ({
   confirmSchedule: api.confirmSchedule,
   SCHEDULE_STATUS: { suggested: '建议', confirmed: '已确认' },
 }))
+// 子组件各自单测；此处 mock 掉，聚焦时间线列出/确认交互。
+vi.mock('./FocusTimer', () => ({ default: () => null }))
+vi.mock('./ScheduleCreateModal', () => ({ default: () => null }))
 vi.mock('antd', () => ({
   Button: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) => (
     <button onClick={onClick}>{children}</button>
   ),
+  // Popconfirm 轻量桩：点击子按钮即触发 onConfirm（等价真人在弹层点「确认生效」）。
+  Popconfirm: ({ children, onConfirm }: { children?: ReactNode; onConfirm?: () => void }) => (
+    <span onClick={onConfirm}>{children}</span>
+  ),
   Empty: ({ description }: { description?: ReactNode }) => <div>{description}</div>,
   Space: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  Spin: () => <div>加载中</div>,
   Tag: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
   Timeline: ({ items }: { items: Array<{ children: ReactNode }> }) => (
     <ul>{items.map((it, i) => <li key={i}>{it.children}</li>)}</ul>

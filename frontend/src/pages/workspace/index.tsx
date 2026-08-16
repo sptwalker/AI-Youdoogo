@@ -1,4 +1,4 @@
-/** 工作台外壳：看板 / 列表 / 收件箱三视图切换（阶段 A 外壳，时间线/日历延后到 B）。 */
+/** 工作台外壳：看板 / 列表 / 收件箱 / 时间线 / 日历 / AI 任务 / 我的知识 七视图切换。 */
 import { PageContainer } from '@ant-design/pro-components'
 import { Segmented } from 'antd'
 import { useState } from 'react'

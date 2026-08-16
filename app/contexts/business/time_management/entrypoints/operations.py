@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,20 @@ from app.contexts.business.time_management.domain.models import PlannableItem
 from app.contexts.business.time_management.infrastructure.composition import (
     build_time_management_application,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestItemInput:
+    """智能排程入参（传输无关原语）：由 HTTP/调用方喂入，entrypoint 内转 PlannableItem。
+
+    与 domain.PlannableItem 同形，隔一层让上游（api）不直依赖 domain 值对象。
+    """
+
+    ref_task_id: uuid.UUID
+    title: str
+    priority: int
+    duration_minutes: int
+    due_at: datetime | None
 
 
 async def create_schedule(
@@ -41,13 +56,23 @@ async def suggest_schedules(
     session: AsyncSession,
     *,
     owner_id: uuid.UUID,
-    items: list[PlannableItem],
+    items: list[SuggestItemInput],
     window_start: datetime,
     window_end: datetime,
 ) -> tuple[ScheduleResult, ...]:
+    plannable = [
+        PlannableItem(
+            ref_task_id=item.ref_task_id,
+            title=item.title,
+            priority=item.priority,
+            duration_minutes=item.duration_minutes,
+            due_at=item.due_at,
+        )
+        for item in items
+    ]
     return await build_time_management_application(session).suggest_schedules(
         owner_id=owner_id,
-        items=items,
+        items=plannable,
         window_start=window_start,
         window_end=window_end,
     )
@@ -108,6 +133,13 @@ async def is_user_focus_intercepting(session: AsyncSession, user_id: uuid.UUID) 
     return await build_time_management_application(session).has_active_intercepting_focus(
         user_id
     )
+
+
+async def active_focus(
+    session: AsyncSession, *, owner_id: uuid.UUID
+) -> FocusSessionResult | None:
+    """本人当前 active 专注会话（供 UI 恢复展示）；无则 None。"""
+    return await build_time_management_application(session).active_focus(owner_id)
 
 
 async def log_time(

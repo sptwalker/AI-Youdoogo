@@ -1,10 +1,12 @@
 /** 日历视图（B4.2）：AntD Calendar，当日有日程则打点；点击某日列出当日日程并可确认建议。
  *
- *  隔离：走 /schedules，仅本人日程。红线：建议态 confirm 才生效。 */
-import { Badge, Button, Calendar, Card, Empty, List, Space, Tag, message } from 'antd'
+ *  隔离：走 /schedules，仅本人日程。红线：建议态 confirm 才生效。
+ *  失败交全局请求拦截 toast，本视图不重复弹。 */
+import { Badge, Button, Calendar, Card, Empty, List, Popconfirm, Space, Spin, Tag, message } from 'antd'
 import type { Dayjs } from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import { confirmSchedule, listSchedules, SCHEDULE_STATUS, type Schedule } from '../../api/schedule'
+import ScheduleCreateModal from './ScheduleCreateModal'
 
 /** 取本地日历日键 YYYY-MM-DD，用于按日分组（避免 UTC 串直接切片错位）。 */
 function dayKey(iso: string): string {
@@ -14,11 +16,17 @@ function dayKey(iso: string): string {
 
 export default function CalendarView() {
   const [rows, setRows] = useState<Schedule[]>([])
+  const [loading, setLoading] = useState(true)
   const [picked, setPicked] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
 
   const reload = () => {
-    void listSchedules().then(setRows).catch(() => undefined)
+    setLoading(true)
+    void listSchedules()
+      .then(setRows)
+      .catch(() => undefined)
+      .finally(() => setLoading(false))
   }
   useEffect(reload, [])
 
@@ -39,16 +47,22 @@ export default function CalendarView() {
       await confirmSchedule(id)
       message.success('已确认生效')
       reload()
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '确认失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     } finally {
       setConfirming(null)
     }
   }
 
   const dayList = picked ? byDay.get(picked) ?? [] : []
+  if (loading) return <Spin />
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+        <Button type="primary" size="small" onClick={() => setCreateOpen(true)}>
+          新建日程
+        </Button>
+      </Space>
       <Calendar
         fullscreen={false}
         onSelect={(value: Dayjs) => setPicked(value.format('YYYY-MM-DD'))}
@@ -70,15 +84,17 @@ export default function CalendarView() {
                   actions={
                     row.status === 'suggested'
                       ? [
-                          <Button
+                          <Popconfirm
                             key="confirm"
-                            size="small"
-                            type="link"
-                            loading={confirming === row.id}
-                            onClick={() => void onConfirm(row.id)}
+                            title="确认使该建议日程生效？"
+                            okText="确认生效"
+                            cancelText="取消"
+                            onConfirm={() => void onConfirm(row.id)}
                           >
-                            确认生效
-                          </Button>,
+                            <Button size="small" type="link" loading={confirming === row.id}>
+                              确认生效
+                            </Button>
+                          </Popconfirm>,
                         ]
                       : []
                   }
@@ -93,6 +109,7 @@ export default function CalendarView() {
           )}
         </Card>
       )}
+      <ScheduleCreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={reload} />
     </Space>
   )
 }

@@ -35,8 +35,8 @@ export default function MyKnowledgeView() {
       setTitle('')
       setText('')
       reload()
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '存入失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     } finally {
       setSaving(false)
     }
@@ -47,8 +47,8 @@ export default function MyKnowledgeView() {
     setAnswer(null)
     try {
       setAnswer(await askMyKnowledge(query.trim()))
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '提问失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     } finally {
       setAsking(false)
     }

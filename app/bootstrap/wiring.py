@@ -22,6 +22,7 @@ from app.api.v1.ops_data import router as ops_data_router
 from app.api.v1.org import router as org_router
 from app.api.v1.projects import router as projects_router
 from app.api.v1.proposals import router as proposals_router
+from app.api.v1.schedule import focus_router
 from app.api.v1.schedule import router as schedule_router
 from app.api.v1.semantic import router as semantic_router
 from app.api.v1.tasks import router as tasks_router
@@ -54,6 +55,7 @@ def register_routes(app: FastAPI) -> None:
         org_router,
         desktop_router,
         schedule_router,
+        focus_router,
         discussion_router,
         discussion_message_router,
         admin_router,

@@ -3,6 +3,12 @@
  *  红线（docs/27 §十一）：对外/业务/资金/人事步骤在运行时停「待验收」，需真人逐步确认才继续；
  *  本页只呈现与触发，绝不放宽——红线步在预览即标红，执行后停在 awaiting_human 等真人「验收并继续」。 */
 import { Alert, Button, Card, Input, List, Space, Tag, Typography, message } from 'antd'
+import {
+  CheckCircleTwoTone,
+  MinusCircleOutlined,
+  PauseCircleTwoTone,
+  PlayCircleTwoTone,
+} from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { executeAiTask, planAiTask, type PlanPreview } from '../../api/aiTasks'
 import { getOrchestrationProgress, transitionTask, type OrchProgress } from '../../api/tasks'
@@ -47,8 +53,8 @@ export default function AiTaskView() {
         return
       }
       setPlan(result.plan)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '生成计划失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     } finally {
       setPlanning(false)
     }
@@ -61,8 +67,8 @@ export default function AiTaskView() {
       setOrch(await executeAiTask({ request: plan.request, title: title.trim() || undefined, steps: plan.steps }))
       setPlan(null)
       message.success('已按计划启动编排')
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '执行失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     } finally {
       setExecuting(false)
     }
@@ -73,8 +79,8 @@ export default function AiTaskView() {
       await transitionTask(stepId, 'accepted', '真人验收')
       if (orch) setOrch(await getOrchestrationProgress(orch.parent_id))
       message.success('已验收，继续后续步骤')
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '验收失败')
+    } catch {
+      /* 失败提示已由全局请求拦截统一弹出 */
     }
   }
 
@@ -152,11 +158,20 @@ export default function AiTaskView() {
             dataSource={orch.steps}
             renderItem={(step) => {
               const waiting = step.red_line && step.status === 'reported'
-              const icon = step.status === 'accepted' ? '✅' : step.status === 'reported' ? '⏸' : step.status === 'executing' ? '▶' : '○'
+              const icon =
+                step.status === 'accepted' ? (
+                  <CheckCircleTwoTone twoToneColor="#52c41a" />
+                ) : step.status === 'reported' ? (
+                  <PauseCircleTwoTone twoToneColor="#fa8c16" />
+                ) : step.status === 'executing' ? (
+                  <PlayCircleTwoTone twoToneColor="#1677ff" />
+                ) : (
+                  <MinusCircleOutlined style={{ color: '#bfbfbf' }} />
+                )
               return (
                 <List.Item actions={waiting ? [<a key="accept" onClick={() => void acceptStep(step.id)}>验收并继续</a>] : []}>
                   <Space size={6} wrap>
-                    <span>{icon}</span>
+                    <span aria-label={step.status}>{icon}</span>
                     <span>步骤{step.step_no + 1}·{step.title}</span>
                     <Tag>{step.skill}</Tag>
                     {step.red_line && <Tag color="red">红线</Tag>}

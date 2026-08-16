@@ -208,6 +208,12 @@ class TimeManagementApplication:
             focus = await uow.focus_sessions.active_for_owner(owner_id)
         return focus is not None and focus.is_intercepting()
 
+    async def active_focus(self, owner_id: uuid.UUID) -> FocusSessionResult | None:
+        """本人当前 active 专注会话（供 UI 恢复计时/展示进行中）；无则 None。"""
+        async with self._uow_factory() as uow:
+            focus = await uow.focus_sessions.active_for_owner(owner_id)
+        return _focus_result(focus) if focus is not None else None
+
     async def _end_focus(
         self, focus_id: uuid.UUID, owner_id: uuid.UUID, *, abort: bool
     ) -> FocusSessionResult:

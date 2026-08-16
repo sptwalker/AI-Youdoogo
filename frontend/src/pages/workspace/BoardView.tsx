@@ -1,5 +1,5 @@
 /** 看板视图：任务卡按只读派生泳道分列展示，blocked 标「需关注」。 */
-import { Badge, Card, Empty, Spin, Tag, Typography, message } from 'antd'
+import { Badge, Card, Empty, Spin, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { listTasks, type TaskCard } from '../../api/tasks'
 import { LANE_COLOR, groupByLane, laneColumns } from '../../features/workspace/board'
@@ -13,7 +13,7 @@ export default function BoardView() {
   useEffect(() => {
     void listTasks()
       .then(setTasks)
-      .catch(() => message.error('加载任务失败'))
+      .catch(() => undefined) // 失败提示已由全局请求拦截统一弹出
       .finally(() => setLoading(false))
   }, [])
 

@@ -87,3 +87,68 @@ async def test_confirm_flips_status_and_isolates_others(
     ok_resp = await c.post(f"/api/v1/schedules/{ids['mine']}/confirm")
     assert ok_resp.status_code == 200
     assert ok_resp.json()["data"]["status"] == "confirmed"  # 真人确认才生效
+
+
+async def test_create_schedule_is_confirmed_and_mine(
+    client: tuple[AsyncClient, dict[str, Any], dict[str, str]],
+) -> None:
+    c, _, _ = client
+    resp = await c.post(
+        "/api/v1/schedules",
+        json={
+            "title": "手动建的会",
+            "start_at": "2026-08-18T14:00:00+00:00",
+            "end_at": "2026-08-18T15:00:00+00:00",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["status"] == "confirmed" and data["source"] == "manual"  # 手动即生效
+
+
+async def test_suggest_creates_suggested_awaiting_confirm(
+    client: tuple[AsyncClient, dict[str, Any], dict[str, str]],
+) -> None:
+    c, _, _ = client
+    import uuid
+
+    resp = await c.post(
+        "/api/v1/schedules/suggest",
+        json={
+            "items": [
+                {
+                    "ref_task_id": str(uuid.uuid4()),
+                    "title": "写周报",
+                    "priority": 1,
+                    "duration_minutes": 30,
+                }
+            ],
+            "window_start": "2026-08-19T09:00:00+00:00",
+            "window_end": "2026-08-19T18:00:00+00:00",
+        },
+    )
+    assert resp.status_code == 200
+    rows = resp.json()["data"]
+    assert rows and all(r["status"] == "suggested" for r in rows)  # 只出建议，待真人 confirm
+
+
+async def test_focus_start_complete_and_active(
+    client: tuple[AsyncClient, dict[str, Any], dict[str, str]],
+) -> None:
+    c, _, _ = client
+    started = await c.post("/api/v1/focus", json={"planned_minutes": 25})
+    assert started.status_code == 200
+    focus_id = started.json()["data"]["id"]
+
+    # active 反映进行中
+    active = await c.get("/api/v1/focus/active")
+    assert active.json()["data"]["id"] == focus_id
+
+    # 重复开启被幂等保护挡下（已有 active → 404）
+    dup = await c.post("/api/v1/focus", json={"planned_minutes": 25})
+    assert dup.status_code == 404
+
+    done = await c.post(f"/api/v1/focus/{focus_id}/complete")
+    assert done.status_code == 200 and done.json()["data"]["status"] == "completed"
+    assert (await c.get("/api/v1/focus/active")).json()["data"] is None  # 结束后无 active
+

@@ -13,6 +13,7 @@ vi.mock('../../api/schedule', () => ({
   confirmSchedule: api.confirmSchedule,
   SCHEDULE_STATUS: { suggested: '建议', confirmed: '已确认' },
 }))
+vi.mock('./ScheduleCreateModal', () => ({ default: () => null }))
 // Calendar 桩：对「本月」逐日调用 cellRender，把打点内容摊平渲染，便于断言当日是否打点。
 vi.mock('antd', () => {
   const List = ({ dataSource, renderItem }: { dataSource: unknown[]; renderItem: (x: unknown) => ReactNode }) => (
@@ -36,7 +37,11 @@ vi.mock('antd', () => {
     ),
     Empty: ({ description }: { description?: ReactNode }) => <div>{description}</div>,
     List,
+    Popconfirm: ({ children, onConfirm }: { children?: ReactNode; onConfirm?: () => void }) => (
+      <span onClick={onConfirm}>{children}</span>
+    ),
     Space: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+    Spin: () => <div>加载中</div>,
     Tag: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
     message: { success: vi.fn(), error: vi.fn() },
   }
